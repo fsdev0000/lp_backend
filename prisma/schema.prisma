@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Founder {
+  id           String   @id @default(uuid())
+  email        String?  @unique
+  name         String
+  phone        String?
+  companyName  String?
+  revenueBand  String?
+  createdAt    DateTime @default(now())
+
+  assessments  Assessment[]
+  transcripts  Transcript[]
+  bookings     Booking[]
+}
+
+model Assessment {
+  id            String   @id @default(uuid())
+  founderId     String
+  scores              String?
+  resultTitle         String?
+  overallScore        Float?
+  tier                String?
+  primaryFocus        String?
+  greatestOpportunity String?
+  openingQuestion     String?
+  focusArea           String?
+  createdAt           DateTime @default(now())
+
+  founder       Founder  @relation(fields: [founderId], references: [id])
+}
+
+model Transcript {
+  id               String   @id @default(uuid())
+  founderId        String
+  conversationLog  String?
+  daisyScore       Int?
+  createdAt        DateTime @default(now())
+
+  founder          Founder  @relation(fields: [founderId], references: [id])
+}
+
+model Booking {
+  id                String   @id @default(uuid())
+  founderId         String
+  ghlAppointmentId  String?
+  scheduledAt       DateTime?
+  status            String   @default("pending")
+  createdAt         DateTime @default(now())
+
+  founder           Founder  @relation(fields: [founderId], references: [id])
+}
+
+model Question {
+  id        String   @id @default(uuid())
+  domain    String
+  text      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model PressureOption {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  title     String
+  hint      String
+  order     Int      @default(0)
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String   // Store stringified JSON since sqlite doesn't have a native Json array column
+  updatedAt DateTime @updatedAt
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   // e.g., 'info', 'warn', 'error'
+  action    String   // e.g., 'EMAIL_SENT', 'ASSESSMENT_SCORED'
+  details   String?  // Serialized JSON of log context
+  createdAt DateTime @default(now())
+}
