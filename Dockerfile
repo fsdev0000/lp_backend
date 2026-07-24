@@ -46,8 +46,9 @@ COPY prisma ./prisma/
 # Install production dependencies only
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
-# Generate Prisma Client inside the runtime image
-RUN npx prisma generate
+# Copy generated Prisma Client from builder stage
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Copy compiled application
 COPY --from=builder /app/dist ./dist
