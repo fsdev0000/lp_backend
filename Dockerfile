@@ -13,7 +13,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install all dependencies
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm npm install
 
 # Copy application source
 COPY tsconfig.json ./
@@ -44,7 +44,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install production dependencies only
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm npm install --omit=dev
 
 # Copy generated Prisma Client from builder stage
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
