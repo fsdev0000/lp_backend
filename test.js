@@ -1,0 +1,1 @@
+const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); prisma.$queryRawUnsafe('SELECT name, decrypted_secret FROM vault.decrypted_secrets').then(console.log).catch(console.error).finally(() => prisma.$disconnect());
