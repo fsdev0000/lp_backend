@@ -18,6 +18,7 @@ RUN --mount=type=cache,target=/root/.npm npm install
 # Copy application source
 COPY tsconfig.json ./
 COPY src ./src
+COPY templates ./templates
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -50,8 +51,9 @@ RUN --mount=type=cache,target=/root/.npm npm install --omit=dev
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
-# Copy compiled application
+# Copy compiled application and templates
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/templates ./templates
 
 # Expose application port
 EXPOSE 4000

@@ -17,7 +17,7 @@ export async function sendAssessmentEmail(contactId: string, emailData: { tier: 
   if (emailData.tier.toLowerCase() === 'critical') templateName = 'critical.html';
   else if (emailData.tier.toLowerCase() === 'moderate') templateName = 'moderate.html';
 
-  const templatePath = path.join(__dirname, '../../../Email templates', templateName);
+  const templatePath = path.join(__dirname, '../../templates', templateName);
   
   try {
     const rawTemplate = fs.readFileSync(templatePath, 'utf8');
@@ -31,14 +31,14 @@ export async function sendAssessmentEmail(contactId: string, emailData: { tier: 
     });
     
     await sendEmail(contactId, `Your Founder Pressure Profile is ready`, html);
-    console.log(`Sent ${templateName} to contact ${contactId}`);
+    console.log(`[SUCCESS] Founder Email Sent: Delivered ${templateName} to contact ${contactId} (${emailData.firstName})`);
   } catch (error) {
-    console.error(`Failed to load or send template ${templateName}:`, error);
+    console.error(`[ERROR] Failed to load or send Founder email (${templateName}):`, error);
   }
 }
 
 export async function sendAdminBriefing(founderData: { name: string, email: string, score: number, tier: string, company: string, phone: string }, adminContactIds: string[]) {
-  const templatePath = path.join(__dirname, '../../../Email templates/internal-consultant-briefing.html');
+  const templatePath = path.join(__dirname, '../../templates/internal-consultant-briefing.html');
   
   try {
     const rawTemplate = fs.readFileSync(templatePath, 'utf8');
@@ -53,8 +53,9 @@ export async function sendAdminBriefing(founderData: { name: string, email: stri
     
     for (const adminContactId of adminContactIds) {
        await sendEmail(adminContactId, `Internal Notification: Founder Assessment (${founderData.score})`, html);
+       console.log(`[SUCCESS] Admin Email Sent: Delivered briefing to contact ${adminContactId}`);
     }
   } catch (error) {
-    console.error(`Failed to send admin briefing:`, error);
+    console.error(`[ERROR] Failed to send Admin briefing:`, error);
   }
 }
