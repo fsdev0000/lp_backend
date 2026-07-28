@@ -6,8 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.upsertContact = upsertContact;
 exports.sendEmail = sendEmail;
 exports.getFreeSlots = getFreeSlots;
+exports.getMonthAvailability = getMonthAvailability;
 exports.bookAppointment = bookAppointment;
 exports.createOpportunity = createOpportunity;
+exports.sendAssessmentEmail = sendAssessmentEmail;
+exports.sendAdminBriefing = sendAdminBriefing;
 const dotenv_1 = __importDefault(require("dotenv"));
 const secrets_1 = require("./secrets");
 dotenv_1.default.config();
@@ -109,6 +112,48 @@ async function getFreeSlots(date) {
     }
     return Array.from(freeSlotTimes);
 }
+async function getMonthAvailability(year, month) {
+    const calendarId = await (0, secrets_1.getSecret)('GHL_CALENDAR_ID');
+    if (!calendarId)
+        throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
+    // Create start and end date for the month
+    const startDateStr = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+04:00`;
+    // Next month first day minus 1 ms
+    const nextMonthDate = new Date(year, month, 1);
+    const endMs = nextMonthDate.getTime() - 1;
+    const startMs = new Date(startDateStr).getTime();
+    const url = `${GHL_BASE}/calendars/${calendarId}/free-slots?startDate=${startMs}&endDate=${endMs}&timezone=Asia/Dubai`;
+    const headers = await ghlHeaders();
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+    if (!res.ok)
+        throw new Error(`GHL API error: ${JSON.stringify(data)}`);
+    const availabilityMap = {};
+    if (data) {
+        const slotsObj = data.slots || data;
+        for (const dateKey of Object.keys(slotsObj)) {
+            if (dateKey.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                let slots = [];
+                if (Array.isArray(slotsObj[dateKey])) {
+                    slots = slotsObj[dateKey];
+                }
+                else if (slotsObj[dateKey]?.slots) {
+                    slots = slotsObj[dateKey].slots;
+                }
+                const freeSlotTimes = new Set();
+                for (const slot of slots) {
+                    try {
+                        let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
+                        freeSlotTimes.add(timeStr);
+                    }
+                    catch (e) { }
+                }
+                availabilityMap[dateKey] = Array.from(freeSlotTimes);
+            }
+        }
+    }
+    return availabilityMap;
+}
 async function bookAppointment(contactId, dateTime, title) {
     const calendarId = await (0, secrets_1.getSecret)('GHL_CALENDAR_ID');
     const locationId = await (0, secrets_1.getSecret)('GHL_LOCATION_ID');
@@ -128,7 +173,7 @@ async function bookAppointment(contactId, dateTime, title) {
             endTime,
             title,
             appointmentStatus: 'confirmed',
-            assignedUserId: '',
+            assignedUserId: ''
         }),
     });
     const data = await res.json();
@@ -173,5 +218,19 @@ async function createOpportunity(contactId, title) {
     }
     catch (e) {
         console.error('Failed to create opportunity:', e);
+    }
+}
+async function sendAssessmentEmail(contactId, data) {
+    const subject = `Your Founder Pressure Scan Results`;
+    const html = `<p>Hi ${data.firstName},</p><p>Your score is ${data.score} (${data.tier}).</p><p>Best,</p><p>Leaders Performance</p>`;
+    return sendEmail(contactId, subject, html);
+}
+async function sendAdminBriefing(data, adminIds) {
+    const subject = `New Scan: ${data.name}`;
+    const html = `<p>A new scan was completed by ${data.name} (${data.company}).</p><p>Score: ${data.score} (${data.tier})</p>`;
+    for (const id of adminIds) {
+        if (id) {
+            await sendEmail(id, subject, html).catch(e => console.error(e));
+        }
     }
 }

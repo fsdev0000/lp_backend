@@ -12,7 +12,7 @@ function renderTemplate(templateHtml: string, variables: Record<string, string>)
   return rendered;
 }
 
-export async function sendAssessmentEmail(contactId: string, emailData: { tier: string, firstName: string, score: number }) {
+export async function sendAssessmentEmail(contactId: string, emailData: { tier: string, firstName: string, score: number, sessionId: string }) {
   let templateName = 'strong.html';
   if (emailData.tier.toLowerCase() === 'critical') templateName = 'critical.html';
   else if (emailData.tier.toLowerCase() === 'moderate') templateName = 'moderate.html';
@@ -22,11 +22,14 @@ export async function sendAssessmentEmail(contactId: string, emailData: { tier: 
   try {
     const rawTemplate = fs.readFileSync(templatePath, 'utf8');
     
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+    const redirectUrl = `${frontendUrl}?session_id=${emailData.sessionId}`;
+
     const html = renderTemplate(rawTemplate, {
       name: emailData.firstName,
       SCORE: emailData.score.toString(),
-      strategic_url: 'https://leadersperformance.ae', // Placeholder
-      daisy_url: 'https://leadersperformance.ae', // Placeholder
+      strategic_url: redirectUrl,
+      daisy_url: redirectUrl,
       unsubscribe_url: '#',
     });
     
@@ -37,7 +40,7 @@ export async function sendAssessmentEmail(contactId: string, emailData: { tier: 
   }
 }
 
-export async function sendAdminBriefing(founderData: { name: string, email: string, score: number, tier: string, company: string, phone: string }, adminContactIds: string[]) {
+export async function sendAdminBriefing(founderData: { name: string, email: string, score: number, tier: string, company: string, phone: string, primary_focus?: string, focus_area?: string, greatest_opportunity?: string, opening_question?: string }, adminContactIds: string[]) {
   const templatePath = path.join(__dirname, '../../templates/internal-consultant-briefing.html');
   
   try {
@@ -48,7 +51,12 @@ export async function sendAdminBriefing(founderData: { name: string, email: stri
       score: founderData.score.toString(),
       tier: founderData.tier,
       company: founderData.company || 'Unknown',
-      // phone: founderData.phone || 'Unknown',
+      primary_focus: founderData.primary_focus || '',
+      focus_area: founderData.focus_area || '',
+      greatest_opportunity: founderData.greatest_opportunity || '',
+      opening_question: founderData.opening_question || '',
+      submitted_at: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      submission_url: 'https://leadersperformance.ae' // placeholder
     });
     
     for (const adminContactId of adminContactIds) {

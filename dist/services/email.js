@@ -26,11 +26,13 @@ async function sendAssessmentEmail(contactId, emailData) {
     const templatePath = path_1.default.join(__dirname, '../../templates', templateName);
     try {
         const rawTemplate = fs_1.default.readFileSync(templatePath, 'utf8');
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+        const redirectUrl = `${frontendUrl}?session_id=${emailData.sessionId}`;
         const html = renderTemplate(rawTemplate, {
             name: emailData.firstName,
             SCORE: emailData.score.toString(),
-            strategic_url: 'https://leadersperformance.ae', // Placeholder
-            daisy_url: 'https://leadersperformance.ae', // Placeholder
+            strategic_url: redirectUrl,
+            daisy_url: redirectUrl,
             unsubscribe_url: '#',
         });
         await (0, ghl_1.sendEmail)(contactId, `Your Founder Pressure Profile is ready`, html);
@@ -50,7 +52,12 @@ async function sendAdminBriefing(founderData, adminContactIds) {
             score: founderData.score.toString(),
             tier: founderData.tier,
             company: founderData.company || 'Unknown',
-            // phone: founderData.phone || 'Unknown',
+            primary_focus: founderData.primary_focus || '',
+            focus_area: founderData.focus_area || '',
+            greatest_opportunity: founderData.greatest_opportunity || '',
+            opening_question: founderData.opening_question || '',
+            submitted_at: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            submission_url: 'https://leadersperformance.ae' // placeholder
         });
         for (const adminContactId of adminContactIds) {
             await (0, ghl_1.sendEmail)(adminContactId, `Internal Notification: Founder Assessment (${founderData.score})`, html);

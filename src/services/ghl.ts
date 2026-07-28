@@ -110,6 +110,53 @@ export async function getFreeSlots(date: string) {
   return Array.from(freeSlotTimes);
 }
 
+export async function getMonthAvailability(year: number, month: number) {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  if (!calendarId) throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
+
+  // Create start and end date for the month
+  const startDateStr = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+04:00`;
+  // Next month first day minus 1 ms
+  const nextMonthDate = new Date(year, month, 1);
+  const endMs = nextMonthDate.getTime() - 1;
+  const startMs = new Date(startDateStr).getTime();
+
+  const url = `${GHL_BASE}/calendars/${calendarId}/free-slots?startDate=${startMs}&endDate=${endMs}&timezone=Asia/Dubai`;
+  
+  const headers = await ghlHeaders();
+  const res = await fetch(url, { headers });
+  const data: any = await res.json();
+
+  if (!res.ok) throw new Error(`GHL API error: ${JSON.stringify(data)}`);
+
+  const availabilityMap: Record<string, string[]> = {};
+  
+  if (data) {
+    const slotsObj = data.slots || data;
+    for (const dateKey of Object.keys(slotsObj)) {
+      if (dateKey.match(/^\d{4}-\d{2}-\d{2}$/)) {
+         let slots = [];
+         if (Array.isArray(slotsObj[dateKey])) {
+           slots = slotsObj[dateKey];
+         } else if (slotsObj[dateKey]?.slots) {
+           slots = slotsObj[dateKey].slots;
+         }
+         
+         const freeSlotTimes = new Set<string>();
+         for (const slot of slots) {
+           try {
+             let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
+             freeSlotTimes.add(timeStr);
+           } catch (e) {}
+         }
+         availabilityMap[dateKey] = Array.from(freeSlotTimes);
+      }
+    }
+  }
+
+  return availabilityMap;
+}
+
 export async function bookAppointment(contactId: string, dateTime: string, title: string) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   const locationId = await getSecret('GHL_LOCATION_ID');
@@ -131,7 +178,7 @@ export async function bookAppointment(contactId: string, dateTime: string, title
       endTime,
       title,
       appointmentStatus: 'confirmed',
-      assignedUserId: '',
+      assignedUserId: ''
     }),
   });
 
@@ -177,5 +224,21 @@ export async function createOpportunity(contactId: string, title: string) {
         });
     } catch (e) {
         console.error('Failed to create opportunity:', e);
+    }
+}
+
+export async function sendAssessmentEmail(contactId: string, data: { tier: string, firstName: string, score: number }) {
+    const subject = `Your Founder Pressure Scan Results`;
+    const html = `<p>Hi ${data.firstName},</p><p>Your score is ${data.score} (${data.tier}).</p><p>Best,</p><p>Leaders Performance</p>`;
+    return sendEmail(contactId, subject, html);
+}
+
+export async function sendAdminBriefing(data: any, adminIds: string[]) {
+    const subject = `New Scan: ${data.name}`;
+    const html = `<p>A new scan was completed by ${data.name} (${data.company}).</p><p>Score: ${data.score} (${data.tier})</p>`;
+    for (const id of adminIds) {
+        if (id) {
+           await sendEmail(id, subject, html).catch(e => console.error(e));
+        }
     }
 }
