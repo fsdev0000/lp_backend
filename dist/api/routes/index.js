@@ -592,6 +592,105 @@ apiRoutes.post('/chat/message', async (req, res) => {
 });
 /**
  * @openapi
+ * /voice/token:
+ *   post:
+ *     summary: Get ElevenLabs signed URL
+ *     description: Returns a signed URL for the ElevenLabs Conversational AI SDK.
+ *     tags:
+ *       - Voice AI
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sessionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Signed URL and System Prompt
+ */
+apiRoutes.post('/voice/token', async (req, res) => {
+    try {
+        const apiKey = await (0, secrets_1.getSecret)('ELEVENLABS_API_KEY');
+        const agentId = await (0, secrets_1.getSecret)('ELEVENLABS_AGENT_ID') || process.env.ELEVENLABS_AGENT_ID;
+        if (!apiKey) {
+            return res.status(500).json({ error: 'ElevenLabs API key not configured' });
+        }
+        if (!agentId) {
+            return res.status(500).json({ error: 'ElevenLabs Agent ID not configured' });
+        }
+        const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
+            method: 'GET',
+            headers: {
+                'xi-api-key': apiKey
+            }
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('ElevenLabs token error:', errorText);
+            return res.status(500).json({ error: 'Failed to get signed URL from ElevenLabs' });
+        }
+        const data = await response.json();
+        // Generate prompt if sessionId is provided
+        let systemPrompt = "";
+        let firstMessage = "";
+        if (req.body && req.body.sessionId) {
+            try {
+                const { PrismaClient } = require('@prisma/client');
+                const prisma = new PrismaClient();
+                const transcript = await prisma.transcript.findUnique({
+                    where: { id: req.body.sessionId },
+                    include: { founder: true }
+                });
+                if (transcript) {
+                    const { getDaisySystemPrompt } = require('../../config/daisyPrompt');
+                    const context = {
+                        lead_name: transcript.founder?.name || "Founder",
+                        company: transcript.founder?.companyName || "your company",
+                        revenue: transcript.founder?.revenueBand || "Unknown",
+                        stage: transcript.founder?.companyStage || "Unknown"
+                    };
+                    systemPrompt = getDaisySystemPrompt(context);
+                    const name = transcript.founder?.name?.trim() || "Founder";
+                    firstMessage = `Hi ${name}, I have your Founder Pressure Scan results here. I'm ready to listen first, then share how your business reads from the outside. Whenever you're ready, tell me a bit about what's been on your mind lately.`;
+                }
+            }
+            catch (err) {
+                console.error("Failed to generate custom prompt:", err);
+            }
+        }
+        // If no sessionId or error, we'll try to provide a generic prompt just in case.
+        if (!systemPrompt) {
+            const { getDaisySystemPrompt } = require('../../config/daisyPrompt');
+            systemPrompt = getDaisySystemPrompt({
+                lead_name: "Founder",
+                company: "your company",
+                revenue: "Unknown",
+                stage: "Unknown"
+            });
+            firstMessage = "Hi, I have your Founder Pressure Scan results here. I'm ready to listen first, then share how your business reads from the outside. Whenever you're ready, tell me a bit about what's been on your mind lately.";
+        }
+        // Enhance the system prompt to strongly forbid generic "Are you still there?" behavior
+        // and force it to be patient, listening carefully without interrupting.
+        systemPrompt += `
+    
+CRITICAL AUDIO & PACING INSTRUCTIONS:
+- Do NOT interrupt the user. Wait completely for them to finish speaking.
+- DO NOT say "Are you still there?", "Hello?", or "Can you hear me?".
+- If there is silence, assume the user is thinking. Stay quiet.
+- Do not make filler noises like breathing, mouth clicks, or robotic sounds.
+- Keep your tone warm, confident, and highly professional at all times.`;
+        return res.json({ signedUrl: data.signed_url, prompt: systemPrompt, firstMessage });
+    }
+    catch (e) {
+        console.error('Token Error:', e);
+        res.status(500).json({ error: 'Failed to generate token', details: e.message });
+    }
+});
+/**
+ * @openapi
  * /voice/transcribe:
  *   post:
  *     summary: Process Audio and Get AI Response
