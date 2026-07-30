@@ -10,15 +10,34 @@ import { Server } from 'socket.io';
 
 dotenv.config();
 
+import { WebSocketServer } from 'ws';
+import { setupLlmWebSocket } from './api/routes/llm';
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 const httpServer = createServer(app);
 
-// Setup Socket.IO
+// Setup Socket.IO for general purpose real-time connection
 export const io = new Server(httpServer, {
   cors: {
     origin: '*', // Adjust for production if needed
     methods: ['GET', 'POST']
+  }
+});
+
+// Setup standard WebSocket for ElevenLabs Custom LLM
+const wss = new WebSocketServer({ noServer: true });
+setupLlmWebSocket(wss);
+
+httpServer.on('upgrade', (request, socket, head) => {
+  const pathname = request.url;
+  if (pathname === '/api/v1/voice/llm-stream') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    // Socket.io handles upgrades that don't match our custom path automatically 
+    // when it intercepts the server. We don't need to manually route it unless disabled.
   }
 });
 

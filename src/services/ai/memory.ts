@@ -24,6 +24,10 @@ export type Message = {
 };
 
 export async function handleConversationTurn(sessionId: string, userMessage: string): Promise<any> {
+    if (!sessionId || sessionId === 'default-session') {
+        throw new Error("FATAL: Attempted to process conversation turn with invalid or default session ID");
+    }
+
     const openai = await getOpenAI();
     if (!openai) {
         throw new Error("OpenAI not configured");
