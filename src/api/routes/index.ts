@@ -237,22 +237,35 @@ apiRoutes.get('/ping', (req, res) => {
  *                   items:
  *                     $ref: '#/components/schemas/ScaleOption'
  */
+let cachedConfig: any = null;
+let cacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 apiRoutes.get('/scan/config', async (req, res) => {
   try {
-    const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
-    const pressureOptions = await prisma.pressureOption.findMany({ orderBy: { order: 'asc' } });
-    
-    const rawRevenue = await prisma.systemConfig.findUnique({ where: { key: 'revenueBands' } });
-    const rawStages = await prisma.systemConfig.findUnique({ where: { key: 'stages' } });
-    const rawScale = await prisma.systemConfig.findUnique({ where: { key: 'scaleOptions' } });
+    const now = Date.now();
+    if (cachedConfig && now - cacheTime < CACHE_TTL) {
+      return res.json(cachedConfig);
+    }
 
-    res.json({
+    const [questions, pressureOptions, rawRevenue, rawStages, rawScale] = await Promise.all([
+      prisma.question.findMany({ orderBy: { order: 'asc' } }),
+      prisma.pressureOption.findMany({ orderBy: { order: 'asc' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'revenueBands' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'stages' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'scaleOptions' } })
+    ]);
+
+    cachedConfig = {
       questions,
       pressureOptions,
       revenueBands: rawRevenue ? JSON.parse(rawRevenue.value) : [],
       stages: rawStages ? JSON.parse(rawStages.value) : [],
       scaleOptions: rawScale ? JSON.parse(rawScale.value) : []
-    });
+    };
+    cacheTime = now;
+
+    res.json(cachedConfig);
   } catch (error) {
     console.error('Error fetching scan config:', error);
     res.status(500).json({ error: 'Internal Server Error' });

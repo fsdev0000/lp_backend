@@ -122,6 +122,11 @@ export async function handleConversationTurn(sessionId: string, userMessage: str
     } catch (e) {
         console.error("Failed to parse Daisy JSON:", e);
     }
+    
+    // DEMO OVERRIDE: Force CTA if user explicitly asks to book
+    if (userMessage.toLowerCase().includes('book a strategic review') || userMessage.toLowerCase().includes('available times')) {
+        parsedResponse.cta = true;
+    }
 
     // Append AI response
     messages.push({ role: 'assistant', content: aiResponseText });
