@@ -26,6 +26,7 @@ export const buildDaisySystemPrompt = (
       getExecutiveReportPrompt(interpretation),
       getGuardrailsPrompt(),
       getBookingRulesPrompt(),
+      getToolRulesPrompt(),
       getVoiceRulesPrompt(),
       getRuntimeStatePrompt(vars, memoryFlags),
     ];

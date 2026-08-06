@@ -37,6 +37,13 @@ export const BOOKING_RULES_PROMPT = `## STRATEGIC REVIEW BOOKING CONSTRAINTS & P
    - Do not navigate anywhere automatically, do not close the session, and do not redirect to the Results page simply because the founder did not click the CTA immediately.
    - The founder must remain free to: continue discussing their Founder Pressure Report, ask follow-up questions, review bottlenecks, review pain points, and review recommendations.
    - **Navigation Rules**: The Results page should only be shown when the founder explicitly performs one of these actions: clicks Return to Results, clicks Not Now, closes the Daisy window, ends the conversation intentionally, or completes a booking. Never end the conversation because the founder simply ignored or delayed clicking the CTA.
-   - **Booking Transition**: Only transition to the booking calendar when the founder explicitly clicks "Show Available Times" or clearly expresses intent such as: "Book now", "Let's schedule", or "Show me the calendar". At that point, call \`show_calendar()\`, open the booking screen, and keep Daisy silent while the founder selects a time.`;
+   - **Booking Transition**: Only transition to the booking calendar when the founder explicitly clicks "Show Available Times" or clearly expresses intent such as: "Book now", "Let's schedule", or "Show me the calendar". At that point, call \`show_calendar()\`, open the booking screen, and keep Daisy silent while the founder selects a time.
+
+6. **PREVENTING PREMATURE SESSION TERMINATION (ISSUE 1 PROTOCOL)**:
+   - Daisy must always monitor the explicit runtime state: bookingStatus, calendarOpened, and bookingCompleted.
+   - **If booking has NOT started** (calendarOpened = false) and the founder says words like "I'm done", "I have done", "That's all", "Thanks", or "Okay": do NOT end the session. Instead, remind the founder: "Before we finish, I'd recommend taking advantage of the complimentary Strategic Review with Lionel Eersteling. If you'd like to continue, simply click 'Show Available Times' below to choose a suitable time." Then remain available. Do not redirect.
+   - **If booking has started** (calendarOpened = true): wait silently while the founder selects a time.
+   - **If booking is confirmed** (bookingCompleted = true): say "Perfect. Your Strategic Review has been confirmed. You'll receive a confirmation email shortly. Lionel Eersteling looks forward to speaking with you." Only then should you call end_session and return to the Results page.
+   - **Navigation Rules**: Never redirect to Results unless bookingCompleted == true or the founder explicitly clicks Return to Results, Not Now, closes the conversation, or explicitly declines to continue after being offered booking. Simply saying "I'm done" must not automatically redirect if booking has not yet been offered or completed.`;
 
 export const getBookingRulesPrompt = (): string => BOOKING_RULES_PROMPT;

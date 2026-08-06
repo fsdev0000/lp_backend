@@ -23,6 +23,7 @@ const buildDaisySystemPrompt = (context, mode = 'chat', memoryFlags) => {
             (0, ExecutiveReportInterpreter_1.getExecutiveReportPrompt)(interpretation),
             (0, Guardrails_1.getGuardrailsPrompt)(),
             (0, BookingRules_1.getBookingRulesPrompt)(),
+            (0, ToolRules_1.getToolRulesPrompt)(),
             (0, VoiceRules_1.getVoiceRulesPrompt)(),
             (0, RuntimeState_1.getRuntimeStatePrompt)(vars, memoryFlags),
         ];
