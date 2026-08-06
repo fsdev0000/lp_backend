@@ -9,7 +9,7 @@ exports.geminiTools = [
         type: "function",
         function: {
             name: "get_available_times",
-            description: "Gets available time slots for a consultation.",
+            description: "Gets available time slots for a Strategic Review with Lionel Eersteling.",
             parameters: {
                 type: "object",
                 properties: {
@@ -26,7 +26,7 @@ exports.geminiTools = [
         type: "function",
         function: {
             name: "book_appointment",
-            description: "Books an appointment for the user at the specified time.",
+            description: "Books a Strategic Review for the founder at the specified time.",
             parameters: {
                 type: "object",
                 properties: {
@@ -36,7 +36,7 @@ exports.geminiTools = [
                     },
                     title: {
                         type: "string",
-                        description: "A short title for the booking (e.g. Founder Pressure Scan Review)"
+                        description: "A short title for the booking (e.g. Strategic Review with Lionel Eersteling)"
                     }
                 },
                 required: ["dateTime", "title"]

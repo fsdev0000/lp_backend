@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.upsertContact = upsertContact;
 exports.sendEmail = sendEmail;
+exports.getCalendarInfo = getCalendarInfo;
 exports.getFreeSlots = getFreeSlots;
 exports.getMonthAvailability = getMonthAvailability;
 exports.bookAppointment = bookAppointment;
@@ -72,6 +73,21 @@ async function sendEmail(contactId, subject, html) {
         throw new Error(`Email send failed: ${errorData}`);
     }
     return await res.json();
+}
+async function getCalendarInfo() {
+    const calendarId = await (0, secrets_1.getSecret)('GHL_CALENDAR_ID');
+    if (!calendarId)
+        throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
+    const headers = await ghlHeaders();
+    const res = await fetch(`${GHL_BASE}/calendars/${calendarId}`, { headers });
+    if (!res.ok)
+        throw new Error(`GHL Calendar fetch failed: ${res.status}`);
+    const data = await res.json();
+    const cal = data.calendar || data;
+    return {
+        name: cal.name || 'Strategic Review',
+        duration: cal.slotDuration || cal.appointmentPerSlot || 45,
+    };
 }
 async function getFreeSlots(date) {
     const calendarId = await (0, secrets_1.getSecret)('GHL_CALENDAR_ID');
@@ -157,10 +173,20 @@ async function getMonthAvailability(year, month) {
 async function bookAppointment(contactId, dateTime, title) {
     const calendarId = await (0, secrets_1.getSecret)('GHL_CALENDAR_ID');
     const locationId = await (0, secrets_1.getSecret)('GHL_LOCATION_ID');
+    let duration = 30;
+    try {
+        const calInfo = await getCalendarInfo();
+        if (calInfo.duration)
+            duration = calInfo.duration;
+    }
+    catch (e) {
+        console.warn('Could not fetch calendar duration, defaulting to 30 min');
+    }
     const startTime = `${dateTime}+04:00`;
     const startDate = new Date(startTime);
-    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-    const endTime = endDate.toISOString();
+    const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+    const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+    const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
     const headers = await ghlHeaders();
     const res = await fetch(`${GHL_BASE}/calendars/events/appointments`, {
         method: 'POST',

@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
-import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability } from '../../services/ghl';
+import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
 import { sendAssessmentEmail, sendAdminBriefing } from '../../services/email';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
 import OpenAI from 'openai';
 import { getSecret } from '../../services/secrets';
+import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntimeVariables } from '../../services/ai/daisy/PromptBuilder';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -655,7 +656,7 @@ apiRoutes.post('/chat/message', async (req, res) => {
 apiRoutes.post('/voice/token', async (req, res) => {
   try {
     const apiKey = await getSecret('ELEVENLABS_API_KEY');
-    const agentId = await getSecret('ELEVENLABS_AGENT_ID') || process.env.ELEVENLABS_AGENT_ID;
+    const agentId = process.env.ELEVENLABS_AGENT_ID || (await getSecret('ELEVENLABS_AGENT_ID')) || 'agent_0501kz5sjfqbfyevzt7kqkmd9gz4';
 
     if (!apiKey) {
       return res.status(500).json({ error: 'ElevenLabs API key not configured' });
@@ -674,65 +675,92 @@ apiRoutes.post('/voice/token', async (req, res) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('ElevenLabs token error:', errorText);
-      return res.status(500).json({ error: 'Failed to get signed URL from ElevenLabs' });
+      return res.status(500).json({ error: `Failed to get signed URL from ElevenLabs: ${errorText}` });
     }
 
     const data = await response.json();
     
-    // Generate prompt if sessionId is provided
+    // Generate prompt and runtime variables if sessionId is provided
     let systemPrompt = "";
     let firstMessage = "";
+    let dynamicVariables: any = {};
     if (req.body && req.body.sessionId) {
       try {
-        const { PrismaClient } = require('@prisma/client');
-        const prisma = new PrismaClient();
         const transcript = await prisma.transcript.findUnique({
           where: { id: req.body.sessionId },
-          include: { founder: true }
+          include: { 
+            founder: {
+              include: {
+                assessments: {
+                  orderBy: { createdAt: 'desc' },
+                  take: 1
+                }
+              }
+            } 
+          }
         });
         
         if (transcript) {
-          const { getDaisySystemPrompt } = require('../../config/daisyPrompt');
+          const latestAssessment = (transcript.founder as any)?.assessments?.[0];
+          const primaryArea = latestAssessment?.primaryFocus || latestAssessment?.focusArea || 'Founder Dependency';
+          const scoreTier = latestAssessment?.tier || 'Critical';
+          const overallScore = latestAssessment?.overallScore !== null && latestAssessment?.overallScore !== undefined ? latestAssessment.overallScore : 78;
+
           const context = {
-            lead_name: transcript.founder?.name || "Founder",
-            company: transcript.founder?.companyName || "your company",
-            revenue: transcript.founder?.revenueBand || "Unknown",
-            stage: transcript.founder?.companyStage || "Unknown"
+            lead_name: transcript.founder?.name || 'Founder',
+            founder: transcript.founder?.name || 'Founder',
+            company_name: transcript.founder?.companyName || 'your company',
+            company: transcript.founder?.companyName || 'your company',
+            revenue: transcript.founder?.revenueBand || undefined,
+            stage: (transcript.founder as any)?.companyStage || 'Growth Stage',
+            primaryPressureArea: primaryArea,
+            primary_pressure_area: primaryArea,
+            score_tier: scoreTier,
+            overallScore: overallScore
           };
-          systemPrompt = getDaisySystemPrompt(context);
-          
-          const name = transcript.founder?.name?.trim() || "Founder";
-          firstMessage = `Hi ${name}, I have your Founder Pressure Scan results here. I'm ready to listen first, then share how your business reads from the outside. Whenever you're ready, tell me a bit about what's been on your mind lately.`;
+          systemPrompt = buildDaisySystemPrompt(context, 'voice');
+          const baseVars = extractDaisyRuntimeVariables(context);
+          dynamicVariables = {
+            ...baseVars,
+            primary_pressure_area: primaryArea,
+            primaryPressureArea: primaryArea,
+            score_tier: String(scoreTier),
+            overall_score: String(overallScore),
+            founder_name: transcript.founder?.name || 'Founder',
+            company_name: transcript.founder?.companyName || 'your company'
+          };
+          firstMessage = getDaisyWelcomeMessageVoice(transcript.founder?.name, primaryArea, scoreTier);
         }
       } catch (err) {
         console.error("Failed to generate custom prompt:", err);
       }
     }
     
-    // If no sessionId or error, we'll try to provide a generic prompt just in case.
+    // If no sessionId or error, fallback to un-guessed greeting and default variables
     if (!systemPrompt) {
-      const { getDaisySystemPrompt } = require('../../config/daisyPrompt');
-      systemPrompt = getDaisySystemPrompt({
-        lead_name: "Founder",
-        company: "your company",
-        revenue: "Unknown",
-        stage: "Unknown"
-      });
-      firstMessage = "Hi, I have your Founder Pressure Scan results here. I'm ready to listen first, then share how your business reads from the outside. Whenever you're ready, tell me a bit about what's been on your mind lately.";
+      const fallbackCtx = { 
+        lead_name: 'Founder', 
+        company: 'your company',
+        primaryPressureArea: 'Founder Dependency',
+        primary_pressure_area: 'Founder Dependency',
+        score_tier: 'Critical',
+        overallScore: 78
+      };
+      systemPrompt = buildDaisySystemPrompt(fallbackCtx, 'voice');
+      const baseVars = extractDaisyRuntimeVariables(fallbackCtx);
+      dynamicVariables = {
+        ...baseVars,
+        primary_pressure_area: 'Founder Dependency',
+        primaryPressureArea: 'Founder Dependency',
+        score_tier: 'Critical',
+        overall_score: '78',
+        founder_name: 'Founder',
+        company_name: 'your company'
+      };
+      firstMessage = getDaisyWelcomeMessageVoice('Founder', dynamicVariables.primary_pressure_area, dynamicVariables.score_tier);
     }
 
-    // Enhance the system prompt to strongly forbid generic "Are you still there?" behavior
-    // and force it to be patient, listening carefully without interrupting.
-    systemPrompt += `
-    
-CRITICAL AUDIO & PACING INSTRUCTIONS:
-- Do NOT interrupt the user. Wait completely for them to finish speaking.
-- DO NOT say "Are you still there?", "Hello?", or "Can you hear me?".
-- If there is silence, assume the user is thinking. Stay quiet.
-- Do not make filler noises like breathing, mouth clicks, or robotic sounds.
-- Keep your tone warm, confident, and highly professional at all times.`;
-
-    return res.json({ signedUrl: data.signed_url, prompt: systemPrompt, firstMessage });
+    return res.json({ signedUrl: data.signed_url, prompt: systemPrompt, firstMessage, dynamicVariables });
   } catch (e: any) {
     console.error('Token Error:', e);
     res.status(500).json({ error: 'Failed to generate token', details: e.message });
@@ -942,6 +970,48 @@ apiRoutes.get('/bookings/availability/month', async (req, res) => {
   } catch (error) {
     console.error('Failed to get month availability:', error);
     res.status(500).json({ error: 'Failed to fetch month availability' });
+  }
+});
+
+/**
+ * @openapi
+ * /bookings/calendar-info:
+ *   get:
+ *     summary: Get Calendar Info
+ *     description: Returns the GHL calendar name and slot duration for dynamic session label display.
+ *     tags:
+ *       - Booking
+ *     responses:
+ *       200:
+ *         description: Calendar name and duration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 name:
+ *                   type: string
+ *                 duration:
+ *                   type: number
+ *                 sessionLabel:
+ *                   type: string
+ */
+apiRoutes.get('/bookings/calendar-info', async (_req, res) => {
+  try {
+    const info = await getCalendarInfo();
+    res.status(200).json({
+      name: info.name,
+      duration: info.duration,
+      sessionLabel: `Strategic Review · ${info.duration} min`,
+    });
+  } catch (error) {
+    console.error('Failed to get calendar info:', error);
+    // Fallback so the UI always has something to show
+    res.status(200).json({
+      name: 'Strategic Review',
+      duration: 30,
+      sessionLabel: 'Strategic Review · 30 min',
+    });
   }
 });
 

@@ -68,6 +68,23 @@ export async function sendEmail(contactId: string, subject: string, html: string
   return await res.json();
 }
 
+export async function getCalendarInfo(): Promise<{ name: string; duration: number }> {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  if (!calendarId) throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
+
+  const headers = await ghlHeaders();
+  const res = await fetch(`${GHL_BASE}/calendars/${calendarId}`, { headers });
+  if (!res.ok) throw new Error(`GHL Calendar fetch failed: ${res.status}`);
+
+  const data: any = await res.json();
+  const cal = data.calendar || data;
+
+  return {
+    name: cal.name || 'Strategic Review',
+    duration: cal.slotDuration || cal.appointmentPerSlot || 45,
+  };
+}
+
 export async function getFreeSlots(date: string) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   if (!calendarId) throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
@@ -161,10 +178,20 @@ export async function bookAppointment(contactId: string, dateTime: string, title
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   const locationId = await getSecret('GHL_LOCATION_ID');
   
+  let duration = 30;
+  try {
+    const calInfo = await getCalendarInfo();
+    if (calInfo.duration) duration = calInfo.duration;
+  } catch (e) {
+    console.warn('Could not fetch calendar duration, defaulting to 30 min');
+  }
+
   const startTime = `${dateTime}+04:00`;
   const startDate = new Date(startTime);
-  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-  const endTime = endDate.toISOString();
+  const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+
+  const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+  const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
 
   const headers = await ghlHeaders();
   const res = await fetch(`${GHL_BASE}/calendars/events/appointments`, {
