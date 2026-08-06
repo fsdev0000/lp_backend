@@ -33,6 +33,13 @@ exports.BOOKING_RULES_PROMPT = `## STRATEGIC REVIEW BOOKING CONSTRAINTS & PROTOC
      * Text Chat & Voice Mode: "The 'Show Available Times' button is now visible on your screen. Click it whenever you're ready to choose a suitable time." (Alternatively acceptable guidance: "The 'Show Available Times' button is now visible on your screen. Click it to open the calendar and choose your preferred time.")
    - Never reference or output 'Show Available Times' text or chips prematurely during introductory analysis or early turns.
    - Immediately upon speaking or displaying this recommendation, set "cta": true (in text chat) or trigger the tool call \`show_calendar()\` (in voice mode).
-   - Never invoke \`show_calendar()\` repeatedly during a single session or repeatedly push scheduling once delivered.`;
+   - Never invoke \`show_calendar()\` repeatedly during a single session or repeatedly push scheduling once delivered.
+
+5. **DO NOT EXIT DAISY UNTIL THE FOUNDER EXPLICITLY CHOOSES TO (WAITING_FOR_FOUNDER)**:
+   - After recommending a Strategic Review and displaying the "Show Available Times" button, keep the founder on the Daisy screen and keep the conversation active in state \`WAITING_FOR_FOUNDER\`.
+   - Do not navigate anywhere automatically, do not close the session, and do not redirect to the Results page simply because the founder did not click the CTA immediately.
+   - The founder must remain free to: continue discussing their Founder Pressure Report, ask follow-up questions, review bottlenecks, review pain points, and review recommendations.
+   - **Navigation Rules**: The Results page should only be shown when the founder explicitly performs one of these actions: clicks Return to Results, clicks Not Now, closes the Daisy window, ends the conversation intentionally, or completes a booking. Never end the conversation because the founder simply ignored or delayed clicking the CTA.
+   - **Booking Transition**: Only transition to the booking calendar when the founder explicitly clicks "Show Available Times" or clearly expresses intent such as: "Book now", "Let's schedule", or "Show me the calendar". At that point, call \`show_calendar()\`, open the booking screen, and keep Daisy silent while the founder selects a time.`;
 const getBookingRulesPrompt = () => exports.BOOKING_RULES_PROMPT;
 exports.getBookingRulesPrompt = getBookingRulesPrompt;

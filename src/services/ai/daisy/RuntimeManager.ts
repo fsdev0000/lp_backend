@@ -129,7 +129,7 @@ class ConcurrentRuntimeManager {
       return false; // Already opened
     }
     session.memoryFlags.calendarOpened = true;
-    session.conversationPhase = 'SHOW_CALENDAR_CALLED';
+    session.conversationPhase = 'WAITING_FOR_FOUNDER';
     return true;
   }
 
@@ -142,7 +142,7 @@ class ConcurrentRuntimeManager {
     if (newPhase === 'TOPIC_QUESTIONS' || newPhase === 'NEXT_TOPIC_EXPLORATION') session.memoryFlags.alreadyDiscussedPainPoints = true;
     if (newPhase === 'UNDERSTANDING_ESTABLISHED') session.memoryFlags.alreadyDiscussedRecommendations = true;
     if (newPhase === 'STRATEGIC_REVIEW_RECOMMENDED') session.memoryFlags.bookingRecommended = true;
-    if (newPhase === 'SHOW_CALENDAR_CALLED') session.memoryFlags.calendarOpened = true;
+    if (newPhase === 'WAITING_FOR_FOUNDER' || newPhase === 'SHOW_CALENDAR_CALLED') session.memoryFlags.calendarOpened = true;
     if (newPhase === 'BOOKING_CONFIRMED') session.memoryFlags.bookingConfirmed = true;
   }
 

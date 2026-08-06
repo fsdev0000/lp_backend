@@ -78,7 +78,7 @@ class ConcurrentRuntimeManager {
             return false; // Already opened
         }
         session.memoryFlags.calendarOpened = true;
-        session.conversationPhase = 'SHOW_CALENDAR_CALLED';
+        session.conversationPhase = 'WAITING_FOR_FOUNDER';
         return true;
     }
     updatePhase(sessionId, newPhase) {
@@ -95,7 +95,7 @@ class ConcurrentRuntimeManager {
             session.memoryFlags.alreadyDiscussedRecommendations = true;
         if (newPhase === 'STRATEGIC_REVIEW_RECOMMENDED')
             session.memoryFlags.bookingRecommended = true;
-        if (newPhase === 'SHOW_CALENDAR_CALLED')
+        if (newPhase === 'WAITING_FOR_FOUNDER' || newPhase === 'SHOW_CALENDAR_CALLED')
             session.memoryFlags.calendarOpened = true;
         if (newPhase === 'BOOKING_CONFIRMED')
             session.memoryFlags.bookingConfirmed = true;
