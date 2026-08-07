@@ -216,8 +216,8 @@ export async function handleVoiceConversationTurn(
     const voiceState = runtimeManager.getVoiceState(sessionId);
 
     // Detect CTA (booking recommendation)
-    const cta = /show available times|book.*strategic review|schedule.*review|click it.*calendar/i.test(reply)
-      && (voiceState ? voiceState.voiceTurnCount >= 3 : true);
+    const cta = /recommend.*strategic review|show available times|review these findings during a complimentary/i.test(reply)
+      || /book|schedule|available times|review with lionel|calendar/i.test(userMessage.trim());
 
     // Save conversation history
     messages.push({ role: 'assistant', content: reply });

@@ -180,18 +180,18 @@ export async function handleConversationTurn(sessionId: string, userMessage: str
         console.error("Failed to parse Daisy JSON:", e);
     }
     
-    // PREMATURE BOOKING GUARD & INTENT OVERRIDE
-    // For both Text and Voice, the Show Available Times button and chips are strictly forbidden
-    // during introductory analysis or whenever cta is false, unless explicit scheduling is recommended or requested.
+    // STRICT CTA LOGIC: The CTA must ONLY appear if Daisy explicitly recommends it.
+    // We derive 'cta' directly from the AI's response text to prevent the UI from showing it prematurely.
     const isExplicitBooking = /book|schedule|available times|review with lionel|calendar/i.test(userMessage.trim());
-    const aiRecommendsBooking = /recommend.*strategic review|show available times.*button is now visible|help you book/i.test(parsedResponse.reply || "");
+    const aiRecommendsBooking = /recommend.*strategic review|show available times|review these findings during a complimentary/i.test(parsedResponse.reply || "");
 
-    if (turnCount < 3 && !isExplicitBooking && !aiRecommendsBooking) {
+    if (aiRecommendsBooking || isExplicitBooking) {
+        parsedResponse.cta = true;
+    } else {
         parsedResponse.cta = false;
+        // Strip out any hallucinated booking instructions just in case
         parsedResponse.reply = parsedResponse.reply.replace(/The ['"]?Show Available Times['"]? button is now visible on your screen\.? Click it to open the calendar and choose your preferred time\.?/gi, "").trim();
         parsedResponse.reply = parsedResponse.reply.replace(/Please click ['"]?Show Available Times['"]? below to choose a time that works best for you\.?/gi, "").trim();
-    } else if (isExplicitBooking || aiRecommendsBooking) {
-        parsedResponse.cta = true;
     }
 
     // Ensure chips never contain calendar booking strings unless CTA is active
