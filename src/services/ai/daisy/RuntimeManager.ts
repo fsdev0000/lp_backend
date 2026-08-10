@@ -73,7 +73,7 @@ class ConcurrentRuntimeManager {
         sessionId,
         conversationId,
         chatHistory: [],
-        conversationPhase: 'WELCOME',
+        conversationPhase: 'REPORT_REVIEW',
         memoryFlags: {
           alreadyExplained: false,
           alreadyDiscussedBottlenecks: false,
@@ -129,7 +129,7 @@ class ConcurrentRuntimeManager {
       return false; // Already opened
     }
     session.memoryFlags.calendarOpened = true;
-    session.conversationPhase = 'WAITING_FOR_FOUNDER';
+    session.conversationPhase = 'WAITING_FOR_BOOKING';
     return true;
   }
 
@@ -137,12 +137,11 @@ class ConcurrentRuntimeManager {
     const session = this.getOrCreateSession(sessionId);
     session.conversationPhase = newPhase;
     // Advance matching session memory progress flags automatically upon state progression
-    if (newPhase === 'OVERALL_SUMMARY' || newPhase === 'BIGGEST_PRESSURE') session.memoryFlags.alreadyExplained = true;
-    if (newPhase === 'TOPIC_SELECTION' || newPhase === 'SHORT_EXPLANATION') session.memoryFlags.alreadyDiscussedBottlenecks = true;
-    if (newPhase === 'TOPIC_QUESTIONS' || newPhase === 'NEXT_TOPIC_EXPLORATION') session.memoryFlags.alreadyDiscussedPainPoints = true;
-    if (newPhase === 'UNDERSTANDING_ESTABLISHED') session.memoryFlags.alreadyDiscussedRecommendations = true;
-    if (newPhase === 'STRATEGIC_REVIEW_RECOMMENDED') session.memoryFlags.bookingRecommended = true;
-    if (newPhase === 'WAITING_FOR_FOUNDER' || newPhase === 'SHOW_CALENDAR_CALLED') session.memoryFlags.calendarOpened = true;
+    if (newPhase === 'REPORT_REVIEW') session.memoryFlags.alreadyExplained = true;
+    if (newPhase === 'DEEPENING') session.memoryFlags.alreadyDiscussedBottlenecks = true;
+    if (newPhase === 'STRATEGIC_REVIEW_INTRODUCED') session.memoryFlags.alreadyDiscussedRecommendations = true;
+    if (newPhase === 'BOOKING_RECOMMENDED') session.memoryFlags.bookingRecommended = true;
+    if (newPhase === 'WAITING_FOR_BOOKING' || newPhase === 'CALENDAR_OPEN') session.memoryFlags.calendarOpened = true;
     if (newPhase === 'BOOKING_CONFIRMED') session.memoryFlags.bookingConfirmed = true;
   }
 

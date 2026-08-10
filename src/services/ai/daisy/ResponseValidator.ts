@@ -187,13 +187,33 @@ export class ResponseValidator {
       interventions.push("Stripped markdown asterisks to ensure clean text display without raw formatting syntax.");
     }
 
-    // 4. SILENCE CHECK-INS & REPETITIVE SELF-TALK SUPPRESSION (Part 3 & Part 4)
-    // Prevent repeating filler check-in prompts
+    // 4. SILENCE CHECK-INS, CHATBOT PROMPTS & REPETITIVE SELF-TALK SUPPRESSION
+    // Prevent repeating filler check-in prompts or generic open-ended chatbot questions
+    const forbiddenChatbotPhrases = [
+      /do you have any questions\??/i,
+      /how can i help\??/i,
+      /what would you like to discuss\??/i,
+      /is there anything else i can help with\??/i,
+      /would you like me to explain more\??/i,
+      /i'm here whenever you're ready\.?/i,
+      /feel free to ask\.?/i,
+      /what should we discuss next\??/i
+    ];
+    
+    for (const regex of forbiddenChatbotPhrases) {
+      if (regex.test(output)) {
+        output = output.replace(regex, "").trim();
+        interventions.push("Stripped generic open-ended chatbot question.");
+      }
+    }
+
     const forbiddenCheckins = [
       /^are you still there\??$/i,
       /^are you still with me\??$/i,
       /^hello\??$/i,
-      /^did you catch that\??$/i
+      /^did you catch that\??$/i,
+      /^i'm here when you're ready\.?$/i,
+      /^let me know if you need anything\.?$/i
     ];
     if (forbiddenCheckins.some(r => r.test(output.trim()))) {
       return {

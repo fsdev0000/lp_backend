@@ -175,33 +175,35 @@ export function setupLlmWebSocket(wss: WebSocketServer) {
           runtimeManager.setTurnState(sessionId, 'PROCESSING');
           voiceState.isGeneratingResponse = true;
           console.log(`[VOICE STATE] Transition -> PROCESSING (calling LLM)`);
-          console.log(`[VOICE] Calling LLM`);
-
+          
           try {
-            const response = await handleVoiceConversationTurn(sessionId, userText);
-
-            if (response.reply && response.reply.trim()) {
-              // ── DUPLICATE TRANSMISSION PROTECTION (Problem 4) ──
-              if (runtimeManager.isDuplicateResponse(sessionId, response.reply)) {
-                console.warn(`[VOICE GUARD] Duplicate response detected at WebSocket transmission layer -> suppressing speech.`);
-                runtimeManager.markAssistantFinishedSpeaking(sessionId);
-                console.log(`[VOICE STATE] Transition -> WAITING_FOR_USER lock re-engaged (duplicate suppressed)`);
-                return;
+            let hasStartedSpeaking = false;
+            
+            const response = await handleVoiceConversationTurn(sessionId, userText, (chunk) => {
+              if (chunk.trim() && !hasStartedSpeaking) {
+                 hasStartedSpeaking = true;
+                 runtimeManager.markAssistantSpeaking(sessionId, "Generating response...");
+                 console.log(`[VOICE] Assistant started speaking (streaming)`);
               }
-
-              // Step 3: ASSISTANT_SPEAKING
-              runtimeManager.markAssistantSpeaking(sessionId, response.reply);
-              console.log(`[VOICE STATE] Transition -> ASSISTANT_SPEAKING (${response.reply.split(/\s+/).length} words)`);
-              console.log(`[VOICE] Sending assistant response (${response.reply.split(/\s+/).length} words)`);
-              console.log(`[VOICE] Assistant started speaking`);
-              
               ws.send(JSON.stringify({
                 type: 'assistant_message',
                 message: {
                   role: 'assistant',
-                  content: response.reply
+                  content: chunk
                 }
               }));
+            });
+
+            if (response.reply && response.reply.trim()) {
+              // ── DUPLICATE TRANSMISSION PROTECTION (Problem 4) ──
+              if (runtimeManager.isDuplicateResponse(sessionId, response.reply)) {
+                console.warn(`[VOICE GUARD] Duplicate response detected at end of stream. Not recording duplicate.`);
+              } else {
+                // Step 3: ASSISTANT_SPEAKING (update with full text)
+                runtimeManager.markAssistantSpeaking(sessionId, response.reply);
+              }
+              
+              console.log(`[VOICE STATE] Stream finished. Total words: ${response.reply.split(/\s+/).length}`);
 
               // Handle CTA button flag without interrupting audio delivery
               if (response.cta) {

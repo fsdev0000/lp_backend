@@ -8,6 +8,7 @@ import { handleConversationTurn } from '../../services/ai/memory';
 import OpenAI from 'openai';
 import { getSecret } from '../../services/secrets';
 import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntimeVariables } from '../../services/ai/daisy/PromptBuilder';
+import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -642,6 +643,39 @@ apiRoutes.post('/chat/message', async (req, res) => {
  *       - Voice AI
  *     requestBody:
  *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sessionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Signed URL and System Prompt
+ */
+apiRoutes.get('/voice/state', (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  if (!sessionId) {
+    return res.status(400).json({ error: 'sessionId required' });
+  }
+  
+  const sessionState = runtimeManager.getOrCreateSession(sessionId);
+  if (!sessionState) {
+    return res.status(404).json({ error: 'Session state not found' });
+  }
+
+  const ctaVisible = sessionState.memoryFlags.bookingRecommended || sessionState.memoryFlags.calendarOpened;
+  res.json({ ctaVisible });
+});
+
+/**
+ * @openapi
+ * /api/v1/voice/token:
+ *   post:
+ *     summary: Retrieve signed URL for ElevenLabs frontend WebSocket
+ *     tags: [Voice]
+ *     requestBody:
  *       content:
  *         application/json:
  *           schema:

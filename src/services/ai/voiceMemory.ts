@@ -80,7 +80,8 @@ function stripInternalReasoning(text: string): string {
  */
 export async function handleVoiceConversationTurn(
   sessionId: string,
-  userMessage: string
+  userMessage: string,
+  onChunk?: (chunk: string) => void
 ): Promise<{ reply: string; cta: boolean }> {
   if (!sessionId || sessionId === 'default-session') {
     throw new Error("FATAL: Attempted to process voice turn with invalid session ID");
@@ -176,18 +177,28 @@ export async function handleVoiceConversationTurn(
     let aiResponseText = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const completion = await openai.chat.completions.create({
+        const stream = await openai.chat.completions.create({
           model: "gemini-flash-latest",
           messages: messages,
-          // No response_format: { type: "json_object" } — voice outputs plain text
+          stream: true,
         });
-        aiResponseText = completion.choices[0].message.content || "";
+        
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            aiResponseText += content;
+            if (onChunk) {
+              onChunk(content);
+            }
+          }
+        }
         break;
       } catch (apiError) {
         console.error(`[VOICE MEMORY] LLM attempt ${attempt} failed:`, apiError);
         if (attempt === 3) {
           const focus = assessment?.primaryFocus || assessment?.focusArea || "Decision Load";
           aiResponseText = `Your Founder Pressure Scan identified ${focus} as your strongest pressure area. This means important decisions are still flowing through you before work can continue. I'd recommend exploring this further during a Strategic Review with Lionel Eersteling.`;
+          if (onChunk) onChunk(aiResponseText);
         } else {
           await new Promise(r => setTimeout(r, 600 * attempt));
         }
