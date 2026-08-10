@@ -30,7 +30,7 @@ const wss = new WebSocketServer({ noServer: true });
 setupLlmWebSocket(wss);
 
 httpServer.on('upgrade', (request, socket, head) => {
-  const pathname = request.url;
+  const pathname = request.url ? request.url.split('?')[0] : '';
   if (pathname === '/api/v1/voice/llm-stream') {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
