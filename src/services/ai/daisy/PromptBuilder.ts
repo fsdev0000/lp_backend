@@ -7,6 +7,7 @@ import { getBookingRulesPrompt } from './BookingRules';
 import { getToolRulesPrompt } from './ToolRules';
 import { getVoiceRulesPrompt } from './VoiceRules';
 import { getChatRulesPrompt } from './ChatRules';
+import { getConversationRulesPrompt } from './ConversationRules';
 
 export const buildDaisySystemPrompt = (
   context: DaisyContext,
@@ -24,6 +25,7 @@ export const buildDaisySystemPrompt = (
       getVoiceIdentityPrompt(),
       getStateMachinePrompt(currentPhase),
       getExecutiveReportPrompt(interpretation),
+      getConversationRulesPrompt(),
       getGuardrailsPrompt(),
       getBookingRulesPrompt(),
       getToolRulesPrompt(),
@@ -38,6 +40,7 @@ export const buildDaisySystemPrompt = (
     getIdentityPrompt(),
     getStateMachinePrompt(currentPhase),
     getExecutiveReportPrompt(interpretation),
+    getConversationRulesPrompt(),
     getGuardrailsPrompt(),
     getBookingRulesPrompt(),
     getToolRulesPrompt(),
