@@ -17,10 +17,40 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const httpServer = createServer(app);
 
+// Allowed origins: production domain + ElevenLabs (for voice WebSocket handshake)
+const ALLOWED_ORIGINS = [
+  'https://leadersperformance.ae',
+  'https://www.leadersperformance.ae',
+  'https://api.leadersperformance.ae',
+  'https://elevenlabs.io',
+  'https://api.elevenlabs.io',
+];
+
+// Allow localhost only in development
+if (process.env.NODE_ENV !== 'production') {
+  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000');
+}
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+    // NOTE: Remove this if you want to block all non-browser requests
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn(`[CORS] Blocked request from unauthorized origin: ${origin}`);
+    return callback(new Error(`CORS policy: origin ${origin} is not allowed`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+
 // Setup Socket.IO for general purpose real-time connection
 export const io = new Server(httpServer, {
   cors: {
-    origin: '*', // Adjust for production if needed
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST']
   }
 });
@@ -50,7 +80,7 @@ io.on('connection', (socket) => {
 
 app.set('io', io);
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use('/api/v1', apiRoutes);
