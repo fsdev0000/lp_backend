@@ -173,6 +173,30 @@ export async function handleVoiceConversationTurn(
       }
     }
 
+    // ── INTENT ENGINE BYPASS ──
+    // Intercept booking and calendar requests to enforce the exact CTA wording without relying on the LLM.
+    const isBookingIntent = /book|schedule|available times|review with lionel|calendar|where is the calendar|why are you not providing/i.test(userMessage.trim());
+    if (isBookingIntent) {
+      console.log(`[VOICE MEMORY] Intent Engine bypassed LLM for BOOKING_INTENT.`);
+      const hardcodedReply = "Absolutely. The next step is the Strategic Review with Lionel Eersteling. Click 'Show Available Times' below to choose your time.";
+      
+      // Stream the hardcoded reply
+      if (onChunk) {
+        onChunk(hardcodedReply);
+      }
+      
+      // Record to history
+      runtimeManager.recordSentResponse(sessionId, hardcodedReply);
+      messages.push({ role: 'assistant', content: hardcodedReply });
+      
+      await prisma.transcript.update({
+        where: { id: sessionId },
+        data: { conversationLog: JSON.stringify(messages) }
+      });
+      
+      return { reply: hardcodedReply, cta: true };
+    }
+
     // Generate voice response (plain text, NOT JSON)
     let aiResponseText = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -187,9 +211,6 @@ export async function handleVoiceConversationTurn(
           const content = chunk.choices[0]?.delta?.content || "";
           if (content) {
             aiResponseText += content;
-            if (onChunk) {
-              onChunk(content);
-            }
           }
         }
         break;
@@ -198,7 +219,6 @@ export async function handleVoiceConversationTurn(
         if (attempt === 3) {
           const focus = assessment?.primaryFocus || assessment?.focusArea || "Decision Load";
           aiResponseText = `Your Founder Pressure Scan identified ${focus} as your strongest pressure area. This means important decisions are still flowing through you before work can continue. I'd recommend exploring this further during a Strategic Review with Lionel Eersteling.`;
-          if (onChunk) onChunk(aiResponseText);
         } else {
           await new Promise(r => setTimeout(r, 600 * attempt));
         }
@@ -222,6 +242,11 @@ export async function handleVoiceConversationTurn(
       return { reply: "", cta: false };
     }
 
+    // Now that the response is clean and validated, stream it to ElevenLabs
+    if (onChunk) {
+      onChunk(reply);
+    }
+
     // Record this response hash and increment turn count
     runtimeManager.recordSentResponse(sessionId, reply);
     const voiceState = runtimeManager.getVoiceState(sessionId);
@@ -230,6 +255,9 @@ export async function handleVoiceConversationTurn(
     const cta = /recommend.*strategic review|show available times|review these findings during a complimentary/i.test(reply)
       || /book|schedule|available times|review with lionel|calendar/i.test(userMessage.trim());
 
+    // Strict Enforcement: If LLM failed to set CTA but user intent was clear, force it.
+    const forcedCta = cta || /show available times/i.test(reply);
+
     // Save conversation history
     messages.push({ role: 'assistant', content: reply });
     await prisma.transcript.update({
@@ -237,7 +265,7 @@ export async function handleVoiceConversationTurn(
       data: { conversationLog: JSON.stringify(messages) }
     });
 
-    return { reply, cta };
+    return { reply, cta: forcedCta };
   } finally {
     runtimeManager.releaseTurnLock(sessionId);
   }

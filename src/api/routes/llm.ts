@@ -151,6 +151,13 @@ export function setupLlmWebSocket(wss: WebSocketServer) {
             return;
           }
 
+          // ── VOICE SILENCE ENFORCEMENT (Calendar Open) ──
+          const session = runtimeManager.getSession(sessionId);
+          if (session?.memoryFlags.calendarOpened) {
+            console.log(`[VOICE GUARD] Calendar is open. Daisy must remain silent. Dropping transcript: "${userText}"`);
+            return;
+          }
+
           // ── SPEECH VALIDATION & CONVERSATION LOCK ENFORCEMENT ──
           const speechCheck = isGenuineUserSpeech(userText, voiceState.lastAssistantMessage, confidence);
           if (!speechCheck.genuine) {
