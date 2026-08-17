@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import { getSecret } from '../../services/secrets';
 import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntimeVariables } from '../../services/ai/daisy/PromptBuilder';
 import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
+import { consentRoutes } from './consent';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -35,6 +36,8 @@ const upload = multer();
 
 const prisma = new PrismaClient();
 const apiRoutes = Router();
+
+apiRoutes.use('/consent', consentRoutes);
 
 /**
  * @openapi

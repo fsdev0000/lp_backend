@@ -88,3 +88,24 @@ model SystemLog {
   details   String?  // Serialized JSON of log context
   createdAt DateTime @default(now())
 }
+
+model ConsentAuditLog {
+  id                String   @id @default(uuid())
+  consentId         String
+  anonymousId       String?
+  eventType         String
+  strictlyNecessary Boolean  @default(true)
+  functional        Boolean
+  analytics         Boolean
+  marketing         Boolean
+  personalization   Boolean
+  policyVersion     String
+  bannerVersion     String
+  jurisdiction      String?
+  ipAddress         String?
+  userAgent         String?
+  idempotencyKey    String   @unique
+  createdAt         DateTime @default(now())
+
+  @@index([consentId])
+}
