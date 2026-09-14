@@ -128,6 +128,12 @@ function setupLlmWebSocket(wss) {
                         console.log(`[VOICE GUARD] Transcript received while Daisy is actively speaking over TTS -> ignored to prevent self-interruption.`);
                         return;
                     }
+                    // ── VOICE SILENCE ENFORCEMENT (Calendar Open) ──
+                    const session = RuntimeManager_1.runtimeManager.getSession(sessionId);
+                    if (session?.memoryFlags.calendarOpened) {
+                        console.log(`[VOICE GUARD] Calendar is open. Daisy must remain silent. Dropping transcript: "${userText}"`);
+                        return;
+                    }
                     // ── SPEECH VALIDATION & CONVERSATION LOCK ENFORCEMENT ──
                     const speechCheck = isGenuineUserSpeech(userText, voiceState.lastAssistantMessage, confidence);
                     if (!speechCheck.genuine) {
@@ -149,29 +155,32 @@ function setupLlmWebSocket(wss) {
                     RuntimeManager_1.runtimeManager.setTurnState(sessionId, 'PROCESSING');
                     voiceState.isGeneratingResponse = true;
                     console.log(`[VOICE STATE] Transition -> PROCESSING (calling LLM)`);
-                    console.log(`[VOICE] Calling LLM`);
                     try {
-                        const response = await (0, voiceMemory_1.handleVoiceConversationTurn)(sessionId, userText);
-                        if (response.reply && response.reply.trim()) {
-                            // ── DUPLICATE TRANSMISSION PROTECTION (Problem 4) ──
-                            if (RuntimeManager_1.runtimeManager.isDuplicateResponse(sessionId, response.reply)) {
-                                console.warn(`[VOICE GUARD] Duplicate response detected at WebSocket transmission layer -> suppressing speech.`);
-                                RuntimeManager_1.runtimeManager.markAssistantFinishedSpeaking(sessionId);
-                                console.log(`[VOICE STATE] Transition -> WAITING_FOR_USER lock re-engaged (duplicate suppressed)`);
-                                return;
+                        let hasStartedSpeaking = false;
+                        const response = await (0, voiceMemory_1.handleVoiceConversationTurn)(sessionId, userText, (chunk) => {
+                            if (chunk.trim() && !hasStartedSpeaking) {
+                                hasStartedSpeaking = true;
+                                RuntimeManager_1.runtimeManager.markAssistantSpeaking(sessionId, "Generating response...");
+                                console.log(`[VOICE] Assistant started speaking (streaming)`);
                             }
-                            // Step 3: ASSISTANT_SPEAKING
-                            RuntimeManager_1.runtimeManager.markAssistantSpeaking(sessionId, response.reply);
-                            console.log(`[VOICE STATE] Transition -> ASSISTANT_SPEAKING (${response.reply.split(/\s+/).length} words)`);
-                            console.log(`[VOICE] Sending assistant response (${response.reply.split(/\s+/).length} words)`);
-                            console.log(`[VOICE] Assistant started speaking`);
                             ws.send(JSON.stringify({
                                 type: 'assistant_message',
                                 message: {
                                     role: 'assistant',
-                                    content: response.reply
+                                    content: chunk
                                 }
                             }));
+                        });
+                        if (response.reply && response.reply.trim()) {
+                            // ── DUPLICATE TRANSMISSION PROTECTION (Problem 4) ──
+                            if (RuntimeManager_1.runtimeManager.isDuplicateResponse(sessionId, response.reply)) {
+                                console.warn(`[VOICE GUARD] Duplicate response detected at end of stream. Not recording duplicate.`);
+                            }
+                            else {
+                                // Step 3: ASSISTANT_SPEAKING (update with full text)
+                                RuntimeManager_1.runtimeManager.markAssistantSpeaking(sessionId, response.reply);
+                            }
+                            console.log(`[VOICE STATE] Stream finished. Total words: ${response.reply.split(/\s+/).length}`);
                             // Handle CTA button flag without interrupting audio delivery
                             if (response.cta) {
                                 RuntimeManager_1.runtimeManager.markCalendarOpened(sessionId);

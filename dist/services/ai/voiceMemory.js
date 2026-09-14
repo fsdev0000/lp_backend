@@ -79,7 +79,7 @@ function stripInternalReasoning(text) {
  * - Internal reasoning stripping
  * - Response deduplication
  */
-async function handleVoiceConversationTurn(sessionId, userMessage) {
+async function handleVoiceConversationTurn(sessionId, userMessage, onChunk) {
     if (!sessionId || sessionId === 'default-session') {
         throw new Error("FATAL: Attempted to process voice turn with invalid session ID");
     }
@@ -160,16 +160,40 @@ async function handleVoiceConversationTurn(sessionId, userMessage) {
                 messages = [systemPrompt, ...messages.slice(-15)];
             }
         }
+        // ── INTENT ENGINE BYPASS ──
+        // Intercept booking and calendar requests to enforce the exact CTA wording without relying on the LLM.
+        const isBookingIntent = /book|schedule|available times|review with lionel|calendar|where is the calendar|why are you not providing/i.test(userMessage.trim());
+        if (isBookingIntent) {
+            console.log(`[VOICE MEMORY] Intent Engine bypassed LLM for BOOKING_INTENT.`);
+            const hardcodedReply = "Absolutely. The next step is the Strategic Review with Lionel Eersteling. Click 'Show Available Times' below to choose your time.";
+            // Stream the hardcoded reply
+            if (onChunk) {
+                onChunk(hardcodedReply);
+            }
+            // Record to history
+            RuntimeManager_1.runtimeManager.recordSentResponse(sessionId, hardcodedReply);
+            messages.push({ role: 'assistant', content: hardcodedReply });
+            await prisma.transcript.update({
+                where: { id: sessionId },
+                data: { conversationLog: JSON.stringify(messages) }
+            });
+            return { reply: hardcodedReply, cta: true };
+        }
         // Generate voice response (plain text, NOT JSON)
         let aiResponseText = "";
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                const completion = await openai.chat.completions.create({
+                const stream = await openai.chat.completions.create({
                     model: "gemini-flash-latest",
                     messages: messages,
-                    // No response_format: { type: "json_object" } — voice outputs plain text
+                    stream: true,
                 });
-                aiResponseText = completion.choices[0].message.content || "";
+                for await (const chunk of stream) {
+                    const content = chunk.choices[0]?.delta?.content || "";
+                    if (content) {
+                        aiResponseText += content;
+                    }
+                }
                 break;
             }
             catch (apiError) {
@@ -196,19 +220,25 @@ async function handleVoiceConversationTurn(sessionId, userMessage) {
             console.warn(`[VOICE MEMORY] Duplicate response detected and suppressed for session ${sessionId}`);
             return { reply: "", cta: false };
         }
+        // Now that the response is clean and validated, stream it to ElevenLabs
+        if (onChunk) {
+            onChunk(reply);
+        }
         // Record this response hash and increment turn count
         RuntimeManager_1.runtimeManager.recordSentResponse(sessionId, reply);
         const voiceState = RuntimeManager_1.runtimeManager.getVoiceState(sessionId);
         // Detect CTA (booking recommendation)
-        const cta = /show available times|book.*strategic review|schedule.*review|click it.*calendar/i.test(reply)
-            && (voiceState ? voiceState.voiceTurnCount >= 3 : true);
+        const cta = /recommend.*strategic review|show available times|review these findings during a complimentary/i.test(reply)
+            || /book|schedule|available times|review with lionel|calendar/i.test(userMessage.trim());
+        // Strict Enforcement: If LLM failed to set CTA but user intent was clear, force it.
+        const forcedCta = cta || /show available times/i.test(reply);
         // Save conversation history
         messages.push({ role: 'assistant', content: reply });
         await prisma.transcript.update({
             where: { id: sessionId },
             data: { conversationLog: JSON.stringify(messages) }
         });
-        return { reply, cta };
+        return { reply, cta: forcedCta };
     }
     finally {
         RuntimeManager_1.runtimeManager.releaseTurnLock(sessionId);

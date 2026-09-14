@@ -10,6 +10,7 @@ const BookingRules_1 = require("./BookingRules");
 const ToolRules_1 = require("./ToolRules");
 const VoiceRules_1 = require("./VoiceRules");
 const ChatRules_1 = require("./ChatRules");
+const ConversationRules_1 = require("./ConversationRules");
 const buildDaisySystemPrompt = (context, mode = 'chat', memoryFlags) => {
     const vars = (0, RuntimeState_1.extractDaisyRuntimeVariables)(context);
     const interpretation = (0, ExecutiveReportInterpreter_1.interpretReport)(vars);
@@ -21,6 +22,7 @@ const buildDaisySystemPrompt = (context, mode = 'chat', memoryFlags) => {
             (0, Identity_1.getVoiceIdentityPrompt)(),
             (0, ConversationStateMachine_1.getStateMachinePrompt)(currentPhase),
             (0, ExecutiveReportInterpreter_1.getExecutiveReportPrompt)(interpretation),
+            (0, ConversationRules_1.getConversationRulesPrompt)(),
             (0, Guardrails_1.getGuardrailsPrompt)(),
             (0, BookingRules_1.getBookingRulesPrompt)(),
             (0, ToolRules_1.getToolRulesPrompt)(),
@@ -34,6 +36,7 @@ const buildDaisySystemPrompt = (context, mode = 'chat', memoryFlags) => {
         (0, Identity_1.getIdentityPrompt)(),
         (0, ConversationStateMachine_1.getStateMachinePrompt)(currentPhase),
         (0, ExecutiveReportInterpreter_1.getExecutiveReportPrompt)(interpretation),
+        (0, ConversationRules_1.getConversationRulesPrompt)(),
         (0, Guardrails_1.getGuardrailsPrompt)(),
         (0, BookingRules_1.getBookingRulesPrompt)(),
         (0, ToolRules_1.getToolRulesPrompt)(),

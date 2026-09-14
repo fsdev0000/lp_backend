@@ -14,6 +14,8 @@ const memory_1 = require("../../services/ai/memory");
 const openai_1 = __importDefault(require("openai"));
 const secrets_1 = require("../../services/secrets");
 const PromptBuilder_1 = require("../../services/ai/daisy/PromptBuilder");
+const RuntimeManager_1 = require("../../services/ai/daisy/RuntimeManager");
+const consent_1 = require("./consent");
 let elevenlabsClient = null;
 async function getElevenLabs() {
     if (elevenlabsClient)
@@ -40,6 +42,7 @@ const upload = (0, multer_1.default)();
 const prisma = new client_1.PrismaClient();
 const apiRoutes = (0, express_1.Router)();
 exports.apiRoutes = apiRoutes;
+apiRoutes.use('/consent', consent_1.consentRoutes);
 /**
  * @openapi
  * /voice/transcribe:
@@ -612,6 +615,36 @@ apiRoutes.post('/chat/message', async (req, res) => {
  *       - Voice AI
  *     requestBody:
  *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sessionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Signed URL and System Prompt
+ */
+apiRoutes.get('/voice/state', (req, res) => {
+    const sessionId = req.query.sessionId;
+    if (!sessionId) {
+        return res.status(400).json({ error: 'sessionId required' });
+    }
+    const sessionState = RuntimeManager_1.runtimeManager.getOrCreateSession(sessionId);
+    if (!sessionState) {
+        return res.status(404).json({ error: 'Session state not found' });
+    }
+    const ctaVisible = sessionState.memoryFlags.bookingRecommended || sessionState.memoryFlags.calendarOpened;
+    res.json({ ctaVisible });
+});
+/**
+ * @openapi
+ * /api/v1/voice/token:
+ *   post:
+ *     summary: Retrieve signed URL for ElevenLabs frontend WebSocket
+ *     tags: [Voice]
+ *     requestBody:
  *       content:
  *         application/json:
  *           schema:

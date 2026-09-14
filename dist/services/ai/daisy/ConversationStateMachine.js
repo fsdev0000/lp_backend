@@ -2,26 +2,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStateMachinePrompt = exports.isValidTransition = exports.getNextState = exports.STATE_SEQUENCE = void 0;
 exports.STATE_SEQUENCE = [
-    'WELCOME',
-    'OVERALL_SUMMARY',
-    'BIGGEST_PRESSURE',
-    'TOPIC_SELECTION',
-    'SHORT_EXPLANATION',
-    'TOPIC_QUESTIONS',
-    'NEXT_TOPIC_EXPLORATION',
-    'UNDERSTANDING_ESTABLISHED',
-    'STRATEGIC_REVIEW_RECOMMENDED',
-    'WAITING_FOR_FOUNDER',
-    'SHOW_CALENDAR_CALLED',
+    'REPORT_REVIEW',
+    'DEEPENING',
+    'STRATEGIC_REVIEW_INTRODUCED',
+    'BOOKING_RECOMMENDED',
+    'WAITING_FOR_BOOKING',
+    'CALENDAR_OPEN',
     'BOOKING_CONFIRMED',
     'END_SESSION',
 ];
 const getNextState = (currentState) => {
-    if (currentState === 'STRATEGIC_REVIEW_RECOMMENDED' ||
-        currentState === 'WAITING_FOR_FOUNDER' ||
-        currentState === 'SHOW_CALENDAR_CALLED') {
-        // Persistent advisory state: remain in WAITING_FOR_FOUNDER so the conversation stays open for follow-up questions
-        return 'WAITING_FOR_FOUNDER';
+    if (currentState === 'BOOKING_RECOMMENDED' ||
+        currentState === 'WAITING_FOR_BOOKING' ||
+        currentState === 'CALENDAR_OPEN') {
+        // Persistent advisory state
+        return 'WAITING_FOR_BOOKING';
     }
     const currentIndex = exports.STATE_SEQUENCE.indexOf(currentState);
     if (currentIndex < 0 || currentIndex >= exports.STATE_SEQUENCE.length - 1) {
@@ -33,22 +28,21 @@ exports.getNextState = getNextState;
 const isValidTransition = (fromState, toState) => {
     const fromIdx = exports.STATE_SEQUENCE.indexOf(fromState);
     const toIdx = exports.STATE_SEQUENCE.indexOf(toState);
-    // Deterministic Forward-Only Progression: strictly never loop backward or skip/jump states out of order (except staying within persistent WAITING_FOR_FOUNDER)
-    if ((fromState === 'STRATEGIC_REVIEW_RECOMMENDED' || fromState === 'WAITING_FOR_FOUNDER' || fromState === 'SHOW_CALENDAR_CALLED') &&
-        (toState === 'STRATEGIC_REVIEW_RECOMMENDED' || toState === 'WAITING_FOR_FOUNDER' || toState === 'SHOW_CALENDAR_CALLED')) {
+    if ((fromState === 'BOOKING_RECOMMENDED' || fromState === 'WAITING_FOR_BOOKING' || fromState === 'CALENDAR_OPEN') &&
+        (toState === 'BOOKING_RECOMMENDED' || toState === 'WAITING_FOR_BOOKING' || toState === 'CALENDAR_OPEN')) {
         return true;
     }
     return toIdx >= fromIdx;
 };
 exports.isValidTransition = isValidTransition;
-const getStateMachinePrompt = (currentState = 'OVERALL_SUMMARY') => `## CONVERSATION STATE MACHINE (NON-REPETITIVE ADVISORY FLOW)
+const getStateMachinePrompt = (currentState = 'REPORT_REVIEW') => `## CONVERSATION STATE MACHINE (NON-REPETITIVE ADVISORY FLOW)
 You operate under a strict, non-repetitive state machine governing conversational logic:
-WELCOME → OVERALL_SUMMARY → BIGGEST_PRESSURE → TOPIC_SELECTION → SHORT_EXPLANATION → TOPIC_QUESTIONS → NEXT_TOPIC_EXPLORATION → UNDERSTANDING_ESTABLISHED → STRATEGIC_REVIEW_RECOMMENDED → WAITING_FOR_FOUNDER → SHOW_CALENDAR_CALLED → BOOKING_CONFIRMED → END_SESSION
+REPORT_REVIEW → DEEPENING → STRATEGIC_REVIEW_INTRODUCED → BOOKING_RECOMMENDED → WAITING_FOR_BOOKING → CALENDAR_OPEN → BOOKING_CONFIRMED → END_SESSION
 
 STRICT STATE REGULARITIES & PROACTIVE ADVISORY CADENCE (10/10 FOUNDER EXPERIENCE):
-- **Value Delivery Before Booking**: The founder must feel they received clear analytical value from their report before booking is ever proposed. Follow this cadence: Welcome ↓ Explain finding ↓ Explain meaning ↓ Explain bottlenecks ↓ Explain pain points ↓ Explain report recommendations ↓ Strategic Review recommendation ↓ Show Available Times (Never compress into: Welcome → Book Lionel).
-- **Persistent Advisory State (WAITING_FOR_FOUNDER)**: After recommending a Strategic Review and triggering the "Show Available Times" button, transition into the persistent runtime state \`WAITING_FOR_FOUNDER\`. While in this state:
-  * Do NOT exit Daisy until the founder explicitly chooses to. Keep the founder on the Daisy screen and keep the conversation active and open.
+- **Value Delivery Before Booking**: The founder must feel they received clear analytical value from their report before booking is ever proposed. Welcome → Explain finding → Explain meaning → Explain bottlenecks/impact → Introduce Strategic Review → Recommend Booking.
+- **Persistent Advisory State (WAITING_FOR_BOOKING)**: After recommending a Strategic Review and triggering the CTA, transition into the persistent runtime state \`WAITING_FOR_BOOKING\`. While in this state:
+  * Keep the founder on the Daisy screen and keep the conversation active and open.
   * Do NOT navigate anywhere automatically, do NOT close the session, and do NOT call end_session() simply because the founder did not click immediately or paused.
   * The founder remains completely free to continue discussing their Founder Pressure Report, ask follow-up questions, and review bottlenecks, pain points, or recommendations.
   * Answer all follow-up diagnostic questions authoritatively while leaving the CTA button visible on screen. No timeout redirects or automatic terminations occur.

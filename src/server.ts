@@ -28,7 +28,7 @@ const ALLOWED_ORIGINS = [
 
 // Allow localhost only in development
 if (process.env.NODE_ENV !== 'production') {
-  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000');
+  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:8080');
 }
 
 const corsOptions: cors.CorsOptions = {
@@ -80,9 +80,19 @@ io.on('connection', (socket) => {
 
 app.set('io', io);
 
-app.use(cors(corsOptions));
-app.use(express.json());
+import { checkoutRouter } from './api/routes/checkout';
 
+app.use(cors(corsOptions));
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
+app.use('/api', checkoutRouter);
+app.use('/api/v1', checkoutRouter);
 app.use('/api/v1', apiRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
