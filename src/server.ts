@@ -22,9 +22,17 @@ const ALLOWED_ORIGINS = [
   'https://leadersperformance.ae',
   'https://www.leadersperformance.ae',
   'https://api.leadersperformance.ae',
+  'https://srv826934.hstgr.cloud',
   'https://elevenlabs.io',
   'https://api.elevenlabs.io',
 ];
+
+if (process.env.FRONTEND_URL) {
+  const customFrontend = process.env.FRONTEND_URL.replace(/\/$/, '');
+  if (!ALLOWED_ORIGINS.includes(customFrontend)) {
+    ALLOWED_ORIGINS.push(customFrontend);
+  }
+}
 
 // Allow localhost only in development
 if (process.env.NODE_ENV !== 'production') {
