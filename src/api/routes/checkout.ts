@@ -31,6 +31,17 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
     const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
     const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
 
+    // Allow caller to pass returnPath ('/knowledge' or '/lionel')
+    const rawReturnPath = req.body?.returnPath || req.body?.source;
+    let returnPath = '/lionel';
+    if (typeof rawReturnPath === 'string') {
+      if (rawReturnPath.includes('knowledge')) {
+        returnPath = '/knowledge';
+      } else if (rawReturnPath.includes('lionel')) {
+        returnPath = '/lionel';
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [
@@ -39,11 +50,12 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
           quantity: 1,
         },
       ],
-      success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${frontendUrl}/lionel`,
+      success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&from=${encodeURIComponent(returnPath)}`,
+      cancel_url: `${frontendUrl}${returnPath}`,
       metadata: {
         product: 'Reset by Discipline',
         author: 'Lionel Eersteling',
+        returnPath,
       },
     });
 
@@ -100,6 +112,7 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
 
     res.status(200).json({
       status: isPaid ? 'paid' : session.payment_status || 'pending',
+      returnPath: session.metadata?.returnPath || null,
     });
   } catch (error: any) {
     console.error('[Stripe] Error checking payment status:', error?.message || error);
