@@ -202,3 +202,87 @@ checkoutRouter.post('/stripe/webhook', async (req: Request, res: Response): Prom
 
   res.status(200).json({ received: true });
 });
+
+/**
+ * TODO: TEMPORARY ENDPOINT - MUST BE REMOVED AFTER RETRIEVING THE PRICE IDS.
+ * GET /api/stripe/products
+ * Read-only endpoint to retrieve all active Stripe products and their associated active Price IDs.
+ * Handles Stripe pagination and only returns active products and their active prices.
+ */
+checkoutRouter.get('/stripe/products', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const stripe = getStripeInstance();
+
+    // Retrieve all active products handling pagination
+    const products: Stripe.Product[] = [];
+    for await (const product of stripe.products.list({ active: true, limit: 100 })) {
+      products.push(product);
+    }
+
+    // Retrieve all active prices handling pagination
+    const prices: Stripe.Price[] = [];
+    for await (const price of stripe.prices.list({ active: true, limit: 100 })) {
+      prices.push(price);
+    }
+
+    // Group active prices by productId
+    const pricesByProductId = new Map<string, Array<{
+      priceId: string;
+      currency: string;
+      amount: number | null;
+      type: string;
+      active: boolean;
+      recurring?: {
+        interval: string;
+        intervalCount: number;
+      };
+    }>>();
+
+    for (const price of prices) {
+      const productId = typeof price.product === 'string' ? price.product : price.product?.id;
+      if (!productId) continue;
+
+      const priceData: {
+        priceId: string;
+        currency: string;
+        amount: number | null;
+        type: string;
+        active: boolean;
+        recurring?: {
+          interval: string;
+          intervalCount: number;
+        };
+      } = {
+        priceId: price.id,
+        currency: price.currency,
+        amount: price.unit_amount,
+        type: price.type,
+        active: price.active,
+      };
+
+      if (price.type === 'recurring' && price.recurring) {
+        priceData.recurring = {
+          interval: price.recurring.interval,
+          intervalCount: price.recurring.interval_count,
+        };
+      }
+
+      if (!pricesByProductId.has(productId)) {
+        pricesByProductId.set(productId, []);
+      }
+      pricesByProductId.get(productId)!.push(priceData);
+    }
+
+    const formattedProducts = products.map((product) => ({
+      productId: product.id,
+      name: product.name,
+      description: product.description,
+      prices: pricesByProductId.get(product.id) || [],
+    }));
+
+    res.status(200).json({ products: formattedProducts });
+  } catch (error: any) {
+    console.error('[Stripe] Error fetching products:', error?.message || error);
+    res.status(500).json({ error: error?.message || 'Failed to fetch Stripe products' });
+  }
+});
