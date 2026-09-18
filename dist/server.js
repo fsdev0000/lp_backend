@@ -23,9 +23,16 @@ const ALLOWED_ORIGINS = [
     'https://leadersperformance.ae',
     'https://www.leadersperformance.ae',
     'https://api.leadersperformance.ae',
+    'https://srv826934.hstgr.cloud',
     'https://elevenlabs.io',
     'https://api.elevenlabs.io',
 ];
+if (process.env.FRONTEND_URL) {
+    const customFrontend = process.env.FRONTEND_URL.replace(/\/$/, '');
+    if (!ALLOWED_ORIGINS.includes(customFrontend)) {
+        ALLOWED_ORIGINS.push(customFrontend);
+    }
+}
 // Allow localhost only in development
 if (process.env.NODE_ENV !== 'production') {
     ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:8080');
@@ -76,6 +83,7 @@ exports.io.on('connection', (socket) => {
 });
 app.set('io', exports.io);
 const checkout_1 = require("./api/routes/checkout");
+const contact_1 = require("./api/routes/contact");
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({
     verify: (req, _res, buf) => {
@@ -84,6 +92,8 @@ app.use(express_1.default.json({
 }));
 app.use('/api', checkout_1.checkoutRouter);
 app.use('/api/v1', checkout_1.checkoutRouter);
+app.use('/api', contact_1.contactRouter);
+app.use('/api/v1', contact_1.contactRouter);
 app.use('/api/v1', routes_1.apiRoutes);
 app.use('/api-docs', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec));
 app.get('/health', (req, res) => {

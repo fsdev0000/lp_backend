@@ -89,6 +89,7 @@ io.on('connection', (socket) => {
 app.set('io', io);
 
 import { checkoutRouter } from './api/routes/checkout';
+import { contactRouter } from './api/routes/contact';
 
 app.use(cors(corsOptions));
 app.use(
@@ -101,6 +102,8 @@ app.use(
 
 app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);
+app.use('/api', contactRouter);
+app.use('/api/v1', contactRouter);
 app.use('/api/v1', apiRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 

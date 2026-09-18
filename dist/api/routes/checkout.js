@@ -30,7 +30,19 @@ exports.checkoutRouter.post('/create-checkout', async (req, res) => {
             return;
         }
         const stripe = getStripeInstance();
-        const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
+        const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
+        const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
+        // Allow caller to pass returnPath ('/knowledge' or '/lionel')
+        const rawReturnPath = req.body?.returnPath || req.body?.source;
+        let returnPath = '/lionel';
+        if (typeof rawReturnPath === 'string') {
+            if (rawReturnPath.includes('knowledge')) {
+                returnPath = '/knowledge';
+            }
+            else if (rawReturnPath.includes('lionel')) {
+                returnPath = '/lionel';
+            }
+        }
         const session = await stripe.checkout.sessions.create({
             mode: 'payment',
             line_items: [
@@ -39,11 +51,12 @@ exports.checkoutRouter.post('/create-checkout', async (req, res) => {
                     quantity: 1,
                 },
             ],
-            success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${frontendUrl}/lionel`,
+            success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&from=${encodeURIComponent(returnPath)}`,
+            cancel_url: `${frontendUrl}${returnPath}`,
             metadata: {
                 product: 'Reset by Discipline',
                 author: 'Lionel Eersteling',
+                returnPath,
             },
         });
         if (!session.url) {
@@ -89,6 +102,7 @@ exports.checkoutRouter.get('/payment-status', async (req, res) => {
         }
         res.status(200).json({
             status: isPaid ? 'paid' : session.payment_status || 'pending',
+            returnPath: session.metadata?.returnPath || null,
         });
     }
     catch (error) {
@@ -175,4 +189,60 @@ exports.checkoutRouter.post('/stripe/webhook', async (req, res) => {
         console.log(`[Stripe Webhook] Checkout completed for session ${session.id}. Payment status: ${session.payment_status}`);
     }
     res.status(200).json({ received: true });
+});
+/**
+ * TODO: TEMPORARY ENDPOINT - MUST BE REMOVED AFTER RETRIEVING THE PRICE IDS.
+ * GET /api/stripe/products
+ * Read-only endpoint to retrieve all active Stripe products and their associated active Price IDs.
+ * Handles Stripe pagination and only returns active products and their active prices.
+ */
+exports.checkoutRouter.get('/stripe/products', async (_req, res) => {
+    try {
+        const stripe = getStripeInstance();
+        // Retrieve all active products handling pagination
+        const products = [];
+        for await (const product of stripe.products.list({ active: true, limit: 100 })) {
+            products.push(product);
+        }
+        // Retrieve all active prices handling pagination
+        const prices = [];
+        for await (const price of stripe.prices.list({ active: true, limit: 100 })) {
+            prices.push(price);
+        }
+        // Group active prices by productId
+        const pricesByProductId = new Map();
+        for (const price of prices) {
+            const productId = typeof price.product === 'string' ? price.product : price.product?.id;
+            if (!productId)
+                continue;
+            const priceData = {
+                priceId: price.id,
+                currency: price.currency,
+                amount: price.unit_amount,
+                type: price.type,
+                active: price.active,
+            };
+            if (price.type === 'recurring' && price.recurring) {
+                priceData.recurring = {
+                    interval: price.recurring.interval,
+                    intervalCount: price.recurring.interval_count,
+                };
+            }
+            if (!pricesByProductId.has(productId)) {
+                pricesByProductId.set(productId, []);
+            }
+            pricesByProductId.get(productId).push(priceData);
+        }
+        const formattedProducts = products.map((product) => ({
+            productId: product.id,
+            name: product.name,
+            description: product.description,
+            prices: pricesByProductId.get(product.id) || [],
+        }));
+        res.status(200).json({ products: formattedProducts });
+    }
+    catch (error) {
+        console.error('[Stripe] Error fetching products:', error?.message || error);
+        res.status(500).json({ error: error?.message || 'Failed to fetch Stripe products' });
+    }
 });
