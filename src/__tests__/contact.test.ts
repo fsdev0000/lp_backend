@@ -95,11 +95,11 @@ describe('Contact Us API', () => {
       expect(res.body.error).toBe('Please provide your role or title.');
     });
 
-    it('should reject requests with missing preferred contact method', async () => {
+    it('should reject requests with first name containing numbers or symbols', async () => {
       const res = await request(app)
         .post('/api/contact')
         .send({
-          first_name: 'John',
+          first_name: 'John123',
           last_name: 'Doe',
           company: 'Acme Corp',
           role: 'CEO',
@@ -108,7 +108,55 @@ describe('Contact Us API', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Please select your preferred contact method.');
+      expect(res.body.error).toBe('First name can only contain letters, spaces, hyphens, and apostrophes.');
+    });
+
+    it('should reject requests with first name under 2 characters', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'J',
+          last_name: 'Doe',
+          company: 'Acme Corp',
+          role: 'CEO',
+          email: 'john@example.com',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('First name must be at least 2 characters.');
+    });
+
+    it('should reject requests with missing last name', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'John',
+          company: 'Acme Corp',
+          role: 'CEO',
+          email: 'john@example.com',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Please provide your last name.');
+    });
+
+    it('should reject requests with invalid phone characters', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'John',
+          last_name: 'Doe',
+          company: 'Acme Corp',
+          role: 'CEO',
+          email: 'john@example.com',
+          phone: 'abc-not-phone',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Please provide a valid phone number (e.g. +971 50 123 4567).');
     });
 
     it('should reject requests with invalid preferred contact method', async () => {
@@ -137,8 +185,9 @@ describe('Contact Us API', () => {
     });
 
     it('should accept snake_case payload and process successfully', async () => {
-      const mockFetch = jest.fn().mockImplementation((url: string) => {
-        if (url.includes('/contacts/upsert')) {
+      const mockFetch = jest.fn<any>().mockImplementation((url: any) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/contacts/upsert')) {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({ contact: { id: 'mock-contact-123' } }),
@@ -174,8 +223,9 @@ describe('Contact Us API', () => {
     });
 
     it('should accept camelCase payload (from React frontend form) and process successfully', async () => {
-      const mockFetch = jest.fn().mockImplementation((url: string) => {
-        if (url.includes('/contacts/upsert')) {
+      const mockFetch = jest.fn<any>().mockImplementation((url: any) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/contacts/upsert')) {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({ contact: { id: 'mock-contact-456' } }),

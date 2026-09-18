@@ -124,10 +124,7 @@ function validatePayload(payload) {
     if (message.length > 1000)
         return 'Description cannot exceed 1,000 characters.';
     const validMethods = ['Email', 'Phone', 'WhatsApp', 'Phone or WhatsApp'];
-    if (!payload.preferred_contact_method) {
-        return 'Please select your preferred contact method.';
-    }
-    if (!validMethods.includes(payload.preferred_contact_method)) {
+    if (payload.preferred_contact_method && !validMethods.includes(payload.preferred_contact_method)) {
         return 'Please select a valid preferred contact method.';
     }
     return null;
