@@ -130,7 +130,10 @@ function validatePayload(payload: ContactPayload): string | null {
   if (message.length > 1000) return 'Description cannot exceed 1,000 characters.';
 
   const validMethods = ['Email', 'Phone', 'WhatsApp', 'Phone or WhatsApp'];
-  if (payload.preferred_contact_method && !validMethods.includes(payload.preferred_contact_method)) {
+  if (!payload.preferred_contact_method) {
+    return 'Please select your preferred contact method.';
+  }
+  if (!validMethods.includes(payload.preferred_contact_method)) {
     return 'Please select a valid preferred contact method.';
   }
 
@@ -402,7 +405,11 @@ async function handleContact(req: Request, res: Response): Promise<void> {
     const contactId = await upsertGHLContact(payload, config);
 
     // 2. Send internal email notification
-    await sendInternalNotificationEmail(payload, config);
+    try {
+      await sendInternalNotificationEmail(payload, config);
+    } catch (notifErr) {
+      console.warn('[Contact Us] Internal notification email error (contact was saved):', notifErr);
+    }
 
     // Return success response
     res.status(200).json({ success: true, contactId });

@@ -1,3 +1,4 @@
+import { describe, it, expect, afterAll, jest } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import { consentRoutes } from '../api/routes/consent';

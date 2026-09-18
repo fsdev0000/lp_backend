@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import { contactRouter } from '../api/routes/contact';
@@ -62,7 +63,39 @@ describe('Contact Us API', () => {
       expect(res.body.error).toBe('Description must be at least 10 characters.');
     });
 
-    it('should reject invalid phone characters', async () => {
+    it('should reject requests with missing company', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'John',
+          last_name: 'Doe',
+          role: 'CEO',
+          email: 'john@example.com',
+          preferred_contact_method: 'Email',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Please provide your company or organisation.');
+    });
+
+    it('should reject requests with missing role', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'John',
+          last_name: 'Doe',
+          company: 'Acme Corp',
+          email: 'john@example.com',
+          preferred_contact_method: 'Email',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Please provide your role or title.');
+    });
+
+    it('should reject requests with missing preferred contact method', async () => {
       const res = await request(app)
         .post('/api/contact')
         .send({
@@ -71,12 +104,28 @@ describe('Contact Us API', () => {
           company: 'Acme Corp',
           role: 'CEO',
           email: 'john@example.com',
-          phone: 'abc-not-phone',
           message: 'This is a valid enquiry message for testing.',
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Please provide a valid phone number');
+      expect(res.body.error).toBe('Please select your preferred contact method.');
+    });
+
+    it('should reject requests with invalid preferred contact method', async () => {
+      const res = await request(app)
+        .post('/api/contact')
+        .send({
+          first_name: 'John',
+          last_name: 'Doe',
+          company: 'Acme Corp',
+          role: 'CEO',
+          email: 'john@example.com',
+          preferred_contact_method: 'Telegram',
+          message: 'This is a valid enquiry message for testing.',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Please select a valid preferred contact method.');
     });
   });
 
