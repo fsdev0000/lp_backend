@@ -24,10 +24,10 @@ async function getOpenAI() {
   if (openaiClient) return openaiClient;
   const key = await getSecret('OPENAI_API_KEY') || await getSecret('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
   if (key) {
-      openaiClient = new OpenAI({ 
-          apiKey: key,
-          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
-      });
+    openaiClient = new OpenAI({
+      apiKey: key,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    });
   }
   return openaiClient;
 }
@@ -99,7 +99,7 @@ apiRoutes.post('/voice/transcribe', upload.single('audio'), async (req, res) => 
     });
 
     const json = await response.json();
-    
+
     if (json.error) {
       console.error('Gemini API Error:', json.error);
       return res.status(500).json({ error: 'Transcription failed via Gemini' });
@@ -332,7 +332,7 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
       where: { id: sessionId },
       include: { founder: true }
     });
-    
+
     if (!transcript) {
       return res.status(404).json({ error: 'Session not found' });
     }
@@ -365,7 +365,7 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
 apiRoutes.post('/assessments/submit', async (req, res) => {
   try {
     const { founder, answers } = req.body;
-    
+
     if (!founder || !answers || !Array.isArray(answers)) {
       return res.status(400).json({ error: 'Invalid payload' });
     }
@@ -373,14 +373,14 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
     // Calculate score
     const totalScore = answers.reduce((a, b) => a + (b || 0), 0);
     const overallScore = answers.length > 0 ? totalScore / answers.length : 0;
-    
+
     let tier = 'Strong';
     if (overallScore > 3) tier = 'Critical';
     else if (overallScore > 2) tier = 'Moderate';
 
     // Figure out primary focus based on domain averages
     const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
-    
+
     const domainScores: Record<string, { sum: number; n: number }> = {};
     questions.forEach((q, i) => {
       const val = answers[i] || 0;
@@ -407,7 +407,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
       'Leadership': { opp: 'Leadership Autonomy', q: 'Does your leadership team own their outcomes fully?' },
       'Growth': { opp: 'Scalable Growth Infrastructure', q: 'Is the business scaling efficiently with the current infrastructure?' }
     };
-    
+
     const insight = insights[primaryFocus] || { opp: 'Overall Alignment', q: 'What is the biggest operational constraint today?' };
 
     // Upsert Founder
@@ -460,66 +460,67 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
       }
     });
 
-    // --- GHL & Email Integration ---
+    // --- GHL & Email Integration (Asynchronous / Non-blocking) ---
     if (founder.email) {
-      try {
-        const contactId = await upsertContact({
-          email: founder.email,
-          firstName: founder.founder || founder.name,
-          phone: founder.phone,
-          tags: ['Founder Pressure Scan']
-        });
-
-        if (contactId) {
-          await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-          
-          // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
-          const lionelContactId = await upsertContact({ 
-            email: 'lionel@leadersperformance.ae', 
-            firstName: 'Lionel', 
-            lastName: 'Eersteling', 
-            tags: ['lp-staff'] 
-          });
-          const infoContactId = await upsertContact({ 
-            email: 'info@leadersperformance.ae', 
-            firstName: 'Leaders', 
-            lastName: 'Performance', 
-            tags: ['lp-staff'] 
-          });
-          
-          await sendAdminBriefing({
-            name: founder.founder || founder.name,
+      (async () => {
+        try {
+          const contactId = await upsertContact({
             email: founder.email,
-            score: Math.round((overallScore / 4) * 100),
-            tier,
-            company: founder.company,
+            firstName: founder.founder || founder.name,
             phone: founder.phone,
-            primary_focus: primaryFocus,
-            focus_area: primaryFocus,
-            greatest_opportunity: insight.opp,
-            opening_question: insight.q
-          }, [lionelContactId, infoContactId]);
+            tags: ['Founder Pressure Scan']
+          });
+
+          if (contactId) {
+            await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
+
+            // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
+            const lionelContactId = await upsertContact({
+              email: 'lionel@leadersperformance.ae',
+              firstName: 'Lionel',
+              lastName: 'Eersteling',
+              tags: ['lp-staff']
+            });
+            const infoContactId = await upsertContact({
+              email: 'info@leadersperformance.ae',
+              firstName: 'Leaders',
+              lastName: 'Performance',
+              tags: ['lp-staff']
+            });
+
+            await sendAdminBriefing({
+              name: founder.founder || founder.name,
+              email: founder.email,
+              score: Math.round((overallScore / 4) * 100),
+              tier,
+              company: founder.company,
+              phone: founder.phone,
+              primary_focus: primaryFocus,
+              focus_area: primaryFocus,
+              greatest_opportunity: insight.opp,
+              opening_question: insight.q
+            }, [lionelContactId, infoContactId]);
+          }
+        } catch (ghlError) {
+          console.error('GHL integration failed (non-fatal):', ghlError);
         }
-      } catch (ghlError) {
-        console.error('GHL integration failed (non-fatal):', ghlError);
       }
-    }
     // ---------------------------------
 
     await prisma.systemLog.create({
-      data: {
-        level: 'info',
-        action: 'ASSESSMENT_SCORED',
-        details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
-      }
-    });
+        data: {
+          level: 'info',
+          action: 'ASSESSMENT_SCORED',
+          details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
+        }
+      });
 
-    res.status(201).json({ message: 'Assessment submitted successfully', id: assessment.id, sessionId: transcript.id });
-  } catch (error) {
-    console.error('Error submitting assessment:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
+      res.status(201).json({ message: 'Assessment submitted successfully', id: assessment.id, sessionId: transcript.id });
+    } catch (error) {
+      console.error('Error submitting assessment:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
 
 /**
  * @openapi
@@ -555,7 +556,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
 apiRoutes.post('/chat/init', async (req, res) => {
   try {
     const { founder } = req.body;
-    
+
     let founderRecord;
     if (founder.email) {
       founderRecord = await prisma.founder.upsert({
@@ -565,7 +566,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         },
         create: {
           email: founder.email,
@@ -573,7 +573,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         }
       });
     } else {
@@ -583,7 +582,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         }
       });
     }
@@ -625,14 +623,14 @@ apiRoutes.post('/chat/init', async (req, res) => {
  */
 apiRoutes.post('/chat/message', async (req, res) => {
   const { sessionId, message } = req.body;
-  
+
   if (!sessionId) {
     return res.status(400).json({ error: 'sessionId is required' });
   }
 
   try {
     const aiResponse = await handleConversationTurn(sessionId, message || req.body.text);
-    
+
     return res.json(aiResponse);
   } catch (e) {
     console.error('Chat Error:', e);
@@ -666,7 +664,7 @@ apiRoutes.get('/voice/state', (req, res) => {
   if (!sessionId) {
     return res.status(400).json({ error: 'sessionId required' });
   }
-  
+
   const sessionState = runtimeManager.getOrCreateSession(sessionId);
   if (!sessionState) {
     return res.status(404).json({ error: 'Session state not found' });
@@ -720,7 +718,7 @@ apiRoutes.post('/voice/token', async (req, res) => {
     }
 
     const data = await response.json();
-    
+
     // Generate prompt and runtime variables if sessionId is provided
     let systemPrompt = "";
     let firstMessage = "";
@@ -729,7 +727,7 @@ apiRoutes.post('/voice/token', async (req, res) => {
       try {
         const transcript = await prisma.transcript.findUnique({
           where: { id: req.body.sessionId },
-          include: { 
+          include: {
             founder: {
               include: {
                 assessments: {
@@ -737,10 +735,10 @@ apiRoutes.post('/voice/token', async (req, res) => {
                   take: 1
                 }
               }
-            } 
+            }
           }
         });
-        
+
         if (transcript) {
           const latestAssessment = (transcript.founder as any)?.assessments?.[0];
           const primaryArea = latestAssessment?.primaryFocus || latestAssessment?.focusArea || 'Founder Dependency';
@@ -776,11 +774,11 @@ apiRoutes.post('/voice/token', async (req, res) => {
         console.error("Failed to generate custom prompt:", err);
       }
     }
-    
+
     // If no sessionId or error, fallback to un-guessed greeting and default variables
     if (!systemPrompt) {
-      const fallbackCtx = { 
-        lead_name: 'Founder', 
+      const fallbackCtx = {
+        lead_name: 'Founder',
         company: 'your company',
         primaryPressureArea: 'Founder Dependency',
         primary_pressure_area: 'Founder Dependency',
@@ -838,7 +836,7 @@ apiRoutes.post('/voice/tts', async (req, res) => {
     if (!text) return res.status(400).json({ error: 'text is required' });
 
     // Use voice ID from vault if available, otherwise default to a standard voice
-    const voiceId = await getSecret('ELEVENLABS_VOICE_ID') || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; 
+    const voiceId = await getSecret('ELEVENLABS_VOICE_ID') || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
 
     const elevenlabs = await getElevenLabs();
     if (!elevenlabs) {
@@ -850,7 +848,7 @@ apiRoutes.post('/voice/tts', async (req, res) => {
       model_id: "eleven_turbo_v2",
       output_format: "mp3_44100_128"
     });
-    
+
     // Write the audio stream to the response
     res.setHeader('Content-Type', 'audio/mpeg');
     for await (const chunk of audioStream) {
@@ -892,7 +890,7 @@ apiRoutes.post('/voice/tts', async (req, res) => {
  */
 apiRoutes.post('/booking/schedule', async (req, res) => {
   const { email, date, time, timezone, name, phone } = req.body;
-  
+
   if (!email || !date || !time) {
     return res.status(400).json({ error: 'Missing required booking fields' });
   }
@@ -900,7 +898,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
   try {
     const founderRecord = await prisma.founder.upsert({
       where: { email },
-      update: {}, 
+      update: {},
       create: { email, name: name || 'Unknown', phone: phone || '' }
     });
 
@@ -1005,7 +1003,7 @@ apiRoutes.get('/bookings/availability/month', async (req, res) => {
     const year = parseInt(req.query.year as string);
     const month = parseInt(req.query.month as string); // 1-12
     if (!year || !month) return res.status(400).json({ error: 'Year and month required' });
-    
+
     const availability = await getMonthAvailability(year, month);
     res.status(200).json(availability);
   } catch (error) {

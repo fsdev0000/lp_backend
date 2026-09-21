@@ -372,7 +372,12 @@ async function handleContact(req, res) {
         // 1. Upsert contact in GoHighLevel
         const contactId = await upsertGHLContact(payload, config);
         // 2. Send internal email notification
-        await sendInternalNotificationEmail(payload, config);
+        try {
+            await sendInternalNotificationEmail(payload, config);
+        }
+        catch (notifErr) {
+            console.warn('[Contact Us] Internal notification email error (contact was saved):', notifErr);
+        }
         // Return success response
         res.status(200).json({ success: true, contactId });
     }

@@ -438,6 +438,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
                 founderId: founderRecord.id
             }
         });
+
         // --- GHL & Email Integration ---
         if (founder.email) {
             try {
@@ -449,19 +450,14 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
                 });
                 if (contactId) {
                     await (0, ghl_1.createOpportunity)(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-                    // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
-                    const lionelContactId = await (0, ghl_1.upsertContact)({
-                        email: 'lionel@leadersperformance.ae',
-                        firstName: 'Lionel',
-                        lastName: 'Eersteling',
-                        tags: ['lp-staff']
+                    await (0, email_1.sendAssessmentEmail)(contactId, {
+                        tier,
+                        firstName: founder.founder || founder.name,
+                        score: Math.round((overallScore / 4) * 100),
+                        sessionId: transcript.id,
                     });
-                    const infoContactId = await (0, ghl_1.upsertContact)({
-                        email: 'info@leadersperformance.ae',
-                        firstName: 'Leaders',
-                        lastName: 'Performance',
-                        tags: ['lp-staff']
-                    });
+                    const admin1Id = await (0, ghl_1.upsertContact)({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+                    const admin2Id = await (0, ghl_1.upsertContact)({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
                     await (0, email_1.sendAdminBriefing)({
                         name: founder.founder || founder.name,
                         email: founder.email,
@@ -473,7 +469,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
                         focus_area: primaryFocus,
                         greatest_opportunity: insight.opp,
                         opening_question: insight.q
-                    }, [lionelContactId, infoContactId]);
+                    }, [admin1Id, admin2Id]);
                 }
             }
             catch (ghlError) {
