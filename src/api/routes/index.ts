@@ -563,7 +563,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         },
         create: {
           email: founder.email,
@@ -571,7 +570,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         }
       });
     } else {
@@ -581,7 +579,6 @@ apiRoutes.post('/chat/init', async (req, res) => {
           phone: founder.phone,
           companyName: founder.company,
           revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
         }
       });
     }
