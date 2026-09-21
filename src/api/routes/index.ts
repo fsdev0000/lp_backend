@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
-import { sendAssessmentEmail, sendAdminBriefing } from '../../services/email';
+import { sendAdminBriefing } from '../../services/email';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
 import OpenAI from 'openai';
@@ -473,15 +473,19 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
         if (contactId) {
           await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
           
-          await sendAssessmentEmail(contactId, {
-            tier,
-            firstName: founder.founder || founder.name,
-            score: Math.round((overallScore / 4) * 100),
-            sessionId: transcript.id,
+          // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
+          const lionelContactId = await upsertContact({ 
+            email: 'lionel@leadersperformance.ae', 
+            firstName: 'Lionel', 
+            lastName: 'Eersteling', 
+            tags: ['lp-staff'] 
           });
-
-          const admin1Id = await upsertContact({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-          const admin2Id = await upsertContact({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+          const infoContactId = await upsertContact({ 
+            email: 'info@leadersperformance.ae', 
+            firstName: 'Leaders', 
+            lastName: 'Performance', 
+            tags: ['lp-staff'] 
+          });
           
           await sendAdminBriefing({
             name: founder.founder || founder.name,
@@ -494,7 +498,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
             focus_area: primaryFocus,
             greatest_opportunity: insight.opp,
             opening_question: insight.q
-          }, [admin1Id, admin2Id]);
+          }, [lionelContactId, infoContactId]);
         }
       } catch (ghlError) {
         console.error('GHL integration failed (non-fatal):', ghlError);

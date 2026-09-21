@@ -12,7 +12,7 @@ const swagger_1 = require("./config/swagger");
 const routes_1 = require("./api/routes");
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
-dotenv_1.default.config();
+dotenv_1.default.config(); // Reload env configuration
 const ws_1 = require("ws");
 const llm_1 = require("./api/routes/llm");
 const app = (0, express_1.default)();

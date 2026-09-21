@@ -8,7 +8,7 @@ import { apiRoutes } from './api/routes';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 
-dotenv.config();
+dotenv.config(); // Reload env configuration
 
 import { WebSocketServer } from 'ws';
 import { setupLlmWebSocket } from './api/routes/llm';
