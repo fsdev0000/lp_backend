@@ -460,51 +460,50 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
       }
     });
 
-    // --- GHL & Email Integration (Asynchronous / Non-blocking) ---
+    // --- GHL & Email Integration ---
     if (founder.email) {
-      (async () => {
-        try {
-          const contactId = await upsertContact({
-            email: founder.email,
-            firstName: founder.founder || founder.name,
-            phone: founder.phone,
-            tags: ['Founder Pressure Scan']
+      try {
+        const contactId = await upsertContact({
+          email: founder.email,
+          firstName: founder.founder || founder.name,
+          phone: founder.phone,
+          tags: ['Founder Pressure Scan']
+        });
+
+        if (contactId) {
+          await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
+
+          // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
+          const lionelContactId = await upsertContact({
+            email: 'lionel@leadersperformance.ae',
+            firstName: 'Lionel',
+            lastName: 'Eersteling',
+            tags: ['lp-staff']
+          });
+          const infoContactId = await upsertContact({
+            email: 'info@leadersperformance.ae',
+            firstName: 'Leaders',
+            lastName: 'Performance',
+            tags: ['lp-staff']
           });
 
-          if (contactId) {
-            await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-
-            // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
-            const lionelContactId = await upsertContact({
-              email: 'lionel@leadersperformance.ae',
-              firstName: 'Lionel',
-              lastName: 'Eersteling',
-              tags: ['lp-staff']
-            });
-            const infoContactId = await upsertContact({
-              email: 'info@leadersperformance.ae',
-              firstName: 'Leaders',
-              lastName: 'Performance',
-              tags: ['lp-staff']
-            });
-
-            await sendAdminBriefing({
-              name: founder.founder || founder.name,
-              email: founder.email,
-              score: Math.round((overallScore / 4) * 100),
-              tier,
-              company: founder.company,
-              phone: founder.phone,
-              primary_focus: primaryFocus,
-              focus_area: primaryFocus,
-              greatest_opportunity: insight.opp,
-              opening_question: insight.q
-            }, [lionelContactId, infoContactId]);
-          }
-        } catch (ghlError) {
-          console.error('GHL integration failed (non-fatal):', ghlError);
+          await sendAdminBriefing({
+            name: founder.founder || founder.name,
+            email: founder.email,
+            score: Math.round((overallScore / 4) * 100),
+            tier,
+            company: founder.company,
+            phone: founder.phone,
+            primary_focus: primaryFocus,
+            focus_area: primaryFocus,
+            greatest_opportunity: insight.opp,
+            opening_question: insight.q
+          }, [lionelContactId, infoContactId]);
         }
+      } catch (ghlError) {
+        console.error('GHL integration failed (non-fatal):', ghlError);
       }
+    }
     // ---------------------------------
 
     await prisma.systemLog.create({
