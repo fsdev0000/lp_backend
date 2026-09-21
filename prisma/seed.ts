@@ -4,33 +4,34 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const defaultQuestions = [
-  { domain: "Founder Pressure", text: "The business still requires my direct involvement to maintain momentum." },
-  { domain: "Decision Load", text: "Too many operational decisions still escalate to me before the team can move forward." },
-  { domain: "Execution Cadence", text: "Execution slows down when I am not actively involved." },
-  { domain: "Leadership Alignment", text: "The leadership team needs my constant direction to stay aligned." },
-  { domain: "Operational Resilience", text: "My current operating rhythm is difficult to sustain at the next stage of growth." },
-  { domain: "Decision Load", text: "Key decisions often wait for my approval before progress continues." },
-  { domain: "Execution Cadence", text: "The team's execution rhythm becomes inconsistent when I step back." },
-  { domain: "Leadership Alignment", text: "Operational pressure increases when multiple teams depend on my direction at the same time." },
-  { domain: "Operational Resilience", text: "Decision quality declines when operational pressure accumulates over time." },
-  { domain: "Founder Pressure", text: "Sustaining current momentum requires more of my personal capacity than the business should demand." },
+  { domain: "Founder Involvement", text: "How often does day-to-day progress depend on your direct involvement?" },
+  { domain: "Decision Load", text: "How often can the business maintain momentum when you step back?" },
+  { domain: "Execution Cadence", text: "How often do important decisions wait for your approval before work can continue?" },
+  { domain: "Leadership Alignment", text: "How often are decisions resolved at the appropriate level without being escalated to you?" },
+  { domain: "Operational Resilience", text: "How consistently are priorities translated into completed actions?" },
+  { domain: "Decision Load", text: "How often do commitments or deadlines slip without your intervention?" },
+  { domain: "Execution Cadence", text: "How consistently do leaders make and own decisions within clear boundaries?" },
+  { domain: "Leadership Alignment", text: "How often do leaders wait for your direction before moving forward?" },
+  { domain: "Operational Resilience", text: "How often can the current operating rhythm absorb additional pressure without losing focus or pace?" },
+  { domain: "Founder Pressure", text: "How often does accumulated operational pressure reduce the quality or speed of decision-making?" },
 ];
 
 const defaultPressureOptions = [
-  { key: "decisions", title: "Decisions keep returning to me", hint: "Founder approval loop" },
-  { key: "execution", title: "Execution is inconsistent", hint: "Cadence or follow-through issue" },
-  { key: "leadership", title: "Leadership ownership is unclear", hint: "Role and decision boundaries" },
-  { key: "growth", title: "Growth is creating operational pressure", hint: "Scale is stressing the system" },
-  { key: "unsure", title: "I'm not sure yet", hint: "Start broadly. The scan will narrow from your answers." },
+  { key: "decisions", title: "Too many decisions still require my involvement", hint: "Progress slows while people wait." },
+  { key: "execution", title: "Execution is inconsistent", hint: "Commitments and deadlines are not reliably met." },
+  { key: "leadership", title: "Leadership ownership is unclear", hint: "Responsibilities exist, but accountability is inconsistent." },
+  { key: "growth", title: "Growth is increasing pressure on people and systems.", hint: "Complexity is rising faster than operating capacity." },
+  { key: "unsure", title: "I’m not sure yet", hint: "The questions will help clarify where the pressure may be coming from." },
 ];
 
 const revenueBands = ["Under €1M", "€1M–€5M", "€5M–€15M", "€15M–€50M", "€50M+"];
 const stages = ["Early-stage", "Growth-stage", "Scale-stage", "Mature"];
 const scaleOptions = [
-  { key: "sd", label: "Strongly Disagree", value: 1 },
-  { key: "d", label: "Disagree", value: 2 },
-  { key: "a", label: "Agree", value: 3 },
-  { key: "sa", label: "Strongly Agree", value: 4 },
+  { key: "never", label: "Never", value: 1 },
+  { key: "rarely", label: "Rarely", value: 2 },
+  { key: "sometimes", label: "Sometimes", value: 3 },
+  { key: "often", label: "Often", value: 4 },
+  { key: "consistently", label: "Consistently", value: 5 },
 ];
 
 async function main() {

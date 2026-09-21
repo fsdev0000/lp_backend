@@ -438,52 +438,63 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
                 founderId: founderRecord.id
             }
         });
-        // --- GHL & Email Integration ---
-        if (founder.email) {
-            try {
-                const contactId = await (0, ghl_1.upsertContact)({
-                    email: founder.email,
-                    firstName: founder.founder || founder.name,
-                    phone: founder.phone,
-                    tags: ['Founder Pressure Scan']
-                });
-                if (contactId) {
-                    await (0, ghl_1.createOpportunity)(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-                    await (0, email_1.sendAssessmentEmail)(contactId, {
-                        tier,
-                        firstName: founder.founder || founder.name,
-                        score: Math.round((overallScore / 4) * 100),
-                        sessionId: transcript.id,
-                    });
-                    const admin1Id = await (0, ghl_1.upsertContact)({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-                    const admin2Id = await (0, ghl_1.upsertContact)({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-                    await (0, email_1.sendAdminBriefing)({
-                        name: founder.founder || founder.name,
-                        email: founder.email,
-                        score: Math.round((overallScore / 4) * 100),
-                        tier,
-                        company: founder.company,
-                        phone: founder.phone,
-                        primary_focus: primaryFocus,
-                        focus_area: primaryFocus,
-                        greatest_opportunity: insight.opp,
-                        opening_question: insight.q
-                    }, [admin1Id, admin2Id]);
-                }
-            }
-            catch (ghlError) {
-                console.error('GHL integration failed (non-fatal):', ghlError);
-            }
-        }
-        // ---------------------------------
-        await prisma.systemLog.create({
-            data: {
-                level: 'info',
-                action: 'ASSESSMENT_SCORED',
-                details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
-            }
+        // Respond immediately to the client so UI transition is instant and smooth
+        res.status(201).json({
+            message: 'Assessment submitted successfully',
+            id: assessment.id,
+            sessionId: transcript.id
         });
-        res.status(201).json({ message: 'Assessment submitted successfully', id: assessment.id, sessionId: transcript.id });
+        // Run external integrations (GHL & Email) in the background without blocking the user
+        if (founder.email) {
+            setImmediate(async () => {
+                try {
+                    const contactId = await (0, ghl_1.upsertContact)({
+                        email: founder.email,
+                        firstName: founder.founder || founder.name,
+                        phone: founder.phone,
+                        tags: ['Founder Pressure Scan']
+                    });
+                    if (contactId) {
+                        await (0, ghl_1.createOpportunity)(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
+                        await (0, email_1.sendAssessmentEmail)(contactId, {
+                            tier,
+                            firstName: founder.founder || founder.name,
+                            score: Math.round((overallScore / 4) * 100),
+                            sessionId: transcript.id,
+                        });
+                        const admin1Id = await (0, ghl_1.upsertContact)({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+                        const admin2Id = await (0, ghl_1.upsertContact)({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+                        await (0, email_1.sendAdminBriefing)({
+                            name: founder.founder || founder.name,
+                            email: founder.email,
+                            score: Math.round((overallScore / 4) * 100),
+                            tier,
+                            company: founder.company,
+                            phone: founder.phone,
+                            primary_focus: primaryFocus,
+                            focus_area: primaryFocus,
+                            greatest_opportunity: insight.opp,
+                            opening_question: insight.q
+                        }, [admin1Id, admin2Id]);
+                    }
+                }
+                catch (ghlError) {
+                    console.error('GHL background integration failed (non-fatal):', ghlError);
+                }
+                try {
+                    await prisma.systemLog.create({
+                        data: {
+                            level: 'info',
+                            action: 'ASSESSMENT_SCORED',
+                            details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
+                        }
+                    });
+                }
+                catch (logErr) {
+                    console.error('Log creation error:', logErr);
+                }
+            });
+        }
     }
     catch (error) {
         console.error('Error submitting assessment:', error);
