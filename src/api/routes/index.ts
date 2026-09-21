@@ -460,45 +460,47 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
       }
     });
 
-    // --- GHL & Email Integration ---
+    // --- GHL & Email Integration (Asynchronous / Non-blocking) ---
     if (founder.email) {
-      try {
-        const contactId = await upsertContact({
-          email: founder.email,
-          firstName: founder.founder || founder.name,
-          phone: founder.phone,
-          tags: ['Founder Pressure Scan']
-        });
-
-        if (contactId) {
-          await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-          
-          await sendAssessmentEmail(contactId, {
-            tier,
+      (async () => {
+        try {
+          const contactId = await upsertContact({
+            email: founder.email,
             firstName: founder.founder || founder.name,
-            score: Math.round((overallScore / 4) * 100),
-            sessionId: transcript.id,
+            phone: founder.phone,
+            tags: ['Founder Pressure Scan']
           });
 
-          const admin1Id = await upsertContact({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-          const admin2Id = await upsertContact({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-          
-          await sendAdminBriefing({
-            name: founder.founder || founder.name,
-            email: founder.email,
-            score: Math.round((overallScore / 4) * 100),
-            tier,
-            company: founder.company,
-            phone: founder.phone,
-            primary_focus: primaryFocus,
-            focus_area: primaryFocus,
-            greatest_opportunity: insight.opp,
-            opening_question: insight.q
-          }, [admin1Id, admin2Id]);
+          if (contactId) {
+            await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
+            
+            await sendAssessmentEmail(contactId, {
+              tier,
+              firstName: founder.founder || founder.name,
+              score: Math.round((overallScore / 4) * 100),
+              sessionId: transcript.id,
+            });
+
+            const admin1Id = await upsertContact({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+            const admin2Id = await upsertContact({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
+            
+            await sendAdminBriefing({
+              name: founder.founder || founder.name,
+              email: founder.email,
+              score: Math.round((overallScore / 4) * 100),
+              tier,
+              company: founder.company,
+              phone: founder.phone,
+              primary_focus: primaryFocus,
+              focus_area: primaryFocus,
+              greatest_opportunity: insight.opp,
+              opening_question: insight.q
+            }, [admin1Id, admin2Id]);
+          }
+        } catch (ghlError) {
+          console.error('GHL integration failed (non-fatal):', ghlError);
         }
-      } catch (ghlError) {
-        console.error('GHL integration failed (non-fatal):', ghlError);
-      }
+      })();
     }
     // ---------------------------------
 
