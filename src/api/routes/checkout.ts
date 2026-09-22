@@ -31,14 +31,14 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
     const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
     const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
 
-    // Allow caller to pass returnPath ('/knowledge' or '/lionel')
+    // Allow caller to pass returnPath ('/knowledge' or '/meetlionel')
     const rawReturnPath = req.body?.returnPath || req.body?.source;
-    let returnPath = '/lionel';
+    let returnPath = '/meetlionel';
     if (typeof rawReturnPath === 'string') {
       if (rawReturnPath.includes('knowledge')) {
         returnPath = '/knowledge';
-      } else if (rawReturnPath.includes('lionel')) {
-        returnPath = '/lionel';
+      } else if (rawReturnPath.includes('meetlionel') || rawReturnPath.includes('lionel')) {
+        returnPath = '/meetlionel';
       }
     }
 
