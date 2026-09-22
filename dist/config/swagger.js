@@ -20,6 +20,8 @@ const swaggerOptions = {
             },
         ],
     },
-    apis: ['./src/api/routes/*.ts', './dist/api/routes/*.js'], // Path to the API docs for dev and prod
+    apis: process.env.NODE_ENV === 'production'
+        ? ['./dist/api/routes/*.js']
+        : ['./src/api/routes/*.ts'], // Scan src in dev, dist only in production
 };
 exports.swaggerSpec = (0, swagger_jsdoc_1.default)(swaggerOptions);

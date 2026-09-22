@@ -55,9 +55,8 @@ function getGHLHeaders(apiKey: string): Record<string, string> {
 }
 
 const NOTIFICATION_RECIPIENTS = [
-  { email: 'asif@leadersperformance.ae', firstName: 'Muhammad', lastName: 'Asif' },
-  { email: 'mirza@leadersperformance.ae', firstName: 'Mirza', lastName: 'Asad' },
-  { email: 'info@leadersperformance.ae', firstName: 'Lionel', lastName: 'Eersteling' },
+  { email: 'lionel@leadersperformance.ae', firstName: 'Lionel', lastName: 'Eersteling' },
+  { email: 'info@leadersperformance.ae', firstName: 'Leaders', lastName: 'Performance' },
 ];
 
 function normalizePayload(body: any): ContactPayload {

@@ -45,11 +45,12 @@ export async function sendAdminBriefing(founderData: { name: string, email: stri
   
   try {
     const rawTemplate = fs.readFileSync(templatePath, 'utf8');
+    const cleanScore = (typeof founderData.score === 'number' && !isNaN(founderData.score)) ? Math.round(founderData.score) : 0;
     const html = renderTemplate(rawTemplate, {
       name: founderData.name,
       email: founderData.email,
-      score: founderData.score.toString(),
-      tier: founderData.tier,
+      score: cleanScore.toString(),
+      tier: founderData.tier || 'Critical',
       company: founderData.company || 'Unknown',
       primary_focus: founderData.primary_focus || '',
       focus_area: founderData.focus_area || '',
@@ -60,8 +61,8 @@ export async function sendAdminBriefing(founderData: { name: string, email: stri
     });
     
     for (const adminContactId of adminContactIds) {
-       await sendEmail(adminContactId, `Internal Notification: Founder Assessment (${founderData.score})`, html);
-       console.log(`[SUCCESS] Admin Email Sent: Delivered briefing to contact ${adminContactId}`);
+       await sendEmail(adminContactId, `Internal Notification: Founder Assessment (${cleanScore})`, html);
+       console.log(`[SUCCESS] Admin Email Sent: Delivered briefing to contact ${adminContactId} (Score: ${cleanScore})`);
     }
   } catch (error) {
     console.error(`[ERROR] Failed to send Admin briefing:`, error);

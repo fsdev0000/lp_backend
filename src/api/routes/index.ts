@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
 import { sendAdminBriefing } from '../../services/email';
@@ -39,35 +40,33 @@ const apiRoutes = Router();
 
 apiRoutes.use('/consent', consentRoutes);
 
-/**
- * @openapi
- * /voice/transcribe:
- *   post:
- *     summary: Transcribe audio to text
- *     description: Accepts an audio file upload and returns the transcribed text.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               audio:
- *                 type: string
- *                 format: binary
- *     responses:
- *       200:
- *         description: Transcribed text
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 transcript:
- *                   type: string
- */
+// Ephemeral in-memory session store (Zero Database Retention)
+interface EphemeralSession {
+  answers: any[];
+  founder: {
+    name: string;
+    company: string;
+    email: string;
+    phone: string;
+    revenue: string;
+  };
+  expiresAt: number;
+}
+
+const ephemeralSessions = new Map<string, EphemeralSession>();
+
+// Periodically clean up expired ephemeral sessions every 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of ephemeralSessions.entries()) {
+    if (session.expiresAt < now) {
+      ephemeralSessions.delete(id);
+    }
+  }
+}, 15 * 60 * 1000);
+
+// Voice AI endpoint excluded from production release
+// POST /voice/transcribe
 apiRoutes.post('/voice/transcribe', upload.single('audio'), async (req, res) => {
   try {
     if (!req.file) {
@@ -328,34 +327,16 @@ apiRoutes.get('/scan/config', async (req, res) => {
 apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const transcript = await prisma.transcript.findUnique({
-      where: { id: sessionId },
-      include: { founder: true }
-    });
+    const session = ephemeralSessions.get(sessionId);
 
-    if (!transcript) {
-      return res.status(404).json({ error: 'Session not found' });
+    if (session && session.expiresAt > Date.now()) {
+      return res.json({
+        answers: session.answers,
+        founder: session.founder,
+      });
     }
 
-    const assessment = await prisma.assessment.findFirst({
-      where: { founderId: transcript.founderId },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (!assessment) {
-      return res.status(404).json({ error: 'Assessment not found' });
-    }
-
-    res.json({
-      answers: JSON.parse(assessment.scores || '[]'),
-      founder: {
-        name: transcript.founder.name,
-        company: transcript.founder.companyName || '',
-        email: transcript.founder.email || '',
-        phone: transcript.founder.phone || '',
-        revenue: transcript.founder.revenueBand || '',
-      }
-    });
+    return res.status(404).json({ error: 'Session not found or expired' });
   } catch (error) {
     console.error('Error fetching session:', error);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -370,33 +351,71 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
       return res.status(400).json({ error: 'Invalid payload' });
     }
 
-    // Calculate score
-    const totalScore = answers.reduce((a, b) => a + (b || 0), 0);
-    const overallScore = answers.length > 0 ? totalScore / answers.length : 0;
+    // Robust answer extraction helper: handles numbers, numeric strings, or object wrappers ({score, value, etc.})
+    const numericAnswers: number[] = answers
+      .map((item: any) => {
+        if (item === null || item === undefined) return null;
+        if (typeof item === 'number') return isNaN(item) ? null : item;
+        if (typeof item === 'string') {
+          const n = parseFloat(item);
+          return isNaN(n) ? null : n;
+        }
+        if (typeof item === 'object') {
+          const cand = item.score ?? item.value ?? item.answer ?? item.val ?? item.rating;
+          if (typeof cand === 'number' && !isNaN(cand)) return cand;
+          if (typeof cand === 'string') {
+            const n = parseFloat(cand);
+            if (!isNaN(n)) return n;
+          }
+        }
+        return null;
+      })
+      .filter((n): n is number => n !== null);
+
+    const validCount = numericAnswers.length;
+    const totalScore = numericAnswers.reduce((sum, val) => sum + val, 0);
+    const overallScore = validCount > 0 ? totalScore / validCount : 0;
+
+    // Normalized score out of 100
+    const finalScore = validCount > 0 ? Math.min(100, Math.max(0, Math.round((overallScore / 4) * 100))) : 0;
 
     let tier = 'Strong';
-    if (overallScore > 3) tier = 'Critical';
-    else if (overallScore > 2) tier = 'Moderate';
+    if (overallScore >= 3) tier = 'Critical';
+    else if (overallScore >= 2) tier = 'Moderate';
 
     // Figure out primary focus based on domain averages
     const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
 
     const domainScores: Record<string, { sum: number; n: number }> = {};
     questions.forEach((q, i) => {
-      const val = answers[i] || 0;
-      domainScores[q.domain] ??= { sum: 0, n: 0 };
-      domainScores[q.domain].sum += val;
-      domainScores[q.domain].n += 1;
+      const raw = answers[i];
+      let val: number | null = null;
+      if (typeof raw === 'number' && !isNaN(raw)) val = raw;
+      else if (typeof raw === 'string') {
+        const n = parseFloat(raw);
+        if (!isNaN(n)) val = n;
+      } else if (raw && typeof raw === 'object') {
+        const cand = raw.score ?? raw.value ?? raw.answer;
+        if (typeof cand === 'number' && !isNaN(cand)) val = cand;
+      }
+
+      if (val !== null) {
+        domainScores[q.domain] ??= { sum: 0, n: 0 };
+        domainScores[q.domain].sum += val;
+        domainScores[q.domain].n += 1;
+      }
     });
 
     let primaryFocus = 'General Operations';
     let maxDomainScore = -1;
 
     for (const [domain, stats] of Object.entries(domainScores)) {
-      const avg = stats.sum / stats.n;
-      if (avg > maxDomainScore) {
-        maxDomainScore = avg;
-        primaryFocus = domain;
+      if (stats.n > 0) {
+        const avg = stats.sum / stats.n;
+        if (avg > maxDomainScore) {
+          maxDomainScore = avg;
+          primaryFocus = domain;
+        }
       }
     }
 
@@ -410,54 +429,20 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
 
     const insight = insights[primaryFocus] || { opp: 'Overall Alignment', q: 'What is the biggest operational constraint today?' };
 
-    // Upsert Founder
-    let founderRecord;
-    if (founder.email) {
-      founderRecord = await prisma.founder.upsert({
-        where: { email: founder.email },
-        update: {
-          name: founder.founder || founder.name,
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        },
-        create: {
-          email: founder.email,
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    } else {
-      founderRecord = await prisma.founder.create({
-        // If no email provided, just create
-        data: {
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    }
+    // Zero Database Retention: Generate ephemeral IDs and cache in temporary memory
+    const assessmentId = randomUUID();
+    const sessionId = randomUUID();
 
-    const assessment = await prisma.assessment.create({
-      data: {
-        founderId: founderRecord.id,
-        scores: JSON.stringify(answers),
-        overallScore,
-        tier,
-        primaryFocus,
-        focusArea: primaryFocus,
-        greatestOpportunity: insight.opp,
-        openingQuestion: insight.q
-      }
-    });
-
-    const transcript = await prisma.transcript.create({
-      data: {
-        founderId: founderRecord.id
-      }
+    ephemeralSessions.set(sessionId, {
+      answers,
+      founder: {
+        name: founder.founder || founder.name || 'Unknown',
+        company: founder.company || '',
+        email: founder.email || '',
+        phone: founder.phone || '',
+        revenue: founder.revenue || '',
+      },
+      expiresAt: Date.now() + 30 * 60 * 1000,
     });
 
     // --- GHL & Email Integration ---
@@ -473,7 +458,7 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
         if (contactId) {
           await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
 
-          // Do not send scan email to founder. Send scan result briefing to Mr. Lionel and info@leadersperformance.ae.
+          // Send scan result briefing strictly to Lionel and Info
           const lionelContactId = await upsertContact({
             email: 'lionel@leadersperformance.ae',
             firstName: 'Lionel',
@@ -487,10 +472,11 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
             tags: ['lp-staff']
           });
 
+          const adminRecipients = [lionelContactId, infoContactId].filter(Boolean);
           await sendAdminBriefing({
             name: founder.founder || founder.name,
             email: founder.email,
-            score: Math.round((overallScore / 4) * 100),
+            score: finalScore,
             tier,
             company: founder.company,
             phone: founder.phone,
@@ -498,128 +484,36 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
             focus_area: primaryFocus,
             greatest_opportunity: insight.opp,
             opening_question: insight.q
-          }, [lionelContactId, infoContactId]);
+          }, adminRecipients);
         }
       } catch (ghlError) {
         console.error('GHL integration failed (non-fatal):', ghlError);
       }
     }
-    // ---------------------------------
 
-    await prisma.systemLog.create({
-        data: {
-          level: 'info',
-          action: 'ASSESSMENT_SCORED',
-          details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
-        }
-      });
+    console.log(`[Assessment Scored] Zero-DB Mode: Scored for ${founder.email || 'anonymous'}, Tier: ${tier}`);
 
-      res.status(201).json({ message: 'Assessment submitted successfully', id: assessment.id, sessionId: transcript.id });
-    } catch (error) {
-      console.error('Error submitting assessment:', error);
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
-  });
+    res.status(201).json({ message: 'Assessment submitted successfully', id: assessmentId, sessionId });
+  } catch (error) {
+    console.error('Error submitting assessment:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
-/**
- * @openapi
- * /voice/session:
- *   post:
- *     summary: Initialize AI Voice Session
- *     description: Creates a new conversation transcript record and prepares the AI context.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               founderId:
- *                 type: string
- *                 description: The founder's ID.
- *     responses:
- *       200:
- *         description: Session initialized
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 sessionId:
- *                   type: string
- *                 message:
- *                   type: string
- */
+// Voice AI endpoint excluded from production release
+// POST /voice/session
 apiRoutes.post('/chat/init', async (req, res) => {
   try {
-    const { founder } = req.body;
-
-    let founderRecord;
-    if (founder.email) {
-      founderRecord = await prisma.founder.upsert({
-        where: { email: founder.email },
-        update: {
-          name: founder.founder || founder.name,
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        },
-        create: {
-          email: founder.email,
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    } else {
-      founderRecord = await prisma.founder.create({
-        data: {
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    }
-
-    const session = await prisma.transcript.create({
-      data: {
-        founderId: founderRecord.id
-      }
-    });
-    res.status(200).json({ message: 'Session initialized', sessionId: session.id });
+    const sessionId = randomUUID();
+    res.status(200).json({ message: 'Session initialized', sessionId });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to init session' });
   }
 });
 
-/**
- * @openapi
- * /chat/message:
- *   post:
- *     summary: Send text message to Daisy
- *     description: Accepts text and returns a mocked AI text response.
- *     tags:
- *       - AI Chat
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *               message:
- *                 type: string
- *     responses:
- *       200:
- *         description: AI Text Response
- */
+// AI Chat endpoint excluded from production Swagger docs
+// POST /chat/message
 apiRoutes.post('/chat/message', async (req, res) => {
   const { sessionId, message } = req.body;
 
@@ -637,27 +531,6 @@ apiRoutes.post('/chat/message', async (req, res) => {
   }
 });
 
-/**
- * @openapi
- * /voice/token:
- *   post:
- *     summary: Get ElevenLabs signed URL
- *     description: Returns a signed URL for the ElevenLabs Conversational AI SDK.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *     responses:
- *       200:
- *         description: Signed URL and System Prompt
- */
 apiRoutes.get('/voice/state', (req, res) => {
   const sessionId = req.query.sessionId as string;
   if (!sessionId) {
@@ -673,24 +546,8 @@ apiRoutes.get('/voice/state', (req, res) => {
   res.json({ ctaVisible });
 });
 
-/**
- * @openapi
- * /api/v1/voice/token:
- *   post:
- *     summary: Retrieve signed URL for ElevenLabs frontend WebSocket
- *     tags: [Voice]
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *     responses:
- *       200:
- *         description: Signed URL and System Prompt
- */
+// Voice AI endpoint excluded from production release
+// POST /voice/token
 apiRoutes.post('/voice/token', async (req, res) => {
   try {
     const apiKey = await getSecret('ELEVENLABS_API_KEY');
@@ -805,30 +662,8 @@ apiRoutes.post('/voice/token', async (req, res) => {
   }
 });
 
-/**
- * @openapi
- * /voice/transcribe:
- *   post:
- *     summary: Process Audio and Get AI Response
- *     description: Accepts an audio blob, returns mocked audio.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *               audio:
- *                 type: string
- *                 format: binary
- *     responses:
- *       200:
- *         description: Audio stream response from AI
- */
+// Voice AI endpoint excluded from production release
+// POST /voice/tts
 apiRoutes.post('/voice/tts', async (req, res) => {
   try {
     const { text } = req.body;
@@ -895,12 +730,6 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
   }
 
   try {
-    const founderRecord = await prisma.founder.upsert({
-      where: { email },
-      update: {},
-      create: { email, name: name || 'Unknown', phone: phone || '' }
-    });
-
     const contactId = await upsertContact({
       email,
       firstName: name,
@@ -923,13 +752,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
     const dateTimeStr = `${date}T${formattedTime}:00`;
     await bookAppointment(contactId, dateTimeStr, `Strategy Session - ${name || email}`);
 
-    await prisma.systemLog.create({
-      data: {
-        level: 'info',
-        action: 'SESSION_BOOKED',
-        details: JSON.stringify({ founderId: founderRecord.id, email, date, time, timezone })
-      }
-    });
+    console.log(`[Booking Scheduled] Zero-DB Mode: Successfully booked for ${email} at ${dateTimeStr}`);
 
     // Emit event to connected clients for real-time update
     const io = req.app.get('io');
@@ -939,7 +762,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
 
     res.json({ success: true, message: 'Session successfully booked' });
   } catch (error) {
-    console.error('Booking error:', error);
+    console.error('Error scheduling booking:', error);
     res.status(500).json({ error: 'Failed to schedule booking' });
   }
 });

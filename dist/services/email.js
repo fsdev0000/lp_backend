@@ -46,11 +46,12 @@ async function sendAdminBriefing(founderData, adminContactIds) {
     const templatePath = path_1.default.join(__dirname, '../../templates/internal-consultant-briefing.html');
     try {
         const rawTemplate = fs_1.default.readFileSync(templatePath, 'utf8');
+        const cleanScore = (typeof founderData.score === 'number' && !isNaN(founderData.score)) ? Math.round(founderData.score) : 0;
         const html = renderTemplate(rawTemplate, {
             name: founderData.name,
             email: founderData.email,
-            score: founderData.score.toString(),
-            tier: founderData.tier,
+            score: cleanScore.toString(),
+            tier: founderData.tier || 'Critical',
             company: founderData.company || 'Unknown',
             primary_focus: founderData.primary_focus || '',
             focus_area: founderData.focus_area || '',
@@ -60,8 +61,8 @@ async function sendAdminBriefing(founderData, adminContactIds) {
             submission_url: 'https://leadersperformance.ae' // placeholder
         });
         for (const adminContactId of adminContactIds) {
-            await (0, ghl_1.sendEmail)(adminContactId, `Internal Notification: Founder Assessment (${founderData.score})`, html);
-            console.log(`[SUCCESS] Admin Email Sent: Delivered briefing to contact ${adminContactId}`);
+            await (0, ghl_1.sendEmail)(adminContactId, `Internal Notification: Founder Assessment (${cleanScore})`, html);
+            console.log(`[SUCCESS] Admin Email Sent: Delivered briefing to contact ${adminContactId} (Score: ${cleanScore})`);
         }
     }
     catch (error) {
