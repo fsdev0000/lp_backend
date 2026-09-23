@@ -51,7 +51,25 @@ const corsOptions: cors.CorsOptions = {
     return callback(new Error(`CORS policy: origin ${origin} is not allowed`));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-api-key',
+    'apikey',
+    'x-client-info',
+    'x-slug',
+    'x-title',
+    'x-excerpt',
+    'x-pillar',
+    'x-meta-title',
+    'x-meta-description',
+    'x-pillar-color',
+    'x-keywords',
+    'x-publish-date',
+    'x-reading-time',
+    'x-author',
+    'x-published',
+  ],
   credentials: true,
 };
 
@@ -90,6 +108,7 @@ app.set('io', io);
 
 import { checkoutRouter } from './api/routes/checkout';
 import { contactRouter } from './api/routes/contact';
+import { articlesRoutes } from './api/routes/articles.routes';
 
 app.use(cors(corsOptions));
 app.use(
@@ -99,11 +118,14 @@ app.use(
     },
   })
 );
+app.use(express.text({ type: ['text/*', 'application/x-yaml', 'text/markdown'] }));
 
 app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);
 app.use('/api', contactRouter);
 app.use('/api/v1', contactRouter);
+app.use('/api/articles', articlesRoutes);
+app.use('/api/v1/articles', articlesRoutes);
 app.use('/api/v1', apiRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 

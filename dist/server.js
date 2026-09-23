@@ -50,7 +50,25 @@ const corsOptions = {
         return callback(new Error(`CORS policy: origin ${origin} is not allowed`));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-api-key',
+        'apikey',
+        'x-client-info',
+        'x-slug',
+        'x-title',
+        'x-excerpt',
+        'x-pillar',
+        'x-meta-title',
+        'x-meta-description',
+        'x-pillar-color',
+        'x-keywords',
+        'x-publish-date',
+        'x-reading-time',
+        'x-author',
+        'x-published',
+    ],
     credentials: true,
 };
 // Setup Socket.IO for general purpose real-time connection
@@ -84,16 +102,20 @@ exports.io.on('connection', (socket) => {
 app.set('io', exports.io);
 const checkout_1 = require("./api/routes/checkout");
 const contact_1 = require("./api/routes/contact");
+const articles_routes_1 = require("./api/routes/articles.routes");
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({
     verify: (req, _res, buf) => {
         req.rawBody = buf;
     },
 }));
+app.use(express_1.default.text({ type: ['text/*', 'application/x-yaml', 'text/markdown'] }));
 app.use('/api', checkout_1.checkoutRouter);
 app.use('/api/v1', checkout_1.checkoutRouter);
 app.use('/api', contact_1.contactRouter);
 app.use('/api/v1', contact_1.contactRouter);
+app.use('/api/articles', articles_routes_1.articlesRoutes);
+app.use('/api/v1/articles', articles_routes_1.articlesRoutes);
 app.use('/api/v1', routes_1.apiRoutes);
 app.use('/api-docs', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec));
 app.get('/health', (req, res) => {
