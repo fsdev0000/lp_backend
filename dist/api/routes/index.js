@@ -696,6 +696,9 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
                 hours = 0;
             formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
         }
+        if (formattedTime < '14:00' || formattedTime > '16:30') {
+            return res.status(400).json({ error: 'Bookings are strictly limited to 2:00 PM - 4:30 PM (Dubai time).' });
+        }
         const dateTimeStr = `${date}T${formattedTime}:00`;
         await (0, ghl_1.bookAppointment)(contactId, dateTimeStr, `Strategy Session - ${name || email}`);
         console.log(`[Booking Scheduled] Zero-DB Mode: Successfully booked for ${email} at ${dateTimeStr}`);
