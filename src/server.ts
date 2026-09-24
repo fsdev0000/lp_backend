@@ -25,6 +25,7 @@ const ALLOWED_ORIGINS = [
   'https://srv826934.hstgr.cloud',
   'https://elevenlabs.io',
   'https://api.elevenlabs.io',
+  'https://clarity.microsoft.com'
 ];
 
 if (process.env.FRONTEND_URL) {
