@@ -28,6 +28,7 @@ const ALLOWED_ORIGINS = [
   'https://clarity.microsoft.com'
 ];
 
+
 if (process.env.FRONTEND_URL) {
   const customFrontend = process.env.FRONTEND_URL.replace(/\/$/, '');
   if (!ALLOWED_ORIGINS.includes(customFrontend)) {
