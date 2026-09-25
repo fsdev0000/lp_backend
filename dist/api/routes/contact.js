@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.contactRouter = void 0;
 const express_1 = require("express");
 const secrets_1 = require("../../services/secrets");
+const rateLimiter_1 = require("../../middleware/rateLimiter");
 exports.contactRouter = (0, express_1.Router)();
 async function getGHLConfig() {
     const ghlBase = process.env.GHL_BASE ||
@@ -387,5 +388,5 @@ async function handleContact(req, res) {
     }
 }
 // Support both /contact and /contact-us
-exports.contactRouter.post('/contact', handleContact);
-exports.contactRouter.post('/contact-us', handleContact);
+exports.contactRouter.post('/contact', rateLimiter_1.contactRateLimiter, handleContact);
+exports.contactRouter.post('/contact-us', rateLimiter_1.contactRateLimiter, handleContact);

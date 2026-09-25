@@ -10,7 +10,7 @@ app.set('trust proxy', 1);
 app.use(express.json());
 
 // Mock handler to track if execution reaches form processing
-const mockAssessmentHandler = jest.fn((req, res) => {
+const mockAssessmentHandler = jest.fn((req: express.Request, res: express.Response) => {
   res.status(201).json({ success: true, message: 'Assessment processed' });
 });
 

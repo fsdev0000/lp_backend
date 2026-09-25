@@ -44,13 +44,10 @@ async function main() {
     (0, assert_1.default)(/^New Founder Pressure Scan Submission — Cyberdyne Systems — FPS-\d{4}-\d{4}$/.test(email2.subject), 'Subject must match generated reference number');
     (0, assert_1.default)(email2.html.includes(email2.referenceNumber), 'HTML must display reference number');
     console.log('✓ Test 4 Passed: Canonical reference number generation verified');
-    // Test 5: Approved Secure CTA "Open Secure Review" & Zero Sensitive Data in Link
+    // Test 5: Approved Secure CTA "Open Secure Review" & Disabled link to '#'
     (0, assert_1.default)(email.html.includes('Open Secure Review'), 'Must contain exact CTA text "Open Secure Review"');
-    const reviewUrl = await (0, email_1.getSecureReviewUrl)();
-    (0, assert_1.default)(!reviewUrl.includes('score='), 'Review URL must not contain score query param');
-    (0, assert_1.default)(!reviewUrl.includes('answers='), 'Review URL must not contain answers query param');
-    (0, assert_1.default)(!reviewUrl.includes('tier='), 'Review URL must not contain tier query param');
-    console.log('✓ Test 5 Passed: Secure review CTA and zero sensitive query parameters verified');
+    (0, assert_1.default)(email.html.includes('href="#"'), 'CTA button link must be disabled to "#"');
+    console.log('✓ Test 5 Passed: Secure review CTA disabled with empty link "#" verified');
     // Test 6: Zero Exposure of Confidential Submission Data in Subject or Body
     (0, assert_1.default)(!email.subject.includes('87'), 'Subject must not leak score');
     (0, assert_1.default)(!email.subject.includes('Critical'), 'Subject must not leak tier');

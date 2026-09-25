@@ -17,6 +17,7 @@ const secrets_1 = require("../../services/secrets");
 const PromptBuilder_1 = require("../../services/ai/daisy/PromptBuilder");
 const RuntimeManager_1 = require("../../services/ai/daisy/RuntimeManager");
 const consent_1 = require("./consent");
+const rateLimiter_1 = require("../../middleware/rateLimiter");
 let elevenlabsClient = null;
 async function getElevenLabs() {
     if (elevenlabsClient)
@@ -318,7 +319,7 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
-apiRoutes.post('/assessments/submit', async (req, res) => {
+apiRoutes.post('/assessments/submit', rateLimiter_1.assessmentRateLimiter, async (req, res) => {
     try {
         const { founder, answers } = req.body;
         if (!founder || !answers || !Array.isArray(answers)) {

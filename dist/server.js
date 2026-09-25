@@ -16,6 +16,8 @@ dotenv_1.default.config(); // Reload env configuration
 const ws_1 = require("ws");
 const llm_1 = require("./api/routes/llm");
 const app = (0, express_1.default)();
+// Enable trust proxy for Traefik reverse proxy to accurately derive client IP from X-Forwarded-For
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 4000;
 const httpServer = (0, http_1.createServer)(app);
 // Allowed origins: production domain + ElevenLabs (for voice WebSocket handshake)

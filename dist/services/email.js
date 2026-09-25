@@ -123,7 +123,7 @@ async function buildAdminBriefingEmail(founderData) {
     const referenceNumber = (founderData.reference_number || founderData.ref || generateReferenceNumber()).trim();
     const submittedAt = formatOperationalSubmissionDate(founderData.submission_date);
     const reviewStatus = (founderData.review_status || 'Awaiting Human Review').trim();
-    const reviewUrl = founderData.review_url || (await getSecureReviewUrl());
+    const reviewUrl = '#';
     const initialReason = (founderData.initial_reason ||
         founderData.reason ||
         'We are preparing for the next stage of growth and I want to understand where my involvement may be limiting leadership ownership and execution.').trim();
