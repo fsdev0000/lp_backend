@@ -138,7 +138,7 @@ exports.checkoutRouter.post('/create-checkout', async (req, res) => {
         const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
         // Allow caller to pass full returnPath (e.g. '/knowledge?book-name=reset-by-discipline&version=nl#reset-by-discipline')
         const rawReturnPath = req.body?.returnPath || req.body?.source;
-        let returnPath = `/knowledge?book-name=reset-by-discipline&version=${version}#reset-by-discipline`;
+        let returnPath = `/knowledge?book-name=reset-by-discipline&version=${version}`;
         if (typeof rawReturnPath === 'string' && rawReturnPath.startsWith('/')) {
             returnPath = rawReturnPath;
         }
