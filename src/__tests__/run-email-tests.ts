@@ -53,13 +53,10 @@ async function main() {
   assert(email2.html.includes(email2.referenceNumber), 'HTML must display reference number');
   console.log('✓ Test 4 Passed: Canonical reference number generation verified');
 
-  // Test 5: Approved Secure CTA "Open Secure Review" & Zero Sensitive Data in Link
+  // Test 5: Approved Secure CTA "Open Secure Review" & Disabled link to '#'
   assert(email.html.includes('Open Secure Review'), 'Must contain exact CTA text "Open Secure Review"');
-  const reviewUrl = await getSecureReviewUrl();
-  assert(!reviewUrl.includes('score='), 'Review URL must not contain score query param');
-  assert(!reviewUrl.includes('answers='), 'Review URL must not contain answers query param');
-  assert(!reviewUrl.includes('tier='), 'Review URL must not contain tier query param');
-  console.log('✓ Test 5 Passed: Secure review CTA and zero sensitive query parameters verified');
+  assert(email.html.includes('href="#"'), 'CTA button link must be disabled to "#"');
+  console.log('✓ Test 5 Passed: Secure review CTA disabled with empty link "#" verified');
 
   // Test 6: Zero Exposure of Confidential Submission Data in Subject or Body
   assert(!email.subject.includes('87'), 'Subject must not leak score');

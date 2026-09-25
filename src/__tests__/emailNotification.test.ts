@@ -53,7 +53,7 @@ describe('Founder Pressure Scan Internal Notification Email Template', () => {
     expect(email.html).toContain(email.referenceNumber);
   });
 
-  test('contains approved Secure CTA text "Open Secure Review" with no sensitive query parameters', async () => {
+  test('contains approved Secure CTA text "Open Secure Review" with disabled href "#"', async () => {
     const email = await buildAdminBriefingEmail({
       name: 'Daniel Mercer',
       company: 'Mercer Group',
@@ -61,17 +61,7 @@ describe('Founder Pressure Scan Internal Notification Email Template', () => {
     });
 
     expect(email.html).toContain('Open Secure Review');
-    
-    // Ensure the review URL does not leak confidential data
-    const urlMatch = email.html.match(/href="([^"]+)"/);
-    expect(urlMatch).toBeTruthy();
-    const href = urlMatch![1];
-    
-    expect(href).not.toContain('score=');
-    expect(href).not.toContain('tier=');
-    expect(href).not.toContain('answers=');
-    expect(href).not.toContain('question=');
-    expect(href).not.toContain('diagnostic=');
+    expect(email.html).toContain('href="#"');
   });
 
   test('strictly protects confidential information: no scores, tiers, or raw answers exposed', async () => {

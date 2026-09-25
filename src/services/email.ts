@@ -146,7 +146,7 @@ export async function buildAdminBriefingEmail(founderData: AdminBriefingData): P
   const referenceNumber = (founderData.reference_number || founderData.ref || generateReferenceNumber()).trim();
   const submittedAt = formatOperationalSubmissionDate(founderData.submission_date);
   const reviewStatus = (founderData.review_status || 'Awaiting Human Review').trim();
-  const reviewUrl = founderData.review_url || (await getSecureReviewUrl());
+  const reviewUrl = '#';
 
   const initialReason = (
     founderData.initial_reason ||
