@@ -31,15 +31,11 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
     const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
     const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
 
-    // Allow caller to pass returnPath ('/knowledge' or '/meetlionel')
+    // Allow caller to pass full returnPath (e.g. '/knowledge?book-name=reset-by-discipline&version=nl#reset-by-discipline')
     const rawReturnPath = req.body?.returnPath || req.body?.source;
-    let returnPath = '/meetlionel';
-    if (typeof rawReturnPath === 'string') {
-      if (rawReturnPath.includes('knowledge')) {
-        returnPath = '/knowledge';
-      } else if (rawReturnPath.includes('meetlionel') || rawReturnPath.includes('lionel')) {
-        returnPath = '/meetlionel';
-      }
+    let returnPath = '/knowledge?book-name=reset-by-discipline#reset-by-discipline';
+    if (typeof rawReturnPath === 'string' && rawReturnPath.startsWith('/')) {
+      returnPath = rawReturnPath;
     }
 
     const session = await stripe.checkout.sessions.create({
