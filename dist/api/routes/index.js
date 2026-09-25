@@ -447,6 +447,8 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
                         tier,
                         company: founder.company,
                         phone: founder.phone,
+                        reference_number: founder.reference_number || founder.ref,
+                        initial_reason: founder.initial_reason || founder.reason || founder.pressure,
                         primary_focus: primaryFocus,
                         focus_area: primaryFocus,
                         greatest_opportunity: insight.opp,
