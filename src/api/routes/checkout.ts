@@ -15,149 +15,28 @@ function getStripeInstance(): Stripe {
 }
 
 /**
- * Helpers for multi-language book support (English and Dutch)
- */
-function getBookPriceId(version: 'nl' | 'en'): { priceId: string; envVarName: string } | null {
-  if (version === 'nl') {
-    const priceId = process.env.STRIPE_BOOK_PRICE_ID_NL || process.env.STRIPE_BOOK_PRICE_ID;
-    return priceId ? { priceId, envVarName: 'STRIPE_BOOK_PRICE_ID_NL' } : null;
-  }
-  const priceId = process.env.STRIPE_BOOK_PRICE_ID_EN || process.env.STRIPE_BOOK_PRICE_ID;
-  return priceId ? { priceId, envVarName: 'STRIPE_BOOK_PRICE_ID_EN' } : null;
-}
-
-function getAllBookPriceIds(): string[] {
-  return [
-    process.env.STRIPE_BOOK_PRICE_ID_EN,
-    process.env.STRIPE_BOOK_PRICE_ID_NL,
-    process.env.STRIPE_BOOK_PRICE_ID,
-  ].filter(Boolean) as string[];
-}
-
-function getSessionVersion(session: Stripe.Checkout.Session): 'nl' | 'en' {
-  // 1. Check metadata
-  const metaVersion = (session.metadata?.version || '').toLowerCase().trim();
-  if (metaVersion === 'nl' || metaVersion === 'dutch') {
-    return 'nl';
-  }
-  if (metaVersion === 'en' || metaVersion === 'english') {
-    return 'en';
-  }
-
-  // 2. Check line items for specific Dutch or English Price ID
-  const nlPriceId = process.env.STRIPE_BOOK_PRICE_ID_NL;
-  const enPriceId = process.env.STRIPE_BOOK_PRICE_ID_EN;
-  if (session.line_items?.data) {
-    if (nlPriceId && session.line_items.data.some((item) => item.price?.id === nlPriceId)) {
-      return 'nl';
-    }
-    if (enPriceId && session.line_items.data.some((item) => item.price?.id === enPriceId)) {
-      return 'en';
-    }
-  }
-
-  // 3. Check metadata returnPath for version param
-  const returnPath = session.metadata?.returnPath || '';
-  if (returnPath.includes('version=nl') || returnPath.includes('lang=nl')) {
-    return 'nl';
-  }
-
-  return 'en';
-}
-
-function getBookFilePath(version: 'nl' | 'en'): { filePath: string; fileName: string } | null {
-  const isDutch = version === 'nl';
-  const downloadFileName = isDutch
-    ? 'RESET BY DISCIPLINE - DUTCH.pdf'
-    : 'RESET BY DISCIPLINE - ENGLISH.pdf';
-
-  const envPath = isDutch
-    ? process.env.BOOK_FILE_PATH_NL
-    : (process.env.BOOK_FILE_PATH_EN || process.env.BOOK_FILE_PATH);
-
-  const exactPrivateFileName = isDutch
-    ? 'RESET BY DISCIPLINE - DUTCH.pdf'
-    : 'RESET BY DICIPLINE- ENGLISH.pdf';
-
-  const candidatePaths = [
-    envPath,
-    path.resolve(process.cwd(), 'private', exactPrivateFileName),
-    path.resolve(__dirname, '../../../private', exactPrivateFileName),
-    path.resolve(process.cwd(), 'private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-    path.resolve(__dirname, '../../../private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-  ].filter(Boolean) as string[];
-
-  let resolvedPath = candidatePaths.find((p) => fs.existsSync(p));
-
-  // Fallback: search directory dynamically if not found
-  if (!resolvedPath) {
-    const dirCandidates = [
-      path.resolve(process.cwd(), 'private'),
-      path.resolve(__dirname, '../../../private'),
-    ];
-    for (const dir of dirCandidates) {
-      if (fs.existsSync(dir)) {
-        try {
-          const files = fs.readdirSync(dir);
-          const match = files.find((f) => {
-            const lower = f.toLowerCase();
-            if (!lower.endsWith('.pdf')) return false;
-            if (isDutch) {
-              return lower.includes('dutch') || lower.includes('nl');
-            }
-            return lower.includes('english') || lower.includes('en') || lower.includes('dicipline') || lower.includes('discipline');
-          });
-          if (match) {
-            resolvedPath = path.resolve(dir, match);
-            break;
-          }
-        } catch {
-          // ignore scan error
-        }
-      }
-    }
-  }
-
-  if (!resolvedPath) {
-    return null;
-  }
-
-  return { filePath: path.resolve(resolvedPath), fileName: downloadFileName };
-}
-
-/**
  * POST /api/create-checkout
  * Creates a one-off Stripe Checkout session for Reset by Discipline.
- * Dynamically supports English and Dutch versions via Price IDs:
- * STRIPE_BOOK_PRICE_ID_EN and STRIPE_BOOK_PRICE_ID_NL
+ * Uses only server-configured Stripe Price ID.
  */
 checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Promise<void> => {
   try {
-    const rawVersion = (req.body?.version || req.query?.version || 'en').toString().toLowerCase().trim();
-    const version: 'nl' | 'en' = (rawVersion === 'nl' || rawVersion === 'dutch') ? 'nl' : 'en';
-
-    const priceConfig = getBookPriceId(version);
-    if (!priceConfig) {
-      const missingVar = version === 'nl' ? 'STRIPE_BOOK_PRICE_ID_NL' : 'STRIPE_BOOK_PRICE_ID_EN';
-      res.status(500).json({ error: `${missingVar} environment variable is not configured` });
+    const priceId = process.env.STRIPE_BOOK_PRICE_ID;
+    if (!priceId) {
+      res.status(500).json({ error: 'STRIPE_BOOK_PRICE_ID environment variable is not configured' });
       return;
     }
 
-    const priceId = priceConfig.priceId;
     const stripe = getStripeInstance();
     const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
     const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
 
     // Allow caller to pass full returnPath (e.g. '/knowledge?book-name=reset-by-discipline&version=nl#reset-by-discipline')
     const rawReturnPath = req.body?.returnPath || req.body?.source;
-    let returnPath = `/knowledge?book-name=reset-by-discipline&version=${version}#reset-by-discipline`;
+    let returnPath = '/knowledge?knowledge?book-name=reset-by-discipline&version=en';
     if (typeof rawReturnPath === 'string' && rawReturnPath.startsWith('/')) {
       returnPath = rawReturnPath;
     }
-
-    const productTitle = version === 'nl'
-      ? 'Reset door Discipline (Dutch Edition)'
-      : 'Reset by Discipline (English Edition)';
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -167,12 +46,11 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
           quantity: 1,
         },
       ],
-      success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&version=${version}&from=${encodeURIComponent(returnPath)}`,
+      success_url: `${frontendUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&from=${encodeURIComponent(returnPath)}`,
       cancel_url: `${frontendUrl}${returnPath}`,
       metadata: {
-        product: productTitle,
+        product: 'Reset by Discipline',
         author: 'Lionel Eersteling',
-        version,
         returnPath,
       },
     });
@@ -192,7 +70,6 @@ checkoutRouter.post('/create-checkout', async (req: Request, res: Response): Pro
 /**
  * GET /api/payment-status?session_id=...
  * Verifies payment directly against Stripe API without any application database.
- * Returns payment status and purchased book version ('en' | 'nl').
  */
 checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -203,7 +80,7 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
       return;
     }
 
-    const validPriceIds = getAllBookPriceIds();
+    const expectedPriceId = process.env.STRIPE_BOOK_PRICE_ID;
     const stripe = getStripeInstance();
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -217,23 +94,20 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
 
     const isPaid = session.payment_status === 'paid';
 
-    // Verify product price if line items are available and price IDs are configured
-    if (validPriceIds.length > 0 && session.line_items?.data) {
+    // Verify product price if line items are available and expectedPriceId is set
+    if (expectedPriceId && session.line_items?.data) {
       const containsExpectedProduct = session.line_items.data.some(
-        (item) => item.price?.id && validPriceIds.includes(item.price.id)
+        (item) => item.price?.id === expectedPriceId
       );
       if (!containsExpectedProduct && isPaid) {
-        console.warn(`[Stripe] Session ${sessionId} does not contain an expected price ID (${validPriceIds.join(', ')})`);
+        console.warn(`[Stripe] Session ${sessionId} does not contain expected price ID ${expectedPriceId}`);
         res.status(400).json({ status: 'unverified' });
         return;
       }
     }
 
-    const version = getSessionVersion(session);
-
     res.status(200).json({
       status: isPaid ? 'paid' : session.payment_status || 'pending',
-      version,
       returnPath: session.metadata?.returnPath || null,
     });
   } catch (error: any) {
@@ -244,7 +118,7 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
 
 /**
  * GET /api/download?session_id=...
- * Serves the private PDF book (English or Dutch) only after verifying payment directly with Stripe.
+ * Serves the private PDF book only after verifying payment directly with Stripe.
  */
 checkoutRouter.get('/download', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -255,7 +129,7 @@ checkoutRouter.get('/download', async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const validPriceIds = getAllBookPriceIds();
+    const expectedPriceId = process.env.STRIPE_BOOK_PRICE_ID;
     const stripe = getStripeInstance();
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -268,9 +142,9 @@ checkoutRouter.get('/download', async (req: Request, res: Response): Promise<voi
     }
 
     // Verify price if configured
-    if (validPriceIds.length > 0 && session.line_items?.data) {
+    if (expectedPriceId && session.line_items?.data) {
       const containsExpectedProduct = session.line_items.data.some(
-        (item) => item.price?.id && validPriceIds.includes(item.price.id)
+        (item) => item.price?.id === expectedPriceId
       );
       if (!containsExpectedProduct) {
         res.status(403).json({ error: 'Unauthorized product in session' });
@@ -278,25 +152,30 @@ checkoutRouter.get('/download', async (req: Request, res: Response): Promise<voi
       }
     }
 
-    // Determine version and resolve corresponding file path
-    const version = getSessionVersion(session);
-    const bookFile = getBookFilePath(version);
+    // Resolve private file path
+    const configuredPath = process.env.BOOK_FILE_PATH;
+    const candidatePaths = [
+      configuredPath,
+      path.resolve(__dirname, '../../../private/reset-by-discipline.pdf'),
+      path.resolve(process.cwd(), 'private/reset-by-discipline.pdf'),
+    ].filter(Boolean) as string[];
 
-    if (!bookFile || !fs.existsSync(bookFile.filePath)) {
-      console.error(`[Stripe] Private book file (${version}) not found on server`);
-      res.status(404).json({ error: `Book file (${version.toUpperCase()}) not found on server` });
+    let resolvedPath = candidatePaths.find((p) => fs.existsSync(p));
+
+    if (!resolvedPath) {
+      console.error('[Stripe] Private book file not found at any configured path');
+      res.status(404).json({ error: 'Book file not found on server' });
       return;
     }
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${bookFile.fileName}"`);
-    res.sendFile(bookFile.filePath);
+    res.setHeader('Content-Disposition', 'attachment; filename="reset-by-discipline.pdf"');
+    res.sendFile(path.resolve(resolvedPath));
   } catch (error: any) {
     console.error('[Stripe] Error serving download:', error?.message || error);
     res.status(403).json({ error: 'Payment verification failed' });
   }
 });
-
 
 /**
  * POST /api/stripe/webhook
