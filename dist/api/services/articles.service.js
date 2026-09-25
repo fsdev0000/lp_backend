@@ -4,6 +4,7 @@ exports.articlesService = exports.ArticlesService = void 0;
 const articles_repository_1 = require("../repositories/articles.repository");
 const articles_validation_1 = require("../validation/articles.validation");
 const secrets_1 = require("../../services/secrets");
+const articleContentNormalizer_1 = require("../utils/articleContentNormalizer");
 class ArticlesService {
     repo;
     constructor(repo = articles_repository_1.articlesRepository) {
@@ -25,15 +26,32 @@ class ArticlesService {
     }
     /**
      * Lists all published articles for the website.
+     * If any article entry includes content, normalizes it.
      */
     async listPublishedArticles() {
-        return this.repo.findPublishedArticles();
+        const articles = await this.repo.findPublishedArticles();
+        return articles.map((article) => {
+            if (article.content) {
+                return {
+                    ...article,
+                    content: (0, articleContentNormalizer_1.normalizeArticleContent)(article.content),
+                };
+            }
+            return article;
+        });
     }
     /**
      * Returns a single published article by slug.
+     * Inspects and normalizes malformed Markdown in memory before returning.
      */
     async getPublishedArticleBySlug(slug) {
-        return this.repo.findArticleBySlug(slug, true);
+        const article = await this.repo.findArticleBySlug(slug, true);
+        if (!article)
+            return null;
+        return {
+            ...article,
+            content: (0, articleContentNormalizer_1.normalizeArticleContent)(article.content),
+        };
     }
     /**
      * Validates and upserts an article by slug.

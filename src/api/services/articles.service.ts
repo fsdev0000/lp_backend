@@ -1,6 +1,7 @@
 import { articlesRepository, ArticlesRepository } from '../repositories/articles.repository';
 import { parseAndValidateArticleInput, Article, ArticleSummary } from '../validation/articles.validation';
 import { getSecret } from '../../services/secrets';
+import { normalizeArticleContent } from '../utils/articleContentNormalizer';
 
 export class ArticlesService {
   constructor(private repo: ArticlesRepository = articlesRepository) {}
@@ -21,16 +22,32 @@ export class ArticlesService {
 
   /**
    * Lists all published articles for the website.
+   * If any article entry includes content, normalizes it.
    */
   async listPublishedArticles(): Promise<ArticleSummary[]> {
-    return this.repo.findPublishedArticles();
+    const articles = await this.repo.findPublishedArticles();
+    return articles.map((article: any) => {
+      if (article.content) {
+        return {
+          ...article,
+          content: normalizeArticleContent(article.content),
+        };
+      }
+      return article;
+    });
   }
 
   /**
    * Returns a single published article by slug.
+   * Inspects and normalizes malformed Markdown in memory before returning.
    */
   async getPublishedArticleBySlug(slug: string): Promise<Article | null> {
-    return this.repo.findArticleBySlug(slug, true);
+    const article = await this.repo.findArticleBySlug(slug, true);
+    if (!article) return null;
+    return {
+      ...article,
+      content: normalizeArticleContent(article.content),
+    };
   }
 
   /**
