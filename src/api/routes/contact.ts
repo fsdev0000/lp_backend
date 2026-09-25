@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSecret } from '../../services/secrets';
+import { contactRateLimiter } from '../../middleware/rateLimiter';
 
 export const contactRouter = Router();
 
@@ -417,5 +418,5 @@ async function handleContact(req: Request, res: Response): Promise<void> {
 }
 
 // Support both /contact and /contact-us
-contactRouter.post('/contact', handleContact);
-contactRouter.post('/contact-us', handleContact);
+contactRouter.post('/contact', contactRateLimiter, handleContact);
+contactRouter.post('/contact-us', contactRateLimiter, handleContact);

@@ -11,6 +11,7 @@ import { getSecret } from '../../services/secrets';
 import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntimeVariables } from '../../services/ai/daisy/PromptBuilder';
 import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
 import { consentRoutes } from './consent';
+import { assessmentRateLimiter } from '../../middleware/rateLimiter';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -343,7 +344,7 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
   }
 });
 
-apiRoutes.post('/assessments/submit', async (req, res) => {
+apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) => {
   try {
     const { founder, answers } = req.body;
 

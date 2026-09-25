@@ -14,6 +14,8 @@ import { WebSocketServer } from 'ws';
 import { setupLlmWebSocket } from './api/routes/llm';
 
 const app = express();
+// Enable trust proxy for Traefik reverse proxy to accurately derive client IP from X-Forwarded-For
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 4000;
 const httpServer = createServer(app);
 
