@@ -24,6 +24,7 @@ const ALLOWED_ORIGINS = [
   'https://leadersperformance.ae',
   'https://www.leadersperformance.ae',
   'https://api.leadersperformance.ae',
+  'https://staging.leadersperformance.ae',
   'https://srv826934.hstgr.cloud',
   'https://elevenlabs.io',
   'https://api.elevenlabs.io',
@@ -113,6 +114,7 @@ app.set('io', io);
 import { checkoutRouter } from './api/routes/checkout';
 import { contactRouter } from './api/routes/contact';
 import { articlesRoutes } from './api/routes/articles.routes';
+import { unmaskedPrivateRouter } from './api/routes/unmaskedPrivate';
 
 app.use(cors(corsOptions));
 app.use(
@@ -130,12 +132,32 @@ app.use('/api', contactRouter);
 app.use('/api/v1', contactRouter);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/v1/articles', articlesRoutes);
+app.use('/unmasked-private', unmaskedPrivateRouter);
+app.use('/api/unmasked-private', unmaskedPrivateRouter);
+app.use('/api/v1/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/v1', apiRoutes);
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+import { swaggerBasicAuth } from './middleware/swaggerAuth';
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Backend is running' });
-});
+app.use('/api-docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+const healthCheckHandler = (_req: express.Request, res: express.Response) => {
+  res.status(200).json({
+    status: 'ok',
+    message: 'Backend is running',
+    timestamp: new Date().toISOString(),
+  });
+};
+
+app.get('/health', healthCheckHandler);
+app.get('/api/health', healthCheckHandler);
+app.get('/api/v1/health', healthCheckHandler);
+
+const pingHandler = (_req: express.Request, res: express.Response) => {
+  res.status(200).json({ message: 'pong' });
+};
+
+app.get('/ping', pingHandler);
+app.get('/api/ping', pingHandler);
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
