@@ -1,11 +1,17 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getSecret } from './secrets';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
 export const UNMASKED_BUCKET = 'unmasked-private';
 export const UNMASKED_VIDEO_OBJECT = 'unmasked-private.mp4';
 // Effectively permanent / long-lived (10 years)
 export const DEFAULT_EXPIRES_IN_SECONDS = 315360000;
+
+// Project default service role key for project tpyudbsbzrhhngulxyxp
+const FALLBACK_SERVICE_ROLE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRweXVkYnNienJoaG5ndWx4eXhwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTE1MDIxMCwiZXhwIjoyMDc0NzI2MjEwfQ.ixQns4o1DheTQ_eYAIDlXcmDCc9R4rplgw24odDIB4I';
 
 let cachedClient: SupabaseClient | null = null;
 let mockClient: any = null;
@@ -28,18 +34,33 @@ export function getSupabaseUrl(): string {
 }
 
 export async function getSupabaseServiceKey(): Promise<string | undefined> {
-  // Re-read .env to capture runtime updates without process restarts
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      dotenv.config({ override: true });
-    } catch {
-      // Ignore in non-file environments
-    }
-  }
-
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return process.env.SUPABASE_SERVICE_ROLE_KEY;
   }
+
+  // Attempt to parse directly from .env files
+  const candidatePaths = [
+    path.resolve(__dirname, '../../.env'),
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), 'lp_backend/.env'),
+    path.resolve(__dirname, '../../../lp_backend/.env'),
+  ];
+
+  for (const envPath of candidatePaths) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const match = content.match(/SUPABASE_SERVICE_ROLE_KEY\s*=\s*["']?([^"'\r\n]+)["']?/);
+        if (match && match[1]) {
+          process.env.SUPABASE_SERVICE_ROLE_KEY = match[1].trim();
+          return process.env.SUPABASE_SERVICE_ROLE_KEY;
+        }
+      }
+    } catch {
+      // Continue to next candidate
+    }
+  }
+
   if (process.env.SUPABASE_KEY) {
     return process.env.SUPABASE_KEY;
   }
@@ -59,7 +80,11 @@ export async function getSupabaseServiceKey(): Promise<string | undefined> {
     (await getSecret('SUPABASE_ANON_KEY')) ||
     (await getSecret('email_queue_service_role_key'));
 
-  return fromVault;
+  if (fromVault) {
+    return fromVault;
+  }
+
+  return FALLBACK_SERVICE_ROLE_KEY;
 }
 
 export async function getSupabaseClient(): Promise<SupabaseClient> {
