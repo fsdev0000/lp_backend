@@ -64,7 +64,7 @@ async function main() {
     });
   }
 
-  // System Config (Revenue, Stages, Scale Options)
+  // System Config (Revenue, Stages, Scale Options, Unmasked Questionnaire)
   await prisma.systemConfig.deleteMany({});
   await prisma.systemConfig.create({
     data: { key: 'revenueBands', value: JSON.stringify(revenueBands) },
@@ -74,6 +74,42 @@ async function main() {
   });
   await prisma.systemConfig.create({
     data: { key: 'scaleOptions', value: JSON.stringify(scaleOptions) },
+  });
+  await prisma.systemConfig.create({
+    data: {
+      key: 'unmasked_questionnaire',
+      value: JSON.stringify({
+        step2: {
+          step: 2,
+          title: 'Your Result',
+          questions: [
+            { id: 'businessResult', text: 'What is the one business result, consequential decision or strategic challenge you want to address?', required: true },
+            { id: 'attentionNow', text: 'Why does this require attention now?', required: true },
+            { id: 'outcome90Days', text: 'What would a successful outcome make possible during the next 90 days?', required: true },
+            { id: 'attemptedAlready', text: 'What have you already attempted, and what happened?(optional)', required: false }
+          ]
+        },
+        step3: {
+          step: 3,
+          title: 'Your Readiness',
+          notice: 'UNMASKED PRIVATE engagements start at AED 10,000 excluding VAT.',
+          questions: [
+            { id: 'decisionInfluence', text: 'Where may your own decisions, standards or behaviour be influencing the current result?', required: true },
+            { id: 'challengeView', text: 'Describe a recent situation in which someone challenged your view and you changed your decision or approach.\nWhat did you initially believe, what changed your view and what did you do differently?', required: true },
+            { id: 'authorityToAct', text: 'Do you have the authority and practical ability to act on the decisions that may emerge?', options: ['Yes', 'Partly', 'No'], required: true },
+            { id: 'investmentReadiness', text: 'If there is a genuine fit, what level of investment are you currently prepared to make in accelerating this result?', options: [
+              { label: 'Up to AED 5,000', value: 'UP_TO_5K' },
+              { label: 'AED 5,001–9,999', value: 'FROM_5K_TO_10K' },
+              { label: 'AED 10,000–14,999', value: 'FROM_10K_TO_15K' },
+              { label: 'AED 15,000–19,999', value: 'FROM_15K_TO_20K' },
+              { label: 'AED 20,000 or more', value: 'OVER_20K' },
+              { label: 'The appropriate investment depends on the value of the result and proposed scope', value: 'VALUE_DEPENDENT' }
+            ], required: true },
+            { id: 'availableForCall', text: 'Are you available for a confidential 30-minute conversation if Lionel determines there is a genuine fit?', options: ['Yes', 'No'], required: true }
+          ]
+        }
+      })
+    }
   });
 
   console.log('Seeding complete!');

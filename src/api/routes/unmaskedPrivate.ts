@@ -13,7 +13,10 @@ import {
   recordRecentSubmission,
   sendUnmaskedPrivateNotification,
   withRetry,
-  INVESTMENT_LABELS,
+  normalizeInvestmentReadiness,
+  getUnmaskedQuestionnaire,
+  updateUnmaskedQuestionnaire,
+  UnmaskedPrivatePayload,
 } from '../../services/unmaskedPrivateService';
 
 export const unmaskedPrivateRouter = Router();
@@ -28,46 +31,180 @@ const unmaskedPrivateLimiter = createRateLimiter({
 });
 
 // Zod Validation Schemas
-const Step1Schema = z.object({
-  fullName: z
-    .string({ message: 'Full name is required.' })
-    .trim()
-    .min(2, 'Full name must be at least 2 characters.')
-    .max(100, 'Full name cannot exceed 100 characters.'),
-  email: z
-    .string({ message: 'A valid corporate email address is required.' })
-    .trim()
-    .email('A valid corporate email address is required.'),
-  phone: z.string().trim().optional(),
-  companyName: z.string().trim().optional(),
-  roleTitle: z.string().trim().optional(),
-});
+const Step1Schema = z
+  .object({
+    fullName: z
+      .string({ message: 'Please enter your full name.' })
+      .trim()
+      .min(2, 'Please enter your full name.')
+      .max(100, 'Full name cannot exceed 100 characters.'),
+    email: z
+      .string({ message: 'Please enter your work email.' })
+      .trim()
+      .email('Please enter your work email.'),
+    phone: z
+      .string({ message: 'Please enter your mobile or WhatsApp number.' })
+      .trim()
+      .min(5, 'Please enter your mobile or WhatsApp number.'),
+    companyName: z
+      .string({ message: 'Please enter your company name.' })
+      .trim()
+      .min(1, 'Please enter your company name.')
+      .max(150, 'Company name cannot exceed 150 characters.'),
+    companyWebsite: z.string().trim().optional(),
+    role: z.string().trim().optional(),
+    roleTitle: z.string().trim().optional(),
+    cityAndCountry: z.string().trim().optional(),
+    location: z.string().trim().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.role && !data.roleTitle) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please enter your role.',
+        path: ['role'],
+      });
+    }
+    if (!data.cityAndCountry && !data.location) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please enter your city and country.',
+        path: ['cityAndCountry'],
+      });
+    }
+  });
 
 const Step2Schema = z
   .object({
+    businessResult: z.string().trim().optional(),
+    attentionNow: z.string().trim().optional(),
+    outcome90Days: z.string().trim().optional(),
+    attemptedAlready: z.string().trim().optional(),
     contextAnswers: z.record(z.string(), z.any()).optional(),
   })
   .passthrough()
-  .optional()
-  .default({});
+  .superRefine((data, ctx) => {
+    const br =
+      data.businessResult ||
+      data.contextAnswers?.businessResult ||
+      data.contextAnswers?.currentChallenge ||
+      data.contextAnswers?.primaryChallenge;
+    if (!br || !String(br).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This field is required.',
+        path: ['businessResult'],
+      });
+    }
 
-const InvestmentReadinessEnum = z.enum([
-  'UP_TO_5K',
-  'FROM_5K_TO_10K',
-  'FROM_10K_TO_15K',
-  'FROM_15K_TO_20K',
-  'OVER_20K',
-  'VALUE_DEPENDENT',
-]);
+    const an =
+      data.attentionNow ||
+      data.contextAnswers?.attentionNow ||
+      data.contextAnswers?.whyNow;
+    if (!an || !String(an).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This field is required.',
+        path: ['attentionNow'],
+      });
+    }
 
-const Step3Schema = z.object({
-  investmentReadiness: InvestmentReadinessEnum,
-});
+    const od =
+      data.outcome90Days ||
+      data.contextAnswers?.outcome90Days ||
+      data.contextAnswers?.successfulOutcome;
+    if (!od || !String(od).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This field is required.',
+        path: ['outcome90Days'],
+      });
+    }
+  });
+
+const Step3Schema = z
+  .object({
+    decisionInfluence: z.string().trim().optional(),
+    challengeView: z.string().trim().optional(),
+    authorityToAct: z.string().trim().optional(),
+    investmentReadiness: z.string({ message: 'Please select an option.' }).trim(),
+    availableForCall: z.string().trim().optional(),
+    contextAnswers: z.record(z.string(), z.any()).optional(),
+  })
+  .passthrough()
+  .superRefine((data, ctx) => {
+    const di =
+      data.decisionInfluence ||
+      data.contextAnswers?.decisionInfluence ||
+      data.contextAnswers?.ownDecisions;
+    if (!di || !String(di).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This field is required.',
+        path: ['decisionInfluence'],
+      });
+    }
+
+    const cv =
+      data.challengeView ||
+      data.contextAnswers?.challengeView ||
+      data.contextAnswers?.recentSituation;
+    if (!cv || !String(cv).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This field is required.',
+        path: ['challengeView'],
+      });
+    }
+
+    const auth =
+      data.authorityToAct ||
+      data.contextAnswers?.authorityToAct ||
+      data.contextAnswers?.authority;
+    if (!auth || !String(auth).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please select an option.',
+        path: ['authorityToAct'],
+      });
+    }
+
+    const normalizedInv = normalizeInvestmentReadiness(data.investmentReadiness);
+    const validInv = [
+      'UP_TO_5K',
+      'FROM_5K_TO_10K',
+      'FROM_10K_TO_15K',
+      'FROM_15K_TO_20K',
+      'OVER_20K',
+      'VALUE_DEPENDENT',
+    ];
+    if (!normalizedInv || !validInv.includes(normalizedInv)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please select an option.',
+        path: ['investmentReadiness'],
+      });
+    }
+
+    const call =
+      data.availableForCall ||
+      data.contextAnswers?.availableForCall ||
+      data.contextAnswers?.available;
+    if (!call || !String(call).trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please select an option.',
+        path: ['availableForCall'],
+      });
+    }
+  });
 
 const ConsentSchema = z.object({
-  privacyConsent: z.boolean({ message: 'Privacy consent is required.' }).refine((val) => val === true, {
-    message: 'Privacy consent must be explicitly granted.',
-  }),
+  privacyConsent: z
+    .boolean({ message: 'Please confirm your consent to continue.' })
+    .refine((val) => val === true, {
+      message: 'Please confirm your consent to continue.',
+    }),
   privacyPolicyVersion: z.string().optional().default('2026.1'),
 });
 
@@ -92,10 +229,166 @@ const UnmaskedApplySchema = z.object({
 
 /**
  * @openapi
+ * /unmasked-private/questions:
+ *   get:
+ *     summary: Fetch dynamic UNMASKED PRIVATE application questionnaire from database
+ *     description: Returns the questions, choices, and configuration for Step 2 (Your Result) and Step 3 (Your Readiness) directly from the database (SystemConfig key 'unmasked_questionnaire'). Step 1 (About You) contact details are rendered directly by the frontend UI.
+ *     tags:
+ *       - Unmasked Private
+ *     responses:
+ *       200:
+ *         description: Dynamic questionnaire configuration retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 questionnaire:
+ *                   type: object
+ *                   properties:
+ *                     step2:
+ *                       type: object
+ *                       properties:
+ *                         step:
+ *                           type: integer
+ *                           example: 2
+ *                         title:
+ *                           type: string
+ *                           example: "Your Result"
+ *                         questions:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                                 example: "businessResult"
+ *                               text:
+ *                                 type: string
+ *                                 example: "What is the one business result, consequential decision or strategic challenge you want to address?"
+ *                               required:
+ *                                 type: boolean
+ *                                 example: true
+ *                     step3:
+ *                       type: object
+ *                       properties:
+ *                         step:
+ *                           type: integer
+ *                           example: 3
+ *                         title:
+ *                           type: string
+ *                           example: "Your Readiness"
+ *                         notice:
+ *                           type: string
+ *                           example: "UNMASKED PRIVATE engagements start at AED 10,000 excluding VAT."
+ *                         questions:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *       500:
+ *         description: Database retrieval error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "QUESTIONNAIRE_FETCH_ERROR"
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to retrieve questionnaire configuration from database."
+ */
+unmaskedPrivateRouter.get('/questions', async (_req: Request, res: Response) => {
+  try {
+    const questionnaire = await getUnmaskedQuestionnaire();
+    return res.status(200).json({
+      success: true,
+      questionnaire,
+    });
+  } catch (error: any) {
+    console.error('[Unmasked Private] Failed to load questions:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      error: 'QUESTIONNAIRE_FETCH_ERROR',
+      message: 'Failed to retrieve questionnaire configuration from database.',
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /unmasked-private/questions:
+ *   put:
+ *     summary: Update dynamic UNMASKED PRIVATE questionnaire in database
+ *     description: Persists modified questions, steps, labels, or error messages directly into the PostgreSQL database (SystemConfig). Automatically invalidates the in-memory cache.
+ *     tags:
+ *       - Unmasked Private
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Full or updated questionnaire JSON schema
+ *     responses:
+ *       200:
+ *         description: Questionnaire updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Questionnaire updated successfully in database."
+ *                 questionnaire:
+ *                   type: object
+ *       400:
+ *         description: Invalid JSON payload
+ *       500:
+ *         description: Database write error
+ */
+unmaskedPrivateRouter.put('/questions', async (req: Request, res: Response) => {
+  try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PAYLOAD',
+        message: 'Invalid questionnaire configuration payload.',
+      });
+    }
+    const updated = await updateUnmaskedQuestionnaire(req.body);
+    return res.status(200).json({
+      success: true,
+      message: 'Questionnaire updated successfully in database.',
+      questionnaire: updated,
+    });
+  } catch (error: any) {
+    console.error('[Unmasked Private] Failed to update questions in DB:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      error: 'QUESTIONNAIRE_UPDATE_ERROR',
+      message: 'Failed to update questionnaire configuration in database.',
+    });
+  }
+});
+
+/**
+ * @openapi
  * /unmasked-private/apply:
  *   post:
  *     summary: Submit UNMASKED PRIVATE application with investment-based routing
- *     description: Validates multi-step application, executes single-source-of-truth investment readiness routing, checks for duplicate submissions, syncs contact to GoHighLevel CRM, and triggers instant internal briefings to executive advisors.
+ *     description: Validates 3-step application, executes single-source-of-truth investment readiness routing, checks for duplicate submissions, syncs contact to GoHighLevel CRM, and triggers instant internal briefings to executive advisors.
  *     tags:
  *       - Unmasked Private
  *     requestBody:
@@ -106,6 +399,7 @@ const UnmaskedApplySchema = z.object({
  *             type: object
  *             required:
  *               - step1
+ *               - step2
  *               - step3
  *               - consent
  *             properties:
@@ -114,6 +408,10 @@ const UnmaskedApplySchema = z.object({
  *                 required:
  *                   - fullName
  *                   - email
+ *                   - phone
+ *                   - companyName
+ *                   - role
+ *                   - cityAndCountry
  *                 properties:
  *                   fullName:
  *                     type: string
@@ -128,21 +426,53 @@ const UnmaskedApplySchema = z.object({
  *                   companyName:
  *                     type: string
  *                     example: Vance Holding Ltd
- *                   roleTitle:
+ *                   companyWebsite:
+ *                     type: string
+ *                     example: "https://vanceholding.com"
+ *                   role:
  *                     type: string
  *                     example: Managing Director
+ *                   cityAndCountry:
+ *                     type: string
+ *                     example: "Dubai, United Arab Emirates"
  *               step2:
  *                 type: object
+ *                 required:
+ *                   - businessResult
+ *                   - attentionNow
+ *                   - outcome90Days
  *                 properties:
- *                   contextAnswers:
- *                     type: object
- *                     example:
- *                       primaryChallenge: "Executive scaling and leadership alignment"
+ *                   businessResult:
+ *                     type: string
+ *                     example: "Decoupling founder dependency and establishing operational governance"
+ *                   attentionNow:
+ *                     type: string
+ *                     example: "Expanding to secondary markets requires autonomous operational cadence"
+ *                   outcome90Days:
+ *                     type: string
+ *                     example: "Executive team takes 100% ownership of operating margins and hiring"
+ *                   attemptedAlready:
+ *                     type: string
+ *                     example: "Appointed general manager but decision bottlenecks persisted"
  *               step3:
  *                 type: object
  *                 required:
+ *                   - decisionInfluence
+ *                   - challengeView
+ *                   - authorityToAct
  *                   - investmentReadiness
+ *                   - availableForCall
  *                 properties:
+ *                   decisionInfluence:
+ *                     type: string
+ *                     example: "Tendency to micromanage tactical deliveries during high-pressure cycles"
+ *                   challengeView:
+ *                     type: string
+ *                     example: "CTO proposed architectural shift which I initially resisted then endorsed"
+ *                   authorityToAct:
+ *                     type: string
+ *                     enum: [Yes, Partly, No]
+ *                     example: Yes
  *                   investmentReadiness:
  *                     type: string
  *                     enum:
@@ -153,6 +483,10 @@ const UnmaskedApplySchema = z.object({
  *                       - OVER_20K
  *                       - VALUE_DEPENDENT
  *                     example: FROM_15K_TO_20K
+ *                   availableForCall:
+ *                     type: string
+ *                     enum: [Yes, No]
+ *                     example: Yes
  *               consent:
  *                 type: object
  *                 required:
@@ -169,13 +503,13 @@ const UnmaskedApplySchema = z.object({
  *                 properties:
  *                   utm_source:
  *                     type: string
- *                     example: linkedin
+ *                     example: "linkedin"
  *                   utm_medium:
  *                     type: string
- *                     example: cpc
+ *                     example: "cpc"
  *                   utm_campaign:
  *                     type: string
- *                     example: private_advisory
+ *                     example: "private_advisory"
  *     responses:
  *       200:
  *         description: Application accepted and evaluated
@@ -212,17 +546,30 @@ const UnmaskedApplySchema = z.object({
  *                   example: false
  *                 error:
  *                   type: string
- *                   example: VALIDATION_ERROR
+ *                   example: "VALIDATION_ERROR"
  *                 message:
  *                   type: string
- *                   example: Please correct the highlighted fields.
+ *                   example: "Please correct the highlighted fields."
  *                 fields:
  *                   type: object
  *                   additionalProperties:
  *                     type: string
  *                   example:
- *                     step1.email: "A valid corporate email address is required."
- *                     step3.investmentReadiness: "Please select an investment readiness option."
+ *                     step1.fullName: "Please enter your full name."
+ *                     step1.email: "Please enter your work email."
+ *                     step1.phone: "Please enter your mobile or WhatsApp number."
+ *                     step1.companyName: "Please enter your company name."
+ *                     step1.role: "Please enter your role."
+ *                     step1.cityAndCountry: "Please enter your city and country."
+ *                     step2.businessResult: "This field is required."
+ *                     step2.attentionNow: "This field is required."
+ *                     step2.outcome90Days: "This field is required."
+ *                     step3.decisionInfluence: "This field is required."
+ *                     step3.challengeView: "This field is required."
+ *                     step3.authorityToAct: "Please select an option."
+ *                     step3.investmentReadiness: "Please select an option."
+ *                     step3.availableForCall: "Please select an option."
+ *                     consent.privacyConsent: "Please confirm your consent to continue."
  *       409:
  *         description: Duplicate application detected within window
  *         content:
@@ -235,10 +582,10 @@ const UnmaskedApplySchema = z.object({
  *                   example: false
  *                 error:
  *                   type: string
- *                   example: DUPLICATE_SUBMISSION
+ *                   example: "DUPLICATE_SUBMISSION"
  *                 message:
  *                   type: string
- *                   example: An application with this email has already been received and is currently under review.
+ *                   example: "An application with this email has already been received and is currently under review."
  *       429:
  *         description: Rate limit exceeded (maximum 5 submissions per hour per IP)
  *         content:
@@ -251,10 +598,10 @@ const UnmaskedApplySchema = z.object({
  *                   example: false
  *                 error:
  *                   type: string
- *                   example: TOO_MANY_REQUESTS
+ *                   example: "TOO_MANY_REQUESTS"
  *                 message:
  *                   type: string
- *                   example: Too many requests. Please try again later.
+ *                   example: "Too many requests. Please try again later."
  *       500:
  *         description: Server fault during processing
  *         content:
@@ -267,10 +614,10 @@ const UnmaskedApplySchema = z.object({
  *                   example: false
  *                 error:
  *                   type: string
- *                   example: SUBMISSION_ERROR
+ *                   example: "SUBMISSION_ERROR"
  *                 message:
  *                   type: string
- *                   example: We could not process your application at this moment. Please try again.
+ *                   example: "We could not process your application at this moment. Please try again."
  */
 async function handleApplicationSubmission(req: Request, res: Response) {
   let normalizedEmail = '';
@@ -282,11 +629,7 @@ async function handleApplicationSubmission(req: Request, res: Response) {
       const fieldErrors: Record<string, string> = {};
       for (const issue of parseResult.error.issues) {
         const pathKey = issue.path.join('.');
-        if (pathKey === 'step3.investmentReadiness') {
-          fieldErrors[pathKey] = 'Please select an investment readiness option.';
-        } else {
-          fieldErrors[pathKey] = issue.message;
-        }
+        fieldErrors[pathKey] = issue.message;
       }
 
       return res.status(400).json({
@@ -297,7 +640,7 @@ async function handleApplicationSubmission(req: Request, res: Response) {
       });
     }
 
-    const payload = parseResult.data;
+    const payload = parseResult.data as unknown as UnmaskedPrivatePayload;
     normalizedEmail = payload.step1.email.toLowerCase().trim();
 
     // 2. In-Flight Concurrency Lock (prevents rapid double-clicks on submit button)
@@ -310,8 +653,6 @@ async function handleApplicationSubmission(req: Request, res: Response) {
     }
 
     // 3. Duplicate Submission Detection (409 Conflict)
-    // Tier 1: In-memory cache (<1ms response)
-    // Tier 2: GoHighLevel CRM lookup (persists across server restarts / deploys)
     const isDuplicate = checkRecentDuplicate(normalizedEmail) || (await checkGhlDuplicate(normalizedEmail));
     if (isDuplicate) {
       return res.status(409).json({
