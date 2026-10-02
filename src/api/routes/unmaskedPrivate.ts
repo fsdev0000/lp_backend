@@ -747,14 +747,13 @@ async function handleApplicationSubmission(req: Request, res: Response) {
         { retries: 3, delayMs: 500, context: 'GHL Contact Upsert' }
       );
 
-      // If qualified, trigger immediate briefing email to Lionel (strictly disabled during tests)
+      // Trigger immediate briefing email to Lionel & staff (strictly disabled during tests)
       if (
-        routing.isQualified &&
         process.env.NODE_ENV !== 'test' &&
         process.env.SKIP_EMAIL !== 'true' &&
         process.env.CI !== 'true'
       ) {
-        sendUnmaskedPrivateNotification(payload, referenceNumber, contactId).catch((err) => {
+        sendUnmaskedPrivateNotification(payload, referenceNumber, contactId, routing.isQualified).catch((err) => {
           console.error('[Unmasked Private] Background notification error:', err?.message || err);
         });
       }

@@ -475,7 +475,18 @@ export function buildUnmaskedBriefingEmail(data: {
     ? `<a href="${escapeHtml(data.companyWebsite)}" target="_blank" style="color:#8a5c18;text-decoration:underline;">${escapeHtml(data.companyWebsite)}</a>`
     : 'Not provided';
 
+  const isQualified = data.isQualified !== false;
+  const statusHeading = isQualified
+    ? 'New Application Awaiting Personal Review'
+    : 'New Application (Below Investment Threshold)';
+
+  const statusSubtext = isQualified
+    ? 'A qualified applicant has submitted an application for UNMASKED PRIVATE. The profile meets the investment threshold and is pending your executive review.'
+    : 'An applicant has submitted an application for UNMASKED PRIVATE with an investment tier below AED 10,000 (Below Threshold).';
+
   const variables: Record<string, string> = {
+    status_heading: escapeHtml(statusHeading),
+    status_subtext: escapeHtml(statusSubtext),
     participant_name: escapeHtml(data.participantName),
     email: escapeHtml(data.email),
     phone: escapeHtml(data.phone || 'Not provided'),
@@ -504,7 +515,8 @@ export function buildUnmaskedBriefingEmail(data: {
     rendered = rendered.replace(new RegExp(`{{${k}}}`, 'g'), v);
   }
 
-  const subject = `[UNMASKED PRIVATE] New Application — ${data.participantName} (${data.companyName || 'Confidential'}) — ${data.referenceNumber}`;
+  const statusPrefix = isQualified ? '[UNMASKED PRIVATE]' : '[UNMASKED PRIVATE — BELOW THRESHOLD]';
+  const subject = `${statusPrefix} New Application — ${data.participantName} (${data.companyName || 'Confidential'}) — ${data.referenceNumber}`;
 
   return { subject, html: rendered };
 }
@@ -546,7 +558,8 @@ export async function withRetry<T>(
 export async function sendUnmaskedPrivateNotification(
   payload: UnmaskedPrivatePayload,
   referenceNumber: string,
-  contactId?: string
+  contactId?: string,
+  isQualified: boolean = true
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test' || process.env.SKIP_EMAIL === 'true' || process.env.CI === 'true') {
     return;
@@ -614,7 +627,7 @@ export async function sendUnmaskedPrivateNotification(
     referenceNumber,
     submittedAt: formatOperationalSubmissionDate(),
     reviewUrl,
-    isQualified: true,
+    isQualified,
     businessResult,
     attentionNow,
     outcome90Days,

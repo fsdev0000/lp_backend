@@ -384,7 +384,16 @@ function buildUnmaskedBriefingEmail(data) {
     const companyWebsiteHtml = data.companyWebsite
         ? `<a href="${(0, email_1.escapeHtml)(data.companyWebsite)}" target="_blank" style="color:#8a5c18;text-decoration:underline;">${(0, email_1.escapeHtml)(data.companyWebsite)}</a>`
         : 'Not provided';
+    const isQualified = data.isQualified !== false;
+    const statusHeading = isQualified
+        ? 'New Application Awaiting Personal Review'
+        : 'New Application (Below Investment Threshold)';
+    const statusSubtext = isQualified
+        ? 'A qualified applicant has submitted an application for UNMASKED PRIVATE. The profile meets the investment threshold and is pending your executive review.'
+        : 'An applicant has submitted an application for UNMASKED PRIVATE with an investment tier below AED 10,000 (Below Threshold).';
     const variables = {
+        status_heading: (0, email_1.escapeHtml)(statusHeading),
+        status_subtext: (0, email_1.escapeHtml)(statusSubtext),
         participant_name: (0, email_1.escapeHtml)(data.participantName),
         email: (0, email_1.escapeHtml)(data.email),
         phone: (0, email_1.escapeHtml)(data.phone || 'Not provided'),
@@ -411,7 +420,8 @@ function buildUnmaskedBriefingEmail(data) {
     for (const [k, v] of Object.entries(variables)) {
         rendered = rendered.replace(new RegExp(`{{${k}}}`, 'g'), v);
     }
-    const subject = `[UNMASKED PRIVATE] New Application — ${data.participantName} (${data.companyName || 'Confidential'}) — ${data.referenceNumber}`;
+    const statusPrefix = isQualified ? '[UNMASKED PRIVATE]' : '[UNMASKED PRIVATE — BELOW THRESHOLD]';
+    const subject = `${statusPrefix} New Application — ${data.participantName} (${data.companyName || 'Confidential'}) — ${data.referenceNumber}`;
     return { subject, html: rendered };
 }
 // Resilient exponential backoff retry utility
@@ -439,7 +449,7 @@ async function withRetry(operation, options = {}) {
     throw lastError;
 }
 // Dispatches notification alerts to Lionel and Leaders Performance staff
-async function sendUnmaskedPrivateNotification(payload, referenceNumber, contactId) {
+async function sendUnmaskedPrivateNotification(payload, referenceNumber, contactId, isQualified = true) {
     if (process.env.NODE_ENV === 'test' || process.env.SKIP_EMAIL === 'true' || process.env.CI === 'true') {
         return;
     }
@@ -491,7 +501,7 @@ async function sendUnmaskedPrivateNotification(payload, referenceNumber, contact
         referenceNumber,
         submittedAt: (0, email_1.formatOperationalSubmissionDate)(),
         reviewUrl,
-        isQualified: true,
+        isQualified,
         businessResult,
         attentionNow,
         outcome90Days,
