@@ -18,8 +18,6 @@ exports.UNMASKED_BUCKET = 'unmasked-private';
 exports.UNMASKED_VIDEO_OBJECT = 'unmasked-private.mp4';
 // Effectively permanent / long-lived (10 years)
 exports.DEFAULT_EXPIRES_IN_SECONDS = 315360000;
-// Project default service role key for project tpyudbsbzrhhngulxyxp
-const FALLBACK_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRweXVkYnNienJoaG5ndWx4eXhwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTE1MDIxMCwiZXhwIjoyMDc0NzI2MjEwfQ.ixQns4o1DheTQ_eYAIDlXcmDCc9R4rplgw24odDIB4I';
 let cachedClient = null;
 let mockClient = null;
 function setMockSupabaseStorageClient(mock) {
@@ -79,7 +77,7 @@ async function getSupabaseServiceKey() {
     if (fromVault) {
         return fromVault;
     }
-    return FALLBACK_SERVICE_ROLE_KEY;
+    return undefined;
 }
 async function getSupabaseClient() {
     if (mockClient) {

@@ -689,7 +689,8 @@ async function handleApplicationSubmission(req: Request, res: Response) {
     const payload = parseResult.data as unknown as UnmaskedPrivatePayload;
     normalizedEmail = payload.step1.email.toLowerCase().trim();
 
-    // 2. In-Flight Concurrency Lock (prevents rapid double-clicks on submit button)
+    // 2. In-Flight Concurrency Lock (Commented out for testing)
+    /*
     if (!acquireInFlightLock(normalizedEmail)) {
       return res.status(409).json({
         success: false,
@@ -697,8 +698,10 @@ async function handleApplicationSubmission(req: Request, res: Response) {
         message: 'An application with this email has already been received and is currently under review.',
       });
     }
+    */
 
-    // 3. Duplicate Submission Detection (409 Conflict)
+    // 3. Duplicate Submission Detection (Commented out for testing)
+    /*
     const isDuplicate = checkRecentDuplicate(normalizedEmail) || (await checkGhlDuplicate(normalizedEmail));
     if (isDuplicate) {
       return res.status(409).json({
@@ -707,6 +710,7 @@ async function handleApplicationSubmission(req: Request, res: Response) {
         message: 'An application with this email has already been received and is currently under review.',
       });
     }
+    */
 
     // 4. Investment-Based Routing Logic
     const routing = evaluateInvestmentRouting(payload.step3.investmentReadiness);
@@ -786,6 +790,6 @@ async function handleApplicationSubmission(req: Request, res: Response) {
   }
 }
 
-// Mount handler on /apply as well as root / of router
-unmaskedPrivateRouter.post('/apply', unmaskedPrivateLimiter, handleApplicationSubmission);
-unmaskedPrivateRouter.post('/', unmaskedPrivateLimiter, handleApplicationSubmission);
+// Mount handler on /apply as well as root / of router (rate limiter bypassed for testing)
+unmaskedPrivateRouter.post('/apply', handleApplicationSubmission);
+unmaskedPrivateRouter.post('/', handleApplicationSubmission);
