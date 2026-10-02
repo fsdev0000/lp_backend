@@ -25,6 +25,8 @@ const ALLOWED_ORIGINS = [
     'https://leadersperformance.ae',
     'https://www.leadersperformance.ae',
     'https://api.leadersperformance.ae',
+    'https://staging.leadersperformance.ae',
+    'https://unmasked.leadersperformance.ae',
     'https://srv826934.hstgr.cloud',
     'https://elevenlabs.io',
     'https://api.elevenlabs.io',
@@ -106,6 +108,7 @@ app.set('io', exports.io);
 const checkout_1 = require("./api/routes/checkout");
 const contact_1 = require("./api/routes/contact");
 const articles_routes_1 = require("./api/routes/articles.routes");
+const unmaskedPrivate_1 = require("./api/routes/unmaskedPrivate");
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({
     verify: (req, _res, buf) => {
@@ -119,11 +122,27 @@ app.use('/api', contact_1.contactRouter);
 app.use('/api/v1', contact_1.contactRouter);
 app.use('/api/articles', articles_routes_1.articlesRoutes);
 app.use('/api/v1/articles', articles_routes_1.articlesRoutes);
+app.use('/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
+app.use('/api/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
+app.use('/api/v1/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/v1', routes_1.apiRoutes);
-app.use('/api-docs', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec));
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Backend is running' });
-});
+const swaggerAuth_1 = require("./middleware/swaggerAuth");
+app.use('/api-docs', swaggerAuth_1.swaggerBasicAuth, swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec));
+const healthCheckHandler = (_req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        message: 'Backend is running',
+        timestamp: new Date().toISOString(),
+    });
+};
+app.get('/health', healthCheckHandler);
+app.get('/api/health', healthCheckHandler);
+app.get('/api/v1/health', healthCheckHandler);
+const pingHandler = (_req, res) => {
+    res.status(200).json({ message: 'pong' });
+};
+app.get('/ping', pingHandler);
+app.get('/api/ping', pingHandler);
 httpServer.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });

@@ -82,6 +82,18 @@ const swaggerOptions = {
           scheme: 'basic',
           description: 'HTTP Basic Authentication for administrative and API documentation access.',
         },
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'Token',
+          description: 'Bearer token for UNMASKED PRIVATE video access and protected operations.',
+        },
+        apiKeyAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-key',
+          description: 'API key for management and protected endpoints.',
+        },
       },
     },
     security: [

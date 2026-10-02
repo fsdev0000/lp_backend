@@ -136,9 +136,9 @@ exports.checkoutRouter.post('/create-checkout', async (req, res) => {
         const stripe = getStripeInstance();
         const reqOrigin = req.headers.origin ? String(req.headers.origin).replace(/\/$/, '') : null;
         const frontendUrl = reqOrigin || (process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
-        // Allow caller to pass full returnPath (e.g. '/knowledge?book-name=reset-by-discipline&version=nl#reset-by-discipline')
+        // Allow caller to pass returnPath, otherwise construct a clean query URL
         const rawReturnPath = req.body?.returnPath || req.body?.source;
-        let returnPath = `/knowledge?book-name=reset-by-discipline&version=${version}#reset-by-discipline`;
+        let returnPath = `/knowledge?book-name=reset-by-discipline&version=${version}`;
         if (typeof rawReturnPath === 'string' && rawReturnPath.startsWith('/')) {
             returnPath = rawReturnPath;
         }

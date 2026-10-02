@@ -1,235 +1,200 @@
-import { Router, Request, Response } from 'express';
-import { z } from 'zod';
-import { randomUUID } from 'crypto';
-import { createRateLimiter } from '../../middleware/rateLimiter';
-import { upsertContact } from '../../services/ghl';
-import {
-  evaluateInvestmentRouting,
-  generateUnmaskedReferenceNumber,
-  checkRecentDuplicate,
-  acquireInFlightLock,
-  releaseInFlightLock,
-  checkGhlDuplicate,
-  recordRecentSubmission,
-  sendUnmaskedPrivateNotification,
-  withRetry,
-  normalizeInvestmentReadiness,
-  getUnmaskedQuestionnaire,
-  updateUnmaskedQuestionnaire,
-  UnmaskedPrivatePayload,
-} from '../../services/unmaskedPrivateService';
-import {
-  generateUnmaskedVideoSignedUrl,
-} from '../../services/supabaseStorageService';
-
-export const unmaskedPrivateRouter = Router();
-
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.unmaskedPrivateRouter = void 0;
+const express_1 = require("express");
+const zod_1 = require("zod");
+const crypto_1 = require("crypto");
+const rateLimiter_1 = require("../../middleware/rateLimiter");
+const ghl_1 = require("../../services/ghl");
+const unmaskedPrivateService_1 = require("../../services/unmaskedPrivateService");
+const supabaseStorageService_1 = require("../../services/supabaseStorageService");
+exports.unmaskedPrivateRouter = (0, express_1.Router)();
 // Rate limiter dedicated to UNMASKED PRIVATE submissions (5 per hour per IP)
-const unmaskedPrivateLimiter = createRateLimiter({
-  message: {
-    success: false,
-    error: 'TOO_MANY_REQUESTS',
-    message: 'Too many requests. Please try again later.',
-  },
+const unmaskedPrivateLimiter = (0, rateLimiter_1.createRateLimiter)({
+    message: {
+        success: false,
+        error: 'TOO_MANY_REQUESTS',
+        message: 'Too many requests. Please try again later.',
+    },
 });
-
 // Zod Validation Schemas
-const Step1Schema = z
-  .object({
-    fullName: z
-      .string({ message: 'Please enter your full name.' })
-      .trim()
-      .min(2, 'Please enter your full name.')
-      .max(100, 'Full name cannot exceed 100 characters.'),
-    email: z
-      .string({ message: 'Please enter your work email.' })
-      .trim()
-      .email('Please enter your work email.'),
-    phone: z
-      .string({ message: 'Please enter your mobile or WhatsApp number.' })
-      .trim()
-      .min(5, 'Please enter your mobile or WhatsApp number.'),
-    companyName: z
-      .string({ message: 'Please enter your company name.' })
-      .trim()
-      .min(1, 'Please enter your company name.')
-      .max(150, 'Company name cannot exceed 150 characters.'),
-    companyWebsite: z.string().trim().optional(),
-    role: z.string().trim().optional(),
-    roleTitle: z.string().trim().optional(),
-    cityAndCountry: z.string().trim().optional(),
-    location: z.string().trim().optional(),
-  })
-  .superRefine((data, ctx) => {
+const Step1Schema = zod_1.z
+    .object({
+    fullName: zod_1.z
+        .string({ message: 'Please enter your full name.' })
+        .trim()
+        .min(2, 'Please enter your full name.')
+        .max(100, 'Full name cannot exceed 100 characters.'),
+    email: zod_1.z
+        .string({ message: 'Please enter your work email.' })
+        .trim()
+        .email('Please enter your work email.'),
+    phone: zod_1.z
+        .string({ message: 'Please enter your mobile or WhatsApp number.' })
+        .trim()
+        .min(5, 'Please enter your mobile or WhatsApp number.'),
+    companyName: zod_1.z
+        .string({ message: 'Please enter your company name.' })
+        .trim()
+        .min(1, 'Please enter your company name.')
+        .max(150, 'Company name cannot exceed 150 characters.'),
+    companyWebsite: zod_1.z.string().trim().optional(),
+    role: zod_1.z.string().trim().optional(),
+    roleTitle: zod_1.z.string().trim().optional(),
+    cityAndCountry: zod_1.z.string().trim().optional(),
+    location: zod_1.z.string().trim().optional(),
+})
+    .superRefine((data, ctx) => {
     if (!data.role && !data.roleTitle) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Please enter your role.',
-        path: ['role'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'Please enter your role.',
+            path: ['role'],
+        });
     }
     if (!data.cityAndCountry && !data.location) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Please enter your city and country.',
-        path: ['cityAndCountry'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'Please enter your city and country.',
+            path: ['cityAndCountry'],
+        });
     }
-  });
-
-const Step2Schema = z
-  .object({
-    businessResult: z.string().trim().optional(),
-    attentionNow: z.string().trim().optional(),
-    outcome90Days: z.string().trim().optional(),
-    attemptedAlready: z.string().trim().optional(),
-    contextAnswers: z.record(z.string(), z.any()).optional(),
-  })
-  .passthrough()
-  .superRefine((data, ctx) => {
-    const br =
-      data.businessResult ||
-      data.contextAnswers?.businessResult ||
-      data.contextAnswers?.currentChallenge ||
-      data.contextAnswers?.primaryChallenge;
+});
+const Step2Schema = zod_1.z
+    .object({
+    businessResult: zod_1.z.string().trim().optional(),
+    attentionNow: zod_1.z.string().trim().optional(),
+    outcome90Days: zod_1.z.string().trim().optional(),
+    attemptedAlready: zod_1.z.string().trim().optional(),
+    contextAnswers: zod_1.z.record(zod_1.z.string(), zod_1.z.any()).optional(),
+})
+    .passthrough()
+    .superRefine((data, ctx) => {
+    const br = data.businessResult ||
+        data.contextAnswers?.businessResult ||
+        data.contextAnswers?.currentChallenge ||
+        data.contextAnswers?.primaryChallenge;
     if (!br || !String(br).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'This field is required.',
-        path: ['businessResult'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'This field is required.',
+            path: ['businessResult'],
+        });
     }
-
-    const an =
-      data.attentionNow ||
-      data.contextAnswers?.attentionNow ||
-      data.contextAnswers?.whyNow;
+    const an = data.attentionNow ||
+        data.contextAnswers?.attentionNow ||
+        data.contextAnswers?.whyNow;
     if (!an || !String(an).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'This field is required.',
-        path: ['attentionNow'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'This field is required.',
+            path: ['attentionNow'],
+        });
     }
-
-    const od =
-      data.outcome90Days ||
-      data.contextAnswers?.outcome90Days ||
-      data.contextAnswers?.successfulOutcome;
+    const od = data.outcome90Days ||
+        data.contextAnswers?.outcome90Days ||
+        data.contextAnswers?.successfulOutcome;
     if (!od || !String(od).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'This field is required.',
-        path: ['outcome90Days'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'This field is required.',
+            path: ['outcome90Days'],
+        });
     }
-  });
-
-const Step3Schema = z
-  .object({
-    decisionInfluence: z.string().trim().optional(),
-    challengeView: z.string().trim().optional(),
-    authorityToAct: z.string().trim().optional(),
-    investmentReadiness: z.string({ message: 'Please select an option.' }).trim(),
-    availableForCall: z.string().trim().optional(),
-    contextAnswers: z.record(z.string(), z.any()).optional(),
-  })
-  .passthrough()
-  .superRefine((data, ctx) => {
-    const di =
-      data.decisionInfluence ||
-      data.contextAnswers?.decisionInfluence ||
-      data.contextAnswers?.ownDecisions;
+});
+const Step3Schema = zod_1.z
+    .object({
+    decisionInfluence: zod_1.z.string().trim().optional(),
+    challengeView: zod_1.z.string().trim().optional(),
+    authorityToAct: zod_1.z.string().trim().optional(),
+    investmentReadiness: zod_1.z.string({ message: 'Please select an option.' }).trim(),
+    availableForCall: zod_1.z.string().trim().optional(),
+    contextAnswers: zod_1.z.record(zod_1.z.string(), zod_1.z.any()).optional(),
+})
+    .passthrough()
+    .superRefine((data, ctx) => {
+    const di = data.decisionInfluence ||
+        data.contextAnswers?.decisionInfluence ||
+        data.contextAnswers?.ownDecisions;
     if (!di || !String(di).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'This field is required.',
-        path: ['decisionInfluence'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'This field is required.',
+            path: ['decisionInfluence'],
+        });
     }
-
-    const cv =
-      data.challengeView ||
-      data.contextAnswers?.challengeView ||
-      data.contextAnswers?.recentSituation;
+    const cv = data.challengeView ||
+        data.contextAnswers?.challengeView ||
+        data.contextAnswers?.recentSituation;
     if (!cv || !String(cv).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'This field is required.',
-        path: ['challengeView'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'This field is required.',
+            path: ['challengeView'],
+        });
     }
-
-    const auth =
-      data.authorityToAct ||
-      data.contextAnswers?.authorityToAct ||
-      data.contextAnswers?.authority;
+    const auth = data.authorityToAct ||
+        data.contextAnswers?.authorityToAct ||
+        data.contextAnswers?.authority;
     if (!auth || !String(auth).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Please select an option.',
-        path: ['authorityToAct'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'Please select an option.',
+            path: ['authorityToAct'],
+        });
     }
-
-    const normalizedInv = normalizeInvestmentReadiness(data.investmentReadiness);
+    const normalizedInv = (0, unmaskedPrivateService_1.normalizeInvestmentReadiness)(data.investmentReadiness);
     const validInv = [
-      'UP_TO_5K',
-      'FROM_5K_TO_10K',
-      'FROM_10K_TO_15K',
-      'FROM_15K_TO_20K',
-      'OVER_20K',
-      'VALUE_DEPENDENT',
+        'UP_TO_5K',
+        'FROM_5K_TO_10K',
+        'FROM_10K_TO_15K',
+        'FROM_15K_TO_20K',
+        'OVER_20K',
+        'VALUE_DEPENDENT',
     ];
     if (!normalizedInv || !validInv.includes(normalizedInv)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Please select an option.',
-        path: ['investmentReadiness'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'Please select an option.',
+            path: ['investmentReadiness'],
+        });
     }
-
-    const call =
-      data.availableForCall ||
-      data.contextAnswers?.availableForCall ||
-      data.contextAnswers?.available;
+    const call = data.availableForCall ||
+        data.contextAnswers?.availableForCall ||
+        data.contextAnswers?.available;
     if (!call || !String(call).trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Please select an option.',
-        path: ['availableForCall'],
-      });
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: 'Please select an option.',
+            path: ['availableForCall'],
+        });
     }
-  });
-
-const ConsentSchema = z.object({
-  privacyConsent: z
-    .boolean({ message: 'Please confirm your consent to continue.' })
-    .refine((val) => val === true, {
-      message: 'Please confirm your consent to continue.',
+});
+const ConsentSchema = zod_1.z.object({
+    privacyConsent: zod_1.z
+        .boolean({ message: 'Please confirm your consent to continue.' })
+        .refine((val) => val === true, {
+        message: 'Please confirm your consent to continue.',
     }),
-  privacyPolicyVersion: z.string().optional().default('2026.1'),
+    privacyPolicyVersion: zod_1.z.string().optional().default('2026.1'),
 });
-
-const TrackingSchema = z
-  .object({
-    utm_source: z.string().optional(),
-    utm_medium: z.string().optional(),
-    utm_campaign: z.string().optional(),
-    utm_term: z.string().optional(),
-    utm_content: z.string().optional(),
-    referrer: z.string().optional(),
-  })
-  .optional();
-
-const UnmaskedApplySchema = z.object({
-  step1: Step1Schema,
-  step2: Step2Schema,
-  step3: Step3Schema,
-  consent: ConsentSchema,
-  tracking: TrackingSchema,
+const TrackingSchema = zod_1.z
+    .object({
+    utm_source: zod_1.z.string().optional(),
+    utm_medium: zod_1.z.string().optional(),
+    utm_campaign: zod_1.z.string().optional(),
+    utm_term: zod_1.z.string().optional(),
+    utm_content: zod_1.z.string().optional(),
+    referrer: zod_1.z.string().optional(),
+})
+    .optional();
+const UnmaskedApplySchema = zod_1.z.object({
+    step1: Step1Schema,
+    step2: Step2Schema,
+    step3: Step3Schema,
+    consent: ConsentSchema,
+    tracking: TrackingSchema,
 });
-
 /**
  * @openapi
  * /unmasked-private/questions:
@@ -308,23 +273,23 @@ const UnmaskedApplySchema = z.object({
  *                   type: string
  *                   example: "Failed to retrieve questionnaire configuration from database."
  */
-unmaskedPrivateRouter.get('/questions', async (_req: Request, res: Response) => {
-  try {
-    const questionnaire = await getUnmaskedQuestionnaire();
-    return res.status(200).json({
-      success: true,
-      questionnaire,
-    });
-  } catch (error: any) {
-    console.error('[Unmasked Private] Failed to load questions:', error?.message || error);
-    return res.status(500).json({
-      success: false,
-      error: 'QUESTIONNAIRE_FETCH_ERROR',
-      message: 'Failed to retrieve questionnaire configuration from database.',
-    });
-  }
+exports.unmaskedPrivateRouter.get('/questions', async (_req, res) => {
+    try {
+        const questionnaire = await (0, unmaskedPrivateService_1.getUnmaskedQuestionnaire)();
+        return res.status(200).json({
+            success: true,
+            questionnaire,
+        });
+    }
+    catch (error) {
+        console.error('[Unmasked Private] Failed to load questions:', error?.message || error);
+        return res.status(500).json({
+            success: false,
+            error: 'QUESTIONNAIRE_FETCH_ERROR',
+            message: 'Failed to retrieve questionnaire configuration from database.',
+        });
+    }
 });
-
 /**
  * @openapi
  * /unmasked-private/questions:
@@ -361,31 +326,31 @@ unmaskedPrivateRouter.get('/questions', async (_req: Request, res: Response) => 
  *       500:
  *         description: Database write error
  */
-unmaskedPrivateRouter.put('/questions', async (req: Request, res: Response) => {
-  try {
-    if (!req.body || typeof req.body !== 'object') {
-      return res.status(400).json({
-        success: false,
-        error: 'INVALID_PAYLOAD',
-        message: 'Invalid questionnaire configuration payload.',
-      });
+exports.unmaskedPrivateRouter.put('/questions', async (req, res) => {
+    try {
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({
+                success: false,
+                error: 'INVALID_PAYLOAD',
+                message: 'Invalid questionnaire configuration payload.',
+            });
+        }
+        const updated = await (0, unmaskedPrivateService_1.updateUnmaskedQuestionnaire)(req.body);
+        return res.status(200).json({
+            success: true,
+            message: 'Questionnaire updated successfully in database.',
+            questionnaire: updated,
+        });
     }
-    const updated = await updateUnmaskedQuestionnaire(req.body);
-    return res.status(200).json({
-      success: true,
-      message: 'Questionnaire updated successfully in database.',
-      questionnaire: updated,
-    });
-  } catch (error: any) {
-    console.error('[Unmasked Private] Failed to update questions in DB:', error?.message || error);
-    return res.status(500).json({
-      success: false,
-      error: 'QUESTIONNAIRE_UPDATE_ERROR',
-      message: 'Failed to update questionnaire configuration in database.',
-    });
-  }
+    catch (error) {
+        console.error('[Unmasked Private] Failed to update questions in DB:', error?.message || error);
+        return res.status(500).json({
+            success: false,
+            error: 'QUESTIONNAIRE_UPDATE_ERROR',
+            message: 'Failed to update questionnaire configuration in database.',
+        });
+    }
 });
-
 /**
  * @openapi
  * /unmasked-private/video-url:
@@ -410,25 +375,24 @@ unmaskedPrivateRouter.put('/questions', async (req: Request, res: Response) => {
  *       500:
  *         description: Storage service error
  */
-unmaskedPrivateRouter.get('/video-url', async (_req: Request, res: Response) => {
-  try {
-    const result = await generateUnmaskedVideoSignedUrl();
-    return res.status(200).json({
-      videoUrl: result.videoUrl,
-    });
-  } catch (error: any) {
-    const status = error.status || 500;
-    const errorCode = error.code || 'STORAGE_ERROR';
-    console.error('[Unmasked Private] Video signed URL error:', error?.message);
-
-    return res.status(status).json({
-      success: false,
-      error: errorCode,
-      message: error?.message || 'Failed to retrieve video access URL.',
-    });
-  }
+exports.unmaskedPrivateRouter.get('/video-url', async (_req, res) => {
+    try {
+        const result = await (0, supabaseStorageService_1.generateUnmaskedVideoSignedUrl)();
+        return res.status(200).json({
+            videoUrl: result.videoUrl,
+        });
+    }
+    catch (error) {
+        const status = error.status || 500;
+        const errorCode = error.code || 'STORAGE_ERROR';
+        console.error('[Unmasked Private] Video signed URL error:', error?.message);
+        return res.status(status).json({
+            success: false,
+            error: errorCode,
+            message: error?.message || 'Failed to retrieve video access URL.',
+        });
+    }
 });
-
 /**
  * @openapi
  * /unmasked-private/apply:
@@ -665,127 +629,111 @@ unmaskedPrivateRouter.get('/video-url', async (_req: Request, res: Response) => 
  *                   type: string
  *                   example: "We could not process your application at this moment. Please try again."
  */
-async function handleApplicationSubmission(req: Request, res: Response) {
-  let normalizedEmail = '';
-
-  try {
-    // 1. Zod Request Payload Validation
-    const parseResult = UnmaskedApplySchema.safeParse(req.body);
-    if (!parseResult.success) {
-      const fieldErrors: Record<string, string> = {};
-      for (const issue of parseResult.error.issues) {
-        const pathKey = issue.path.join('.');
-        fieldErrors[pathKey] = issue.message;
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: 'VALIDATION_ERROR',
-        message: 'Please correct the highlighted fields.',
-        fields: fieldErrors,
-      });
-    }
-
-    const payload = parseResult.data as unknown as UnmaskedPrivatePayload;
-    normalizedEmail = payload.step1.email.toLowerCase().trim();
-
-    // 2. In-Flight Concurrency Lock (prevents rapid double-clicks on submit button)
-    if (!acquireInFlightLock(normalizedEmail)) {
-      return res.status(409).json({
-        success: false,
-        error: 'DUPLICATE_SUBMISSION',
-        message: 'An application with this email has already been received and is currently under review.',
-      });
-    }
-
-    // 3. Duplicate Submission Detection (409 Conflict)
-    const isDuplicate = checkRecentDuplicate(normalizedEmail) || (await checkGhlDuplicate(normalizedEmail));
-    if (isDuplicate) {
-      return res.status(409).json({
-        success: false,
-        error: 'DUPLICATE_SUBMISSION',
-        message: 'An application with this email has already been received and is currently under review.',
-      });
-    }
-
-    // 4. Investment-Based Routing Logic
-    const routing = evaluateInvestmentRouting(payload.step3.investmentReadiness);
-    const referenceNumber = generateUnmaskedReferenceNumber();
-    const applicationId = `unm_app_${randomUUID().replace(/-/g, '').substring(0, 8)}`;
-
-    // 5. Record submission in duplicate protection cache
-    recordRecentSubmission(normalizedEmail, referenceNumber, routing.outcome);
-
-    // 6. Asynchronous GoHighLevel CRM Sync & Notification Dispatch with Retry Logic
-    const nameParts = payload.step1.fullName.trim().split(/\s+/);
-    const firstName = nameParts[0] || 'Applicant';
-    const lastName = nameParts.slice(1).join(' ') || '';
-
-    const tags = ['unmasked-private'];
-    if (routing.isQualified) {
-      tags.push('unmasked-qualified-review');
-    } else {
-      tags.push('unmasked-below-threshold');
-    }
-
-    // CRM synchronization with exponential backoff retries
+async function handleApplicationSubmission(req, res) {
+    let normalizedEmail = '';
     try {
-      const contactId = await withRetry(
-        () =>
-          upsertContact({
-            email: payload.step1.email,
-            firstName,
-            lastName,
-            phone: payload.step1.phone,
-            source: 'UNMASKED PRIVATE Application',
-            tags,
-          }),
-        { retries: 3, delayMs: 500, context: 'GHL Contact Upsert' }
-      );
-
-      // If qualified, trigger immediate briefing email to Lionel (strictly disabled during tests)
-      if (
-        routing.isQualified &&
-        process.env.NODE_ENV !== 'test' &&
-        process.env.SKIP_EMAIL !== 'true' &&
-        process.env.CI !== 'true'
-      ) {
-        sendUnmaskedPrivateNotification(payload, referenceNumber, contactId).catch((err) => {
-          console.error('[Unmasked Private] Background notification error:', err?.message || err);
+        // 1. Zod Request Payload Validation
+        const parseResult = UnmaskedApplySchema.safeParse(req.body);
+        if (!parseResult.success) {
+            const fieldErrors = {};
+            for (const issue of parseResult.error.issues) {
+                const pathKey = issue.path.join('.');
+                fieldErrors[pathKey] = issue.message;
+            }
+            return res.status(400).json({
+                success: false,
+                error: 'VALIDATION_ERROR',
+                message: 'Please correct the highlighted fields.',
+                fields: fieldErrors,
+            });
+        }
+        const payload = parseResult.data;
+        normalizedEmail = payload.step1.email.toLowerCase().trim();
+        // 2. In-Flight Concurrency Lock (prevents rapid double-clicks on submit button)
+        if (!(0, unmaskedPrivateService_1.acquireInFlightLock)(normalizedEmail)) {
+            return res.status(409).json({
+                success: false,
+                error: 'DUPLICATE_SUBMISSION',
+                message: 'An application with this email has already been received and is currently under review.',
+            });
+        }
+        // 3. Duplicate Submission Detection (409 Conflict)
+        const isDuplicate = (0, unmaskedPrivateService_1.checkRecentDuplicate)(normalizedEmail) || (await (0, unmaskedPrivateService_1.checkGhlDuplicate)(normalizedEmail));
+        if (isDuplicate) {
+            return res.status(409).json({
+                success: false,
+                error: 'DUPLICATE_SUBMISSION',
+                message: 'An application with this email has already been received and is currently under review.',
+            });
+        }
+        // 4. Investment-Based Routing Logic
+        const routing = (0, unmaskedPrivateService_1.evaluateInvestmentRouting)(payload.step3.investmentReadiness);
+        const referenceNumber = (0, unmaskedPrivateService_1.generateUnmaskedReferenceNumber)();
+        const applicationId = `unm_app_${(0, crypto_1.randomUUID)().replace(/-/g, '').substring(0, 8)}`;
+        // 5. Record submission in duplicate protection cache
+        (0, unmaskedPrivateService_1.recordRecentSubmission)(normalizedEmail, referenceNumber, routing.outcome);
+        // 6. Asynchronous GoHighLevel CRM Sync & Notification Dispatch with Retry Logic
+        const nameParts = payload.step1.fullName.trim().split(/\s+/);
+        const firstName = nameParts[0] || 'Applicant';
+        const lastName = nameParts.slice(1).join(' ') || '';
+        const tags = ['unmasked-private'];
+        if (routing.isQualified) {
+            tags.push('unmasked-qualified-review');
+        }
+        else {
+            tags.push('unmasked-below-threshold');
+        }
+        // CRM synchronization with exponential backoff retries
+        try {
+            const contactId = await (0, unmaskedPrivateService_1.withRetry)(() => (0, ghl_1.upsertContact)({
+                email: payload.step1.email,
+                firstName,
+                lastName,
+                phone: payload.step1.phone,
+                source: 'UNMASKED PRIVATE Application',
+                tags,
+            }), { retries: 3, delayMs: 500, context: 'GHL Contact Upsert' });
+            // If qualified, trigger immediate briefing email to Lionel (strictly disabled during tests)
+            if (routing.isQualified &&
+                process.env.NODE_ENV !== 'test' &&
+                process.env.SKIP_EMAIL !== 'true' &&
+                process.env.CI !== 'true') {
+                (0, unmaskedPrivateService_1.sendUnmaskedPrivateNotification)(payload, referenceNumber, contactId).catch((err) => {
+                    console.error('[Unmasked Private] Background notification error:', err?.message || err);
+                });
+            }
+        }
+        catch (crmError) {
+            // Non-fatal for client: log failure with context without breaking the user experience
+            console.warn('[Unmasked Private] CRM sync non-fatal warning:', crmError?.message || crmError);
+        }
+        // 7. Return deterministic response with outcome and redirectUrl
+        return res.status(200).json({
+            success: true,
+            outcome: routing.outcome,
+            redirectUrl: routing.redirectUrl,
+            applicationId,
+            referenceNumber,
         });
-      }
-    } catch (crmError: any) {
-      // Non-fatal for client: log failure with context without breaking the user experience
-      console.warn('[Unmasked Private] CRM sync non-fatal warning:', crmError?.message || crmError);
     }
-
-    // 7. Return deterministic response with outcome and redirectUrl
-    return res.status(200).json({
-      success: true,
-      outcome: routing.outcome,
-      redirectUrl: routing.redirectUrl,
-      applicationId,
-      referenceNumber,
-    });
-  } catch (error: any) {
-    console.error('[Unmasked Private] Unhandled submission error:', {
-      message: error?.message,
-      stack: error?.stack,
-      timestamp: new Date().toISOString(),
-    });
-
-    return res.status(500).json({
-      success: false,
-      error: 'SUBMISSION_ERROR',
-      message: 'We could not process your application at this moment. Please try again.',
-    });
-  } finally {
-    if (normalizedEmail) {
-      releaseInFlightLock(normalizedEmail);
+    catch (error) {
+        console.error('[Unmasked Private] Unhandled submission error:', {
+            message: error?.message,
+            stack: error?.stack,
+            timestamp: new Date().toISOString(),
+        });
+        return res.status(500).json({
+            success: false,
+            error: 'SUBMISSION_ERROR',
+            message: 'We could not process your application at this moment. Please try again.',
+        });
     }
-  }
+    finally {
+        if (normalizedEmail) {
+            (0, unmaskedPrivateService_1.releaseInFlightLock)(normalizedEmail);
+        }
+    }
 }
-
 // Mount handler on /apply as well as root / of router
-unmaskedPrivateRouter.post('/apply', unmaskedPrivateLimiter, handleApplicationSubmission);
-unmaskedPrivateRouter.post('/', unmaskedPrivateLimiter, handleApplicationSubmission);
+exports.unmaskedPrivateRouter.post('/apply', unmaskedPrivateLimiter, handleApplicationSubmission);
+exports.unmaskedPrivateRouter.post('/', unmaskedPrivateLimiter, handleApplicationSubmission);
