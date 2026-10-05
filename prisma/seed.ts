@@ -103,7 +103,6 @@ async function main() {
               { label: 'AED 10,000–14,999', value: 'FROM_10K_TO_15K' },
               { label: 'AED 15,000–19,999', value: 'FROM_15K_TO_20K' },
               { label: 'AED 20,000 or more', value: 'OVER_20K' },
-              { label: 'The appropriate investment depends on the value of the result and proposed scope', value: 'VALUE_DEPENDENT' }
             ], required: true },
             { id: 'availableForCall', text: 'Are you available for a confidential 30-minute conversation if Lionel determines there is a genuine fit?', options: ['Yes', 'No'], required: true }
           ]

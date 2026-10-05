@@ -32,7 +32,6 @@ exports.INVESTMENT_LABELS = {
     FROM_10K_TO_15K: 'AED 10,000–14,999',
     FROM_15K_TO_20K: 'AED 15,000–19,999',
     OVER_20K: 'AED 20,000 or more',
-    VALUE_DEPENDENT: 'The appropriate investment depends on the value of the result and proposed scope',
 };
 // Maps human strings or enum keys to canonical investment key
 function normalizeInvestmentReadiness(val) {
@@ -119,10 +118,7 @@ exports.DEFAULT_UNMASKED_QUESTIONNAIRE = {
                     { label: 'AED 10,000–14,999', value: 'FROM_10K_TO_15K' },
                     { label: 'AED 15,000–19,999', value: 'FROM_15K_TO_20K' },
                     { label: 'AED 20,000 or more', value: 'OVER_20K' },
-                    {
-                        label: 'The appropriate investment depends on the value of the result and proposed scope',
-                        value: 'VALUE_DEPENDENT',
-                    },
+
                 ],
                 required: true,
             },
