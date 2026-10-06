@@ -169,8 +169,7 @@ export async function sendFirstNewsletterIssue(email: string, contactId?: string
 }
 
 /**
- * Async background handler to sync subscriber to GHL, send welcome email immediately,
- * and schedule Issue #1 (PDF edition) 1 minute later.
+ * Async background handler to sync subscriber to GHL and send welcome email immediately.
  */
 async function processBackgroundSubscription(email: string): Promise<void> {
   try {
@@ -186,50 +185,12 @@ async function processBackgroundSubscription(email: string): Promise<void> {
         data: { ghlContactId },
       }).catch(() => null);
 
-      // 1. Send Welcome Email immediately
+      // Send Welcome Email immediately
       await sendNewsletterWelcomeEmail(email, ghlContactId);
-
-      // 2. Schedule Issue #1 (PDF edition) 1 minute (60,000 ms) after subscription
-      const delayMs = process.env.NODE_ENV === 'test' ? 100 : 60 * 1000;
-      setTimeout(() => {
-        sendFirstNewsletterIssue(email, ghlContactId).catch((e) =>
-          console.error('[Newsletter] Failed 1-min delayed Issue #1 dispatch:', e)
-        );
-      }, delayMs);
     }
   } catch (err) {
     console.error('[Newsletter] Background processing error:', err);
   }
-}
-
-/**
- * Catch-up worker for pending Issue #1 emails (>60s old, not yet sent)
- */
-async function checkPendingFirstIssues(): Promise<void> {
-  try {
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    const pendingSubscribers = await db.newsletterSubscriber.findMany({
-      where: {
-        status: 'subscribed',
-        firstIssueSent: false,
-        subscribedAt: {
-          lte: oneMinuteAgo,
-        },
-      },
-      take: 20,
-    });
-
-    for (const sub of pendingSubscribers) {
-      await sendFirstNewsletterIssue(sub.email, sub.ghlContactId || undefined);
-    }
-  } catch (err) {
-    // Ignore routine catch-up errors
-  }
-}
-
-// Run catch-up check every 30 seconds
-if (process.env.NODE_ENV !== 'test') {
-  setInterval(checkPendingFirstIssues, 30 * 1000);
 }
 
 /**
