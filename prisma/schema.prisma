@@ -131,3 +131,18 @@ model Article {
   @@map("articles")
 }
 
+model NewsletterSubscriber {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  status         String    @default("subscribed")
+  source         String?   @default("Website Footer")
+  ghlContactId   String?
+  firstIssueSent Boolean   @default(false)
+  firstIssueSentAt DateTime?
+  subscribedAt   DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("newsletter_subscribers")
+}
+
+

@@ -47,17 +47,22 @@ export async function upsertContact(payload: { email: string; firstName?: string
   return data.contact?.id;
 }
 
-export async function sendEmail(contactId: string, subject: string, html: string) {
+export async function sendEmail(contactId: string, subject: string, html: string, emailHeaders?: Record<string, string>) {
   const headers = await ghlHeaders();
+  const payload: any = {
+    type: 'Email',
+    contactId,
+    subject,
+    html,
+  };
+  if (emailHeaders) {
+    payload.emailHeaders = emailHeaders;
+    payload.headers = emailHeaders;
+  }
   const res = await fetch(`${GHL_BASE}/conversations/messages`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      type: 'Email',
-      contactId,
-      subject,
-      html,
-    }),
+    body: JSON.stringify(payload),
   });
   
   if (!res.ok) {

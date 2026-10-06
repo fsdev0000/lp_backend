@@ -116,6 +116,7 @@ import { checkoutRouter } from './api/routes/checkout';
 import { contactRouter } from './api/routes/contact';
 import { articlesRoutes } from './api/routes/articles.routes';
 import { unmaskedPrivateRouter } from './api/routes/unmaskedPrivate';
+import { newsletterRouter } from './api/routes/newsletter';
 
 app.use(cors(corsOptions));
 app.use(
@@ -131,12 +132,20 @@ app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);
 app.use('/api', contactRouter);
 app.use('/api/v1', contactRouter);
+app.use('/api/newsletter', newsletterRouter);
+app.use('/api/v1/newsletter', newsletterRouter);
+app.use('/newsletter', newsletterRouter);
+app.use('/api/v1', newsletterRouter);
+app.use('/api', newsletterRouter);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/v1/articles', articlesRoutes);
 app.use('/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/v1/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/v1', apiRoutes);
+app.use('/', newsletterRouter);
+
+
 import { swaggerBasicAuth } from './middleware/swaggerAuth';
 
 app.use('/api-docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
