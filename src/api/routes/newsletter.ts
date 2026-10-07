@@ -567,7 +567,8 @@ newsletterRouter.all(['/unsubscribe', '/newsletter/unsubscribe', '/api/newslette
     return res.status(200).json({
       success: true,
       subscribed: false,
-      message: 'You have been successfully unsubscribed from The Founder Performance Newsletter.',
+      email: subscriber.email,
+      message: `Your email address (${subscriber.email}) has been successfully unsubscribed from The Founder Performance Newsletter.`,
     });
   } catch (error) {
     console.error('[Newsletter] Unsubscribe error:', error);
