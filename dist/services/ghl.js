@@ -55,17 +55,25 @@ async function upsertContact(payload) {
     const data = await res.json();
     return data.contact?.id;
 }
-async function sendEmail(contactId, subject, html) {
+async function sendEmail(contactId, subject, html, emailHeaders, attachments) {
     const headers = await ghlHeaders();
+    const payload = {
+        type: 'Email',
+        contactId,
+        subject,
+        html,
+    };
+    if (emailHeaders) {
+        payload.emailHeaders = emailHeaders;
+        payload.headers = emailHeaders;
+    }
+    if (attachments && attachments.length > 0) {
+        payload.attachments = attachments;
+    }
     const res = await fetch(`${GHL_BASE}/conversations/messages`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-            type: 'Email',
-            contactId,
-            subject,
-            html,
-        }),
+        body: JSON.stringify(payload),
     });
     if (!res.ok) {
         const errorData = await res.text();

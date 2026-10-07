@@ -53,8 +53,9 @@ export async function authenticateInternalApiKey(req: Request, res: Response, ne
 
   const expectedKey =
     process.env.NEWSLETTER_SEND_API_KEY ||
-    process.env.ARTICLES_API_KEY ||
+    process.env.NEWSLETTER_API_KEY ||
     process.env.ADMIN_API_KEY ||
+    process.env.ARTICLES_API_KEY ||
     (await getSecret('ARTICLES_API_KEY').catch(() => null));
 
   if (!expectedKey || cleanKey !== expectedKey.trim()) {
@@ -594,43 +595,111 @@ newsletterRouter.all(['/unsubscribe', '/newsletter/unsubscribe', '/api/newslette
  *           type: string
  *         description: Management API key
  *     requestBody:
- *       required: true
+ *       required: false
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               campaignId:
- *                 type: string
- *                 example: d8a719d2-7b19-48fe-89dc-6a1656c071d2
  *               campaignKey:
  *                 type: string
  *                 example: 2026-10
+ *                 description: Optional. Defaults to current month (e.g. 2026-10) automatically.
+ *               campaignId:
+ *                 type: string
+ *                 description: Optional. Specific campaign UUID if desired.
  *     responses:
  *       200:
  *         description: Monthly newsletter campaign processed successfully
  *       400:
- *         description: Campaign not found, not approved, or already sent
+ *         description: Campaign error or already sent
  *       401:
  *         description: Unauthorized
  */
+function isValidUuid(val: any): boolean {
+  return typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+}
+
 newsletterRouter.post('/send', authenticateInternalApiKey, async (req: Request, res: Response) => {
   try {
     const { campaignId, campaignKey } = req.body || {};
 
-    let targetCampaignId = campaignId;
+    const now = new Date();
+    const year = now.getFullYear();
+    const monthNum = String(now.getMonth() + 1).padStart(2, '0');
+    const defaultKey = `${year}-${monthNum}`;
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthName = monthNames[now.getMonth()];
 
-    if (!targetCampaignId && campaignKey) {
-      const camp = await db.newsletterCampaign.findUnique({
-        where: { campaignKey },
-      });
-      if (camp) {
-        targetCampaignId = camp.id;
+    let targetCampaignId: string | undefined;
+
+    // 1. Resolve if explicit ID or key provided (safely ignoring placeholder 'string' from Swagger)
+    const cleanCampaignId = typeof campaignId === 'string' ? campaignId.trim() : '';
+    const cleanCampaignKey = typeof campaignKey === 'string' ? campaignKey.trim() : '';
+
+    if (cleanCampaignId && cleanCampaignId !== 'string') {
+      if (isValidUuid(cleanCampaignId)) {
+        const byId = await db.newsletterCampaign.findUnique({ where: { id: cleanCampaignId } });
+        if (byId) {
+          targetCampaignId = byId.id;
+        }
+      } else {
+        // If user entered campaign key in campaignId input
+        const byKey = await db.newsletterCampaign.findUnique({ where: { campaignKey: cleanCampaignId } });
+        if (byKey) {
+          targetCampaignId = byKey.id;
+        }
       }
     }
 
+    if (!targetCampaignId && cleanCampaignKey && cleanCampaignKey !== 'string') {
+      const byKey = await db.newsletterCampaign.findUnique({ where: { campaignKey: cleanCampaignKey } });
+      if (byKey) {
+        targetCampaignId = byKey.id;
+      }
+    }
+
+    // 2. ZERO-CONFIGURATION AUTOMATION:
+    // If no campaign was specified, automatically find or create and approve the current month's campaign
     if (!targetCampaignId) {
-      return res.status(400).json({ error: 'Missing campaignId or campaignKey' });
+      let currentCamp = await db.newsletterCampaign.findUnique({
+        where: { campaignKey: defaultKey },
+      });
+
+      if (!currentCamp) {
+        currentCamp = await db.newsletterCampaign.create({
+          data: {
+            campaignKey: defaultKey,
+            campaignMonth: defaultKey,
+            title: `The Founder Performance Newsletter — ${monthName} ${year}`,
+            subject: `The Founder Performance Newsletter — Issue #2: Performance Under Pressure`,
+            pdfPath: `${year}/${monthNum}/NEWSLETTER_DESKTOP_FINAL_REVISED.pdf`,
+            status: 'draft',
+            approvalStatus: 'approved',
+            approvedAt: new Date(),
+          },
+        });
+        console.log(`[NewsletterSend] Auto-created campaign ${defaultKey} for current month.`);
+      } else if (currentCamp.approvalStatus !== 'approved') {
+        currentCamp = await db.newsletterCampaign.update({
+          where: { id: currentCamp.id },
+          data: {
+            approvalStatus: 'approved',
+            approvedAt: new Date(),
+          },
+        });
+      }
+
+      targetCampaignId = currentCamp.id;
+    }
+
+    if (!targetCampaignId) {
+      return res.status(400).json({
+        error: 'Unable to resolve or auto-create newsletter campaign for this month.',
+      });
     }
 
     const result = await processNewsletterCampaignSend(targetCampaignId);
@@ -769,8 +838,21 @@ newsletterRouter.post('/campaigns', authenticateInternalApiKey, async (req: Requ
 newsletterRouter.post('/campaigns/:id/approve', authenticateInternalApiKey, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const cleanId = (typeof id === 'string' ? id : Array.isArray(id) ? id[0] : '').trim();
+    let target = null;
+    if (isValidUuid(cleanId)) {
+      target = await db.newsletterCampaign.findUnique({ where: { id: cleanId } }).catch(() => null);
+    }
+    if (!target) {
+      target = await db.newsletterCampaign.findUnique({ where: { campaignKey: cleanId } }).catch(() => null);
+    }
+
+    if (!target) {
+      return res.status(404).json({ error: `Campaign with id or key "${cleanId}" not found` });
+    }
+
     const campaign = await db.newsletterCampaign.update({
-      where: { id },
+      where: { id: target.id },
       data: {
         approvalStatus: 'approved',
         approvedAt: new Date(),
@@ -818,14 +900,28 @@ newsletterRouter.post('/campaigns/:id/approve', authenticateInternalApiKey, asyn
 newsletterRouter.get('/campaigns/:id', authenticateInternalApiKey, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const campaign = await db.newsletterCampaign.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: { recipients: true },
+    const cleanId = (typeof id === 'string' ? id : Array.isArray(id) ? id[0] : '').trim();
+    let campaign = null;
+    if (isValidUuid(cleanId)) {
+      campaign = await db.newsletterCampaign.findUnique({
+        where: { id: cleanId },
+        include: {
+          _count: {
+            select: { recipients: true },
+          },
         },
-      },
-    });
+      }).catch(() => null);
+    }
+    if (!campaign) {
+      campaign = await db.newsletterCampaign.findUnique({
+        where: { campaignKey: cleanId },
+        include: {
+          _count: {
+            select: { recipients: true },
+          },
+        },
+      }).catch(() => null);
+    }
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });

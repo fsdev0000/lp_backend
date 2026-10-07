@@ -118,7 +118,6 @@ exports.DEFAULT_UNMASKED_QUESTIONNAIRE = {
                     { label: 'AED 10,000–14,999', value: 'FROM_10K_TO_15K' },
                     { label: 'AED 15,000–19,999', value: 'FROM_15K_TO_20K' },
                     { label: 'AED 20,000 or more', value: 'OVER_20K' },
-
                 ],
                 required: true,
             },

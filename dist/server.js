@@ -109,6 +109,7 @@ const checkout_1 = require("./api/routes/checkout");
 const contact_1 = require("./api/routes/contact");
 const articles_routes_1 = require("./api/routes/articles.routes");
 const unmaskedPrivate_1 = require("./api/routes/unmaskedPrivate");
+const newsletter_1 = require("./api/routes/newsletter");
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({
     verify: (req, _res, buf) => {
@@ -120,12 +121,18 @@ app.use('/api', checkout_1.checkoutRouter);
 app.use('/api/v1', checkout_1.checkoutRouter);
 app.use('/api', contact_1.contactRouter);
 app.use('/api/v1', contact_1.contactRouter);
+app.use('/api/newsletter', newsletter_1.newsletterRouter);
+app.use('/api/v1/newsletter', newsletter_1.newsletterRouter);
+app.use('/newsletter', newsletter_1.newsletterRouter);
+app.use('/api/v1', newsletter_1.newsletterRouter);
+app.use('/api', newsletter_1.newsletterRouter);
 app.use('/api/articles', articles_routes_1.articlesRoutes);
 app.use('/api/v1/articles', articles_routes_1.articlesRoutes);
 app.use('/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/v1/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/v1', routes_1.apiRoutes);
+app.use('/', newsletter_1.newsletterRouter);
 const swaggerAuth_1 = require("./middleware/swaggerAuth");
 app.use('/api-docs', swaggerAuth_1.swaggerBasicAuth, swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.swaggerSpec));
 const healthCheckHandler = (_req, res) => {

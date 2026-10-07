@@ -34,6 +34,10 @@ const swaggerOptions = {
                 name: 'Articles',
                 description: 'Thought leadership articles and publications',
             },
+            {
+                name: 'Newsletter',
+                description: 'The Founder Performance Newsletter subscription, suppression, and monthly campaign dispatch',
+            },
         ],
         paths: {
             '/health': {

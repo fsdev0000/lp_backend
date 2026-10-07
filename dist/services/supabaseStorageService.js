@@ -28,9 +28,19 @@ function resetSupabaseStorageClient() {
     cachedClient = null;
 }
 function getSupabaseUrl() {
-    return (process.env.SUPABASE_URL ||
-        process.env.VITE_SUPABASE_URL ||
-        'https://tpyudbsbzrhhngulxyxp.supabase.co');
+    if (process.env.SUPABASE_URL)
+        return process.env.SUPABASE_URL;
+    if (process.env.VITE_SUPABASE_URL)
+        return process.env.VITE_SUPABASE_URL;
+    // Dynamically extract project ref from DATABASE_URL or DIRECT_URL if available
+    const dbUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
+    if (dbUrl) {
+        const match = dbUrl.match(/postgres\.([^:]+):/);
+        if (match && match[1]) {
+            return `https://${match[1]}.supabase.co`;
+        }
+    }
+    throw new Error('SUPABASE_URL is not configured in .env');
 }
 async function getSupabaseServiceKey() {
     if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
