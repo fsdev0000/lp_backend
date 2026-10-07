@@ -92,10 +92,12 @@ export function getEmailUnsubscribeUrl(tokenOrEmail: string): string {
   return `${base}/unsubscribe?token=${encodeURIComponent(tokenOrEmail)}`;
 }
 
+
 export function getDirectApiUnsubscribeUrl(tokenOrEmail: string): string {
   const apiBase = (process.env.API_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
   return `${apiBase}/api/v1/newsletter/unsubscribe?token=${encodeURIComponent(tokenOrEmail)}`;
 }
+
 
 function getEmailUnsubscribeHeaders(tokenOrEmail: string): Record<string, string> {
   const oneClickUrl = getDirectApiUnsubscribeUrl(tokenOrEmail);
