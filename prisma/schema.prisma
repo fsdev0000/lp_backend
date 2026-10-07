@@ -132,17 +132,73 @@ model Article {
 }
 
 model NewsletterSubscriber {
-  id             String    @id @default(uuid())
-  email          String    @unique
-  status         String    @default("subscribed")
-  source         String?   @default("Website Footer")
-  ghlContactId   String?
-  firstIssueSent Boolean   @default(false)
-  firstIssueSentAt DateTime?
-  subscribedAt   DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  firstName            String?   @map("first_name")
+  consentGiven         Boolean   @default(true) @map("consent_given")
+  consentDate          DateTime  @default(now()) @map("consent_date")
+  consentSource        String    @default("website") @map("consent_source")
+  privacyPolicyVersion String    @default("v2026.3") @map("privacy_policy_version")
+  subscribed           Boolean   @default(true)
+  unsubscribeToken     String?   @unique @map("unsubscribe_token")
+  unsubscribedAt       DateTime? @map("unsubscribed_at")
+  status               String    @default("subscribed")
+  source               String?   @default("Website Footer")
+  ghlContactId         String?
+  firstIssueSent       Boolean   @default(false)
+  firstIssueSentAt     DateTime?
+  subscribedAt         DateTime  @default(now())
+  createdAt            DateTime? @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt
+
+  campaignRecipients   NewsletterCampaignRecipient[]
 
   @@map("newsletter_subscribers")
 }
+
+model NewsletterCampaign {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignKey      String    @unique @map("campaign_key")
+  campaignMonth    String    @map("campaign_month")
+  title            String
+  subject          String
+  pdfPath          String?   @map("pdf_path")
+  status           String    @default("draft")
+  approvalStatus   String    @default("pending") @map("approval_status")
+  scheduledAt      DateTime? @map("scheduled_at")
+  approvedAt       DateTime? @map("approved_at")
+  sendStartedAt    DateTime? @map("send_started_at")
+  sendCompletedAt  DateTime? @map("send_completed_at")
+  totalRecipients  Int       @default(0) @map("total_recipients")
+  totalSent        Int       @default(0) @map("total_sent")
+  totalFailed      Int       @default(0) @map("total_failed")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  recipients       NewsletterCampaignRecipient[]
+
+  @@map("newsletter_campaigns")
+}
+
+model NewsletterCampaignRecipient {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId        String    @map("campaign_id") @db.Uuid
+  subscriberId      String    @map("subscriber_id")
+  email             String
+  status            String    @default("pending")
+  sentAt            DateTime? @map("sent_at")
+  failedAt          DateTime? @map("failed_at")
+  providerMessageId String?   @map("provider_message_id")
+  errorMessage      String?   @map("error_message")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  campaign          NewsletterCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  subscriber        NewsletterSubscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, subscriberId], map: "uq_campaign_subscriber")
+  @@map("newsletter_campaign_recipients")
+}
+
 
 

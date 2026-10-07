@@ -89,7 +89,7 @@ async function run() {
       decisionInfluence: 'Full operational authority',
       challengeView: 'Ready for strategic diagnostic reset',
       authorityToAct: 'Yes',
-      investmentReadiness: 'AED 15,000–19,999',
+      investmentReadiness: 'FROM_15K_TO_20K',
       availableForCall: 'Yes',
     },
     consent: {

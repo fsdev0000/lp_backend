@@ -47,7 +47,13 @@ export async function upsertContact(payload: { email: string; firstName?: string
   return data.contact?.id;
 }
 
-export async function sendEmail(contactId: string, subject: string, html: string, emailHeaders?: Record<string, string>) {
+export async function sendEmail(
+  contactId: string,
+  subject: string,
+  html: string,
+  emailHeaders?: Record<string, string>,
+  attachments?: string[]
+) {
   const headers = await ghlHeaders();
   const payload: any = {
     type: 'Email',
@@ -58,6 +64,9 @@ export async function sendEmail(contactId: string, subject: string, html: string
   if (emailHeaders) {
     payload.emailHeaders = emailHeaders;
     payload.headers = emailHeaders;
+  }
+  if (attachments && attachments.length > 0) {
+    payload.attachments = attachments;
   }
   const res = await fetch(`${GHL_BASE}/conversations/messages`, {
     method: 'POST',
