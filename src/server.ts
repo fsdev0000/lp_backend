@@ -117,6 +117,7 @@ import { contactRouter } from './api/routes/contact';
 import { articlesRoutes } from './api/routes/articles.routes';
 import { unmaskedPrivateRouter } from './api/routes/unmaskedPrivate';
 import { newsletterRouter } from './api/routes/newsletter';
+import { masterclassRouter } from './api/routes/masterclass';
 
 app.use(cors(corsOptions));
 app.use(
@@ -142,6 +143,9 @@ app.use('/api/v1/articles', articlesRoutes);
 app.use('/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/unmasked-private', unmaskedPrivateRouter);
 app.use('/api/v1/unmasked-private', unmaskedPrivateRouter);
+app.use('/masterclass', masterclassRouter);
+app.use('/api/masterclass', masterclassRouter);
+app.use('/api/v1/masterclass', masterclassRouter);
 app.use('/api/v1', apiRoutes);
 app.use('/', newsletterRouter);
 

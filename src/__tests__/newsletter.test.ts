@@ -57,11 +57,11 @@ describe('Newsletter Subscription API', () => {
     });
 
     it('should process a valid email subscription successfully', async () => {
-      const testEmail = `test.founder.${Date.now()}@example.com`;
+      const testEmail = `test.founder.${Date.now()}@leadersperformance.ae`;
       const res = await request(app)
         .post('/api/newsletter/subscribe')
         .set('x-test-rate-limit', 'bypass')
-        .send({ email: testEmail });
+        .send({ email: testEmail, consent: true });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -69,14 +69,45 @@ describe('Newsletter Subscription API', () => {
       expect(res.body.message).toContain('Thank you for subscribing');
     });
 
+    it('should reject test/dummy domains like example.com', async () => {
+      const res = await request(app)
+        .post('/api/newsletter/subscribe')
+        .set('x-test-rate-limit', 'bypass')
+        .send({ email: 'fake.user@example.com', consent: true });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Placeholder and test domains (such as example.com) are not accepted');
+    });
+
+    it('should reject disposable/temporary email addresses', async () => {
+      const res = await request(app)
+        .post('/api/newsletter/subscribe')
+        .set('x-test-rate-limit', 'bypass')
+        .send({ email: 'spammer@mailinator.com', consent: true });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Disposable or temporary email');
+    });
+
+    it('should catch common domain typos and suggest correction', async () => {
+      const res = await request(app)
+        .post('/api/newsletter/subscribe')
+        .set('x-test-rate-limit', 'bypass')
+        .send({ email: 'founder@gmial.com', consent: true });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Did you mean founder@gmail.com');
+      expect(res.body.suggestion).toBe('founder@gmail.com');
+    });
+
     it('should handle duplicate subscription gracefully without erroring out', async () => {
-      const duplicateEmail = `duplicate.${Date.now()}@example.com`;
+      const duplicateEmail = `duplicate.${Date.now()}@leadersperformance.ae`;
 
       // Initial subscription
       const res1 = await request(app)
         .post('/api/newsletter/subscribe')
         .set('x-test-rate-limit', 'bypass')
-        .send({ email: duplicateEmail });
+        .send({ email: duplicateEmail, consent: true });
       expect(res1.status).toBe(200);
       expect(res1.body.alreadySubscribed).toBe(false);
 
@@ -84,7 +115,7 @@ describe('Newsletter Subscription API', () => {
       const res2 = await request(app)
         .post('/api/newsletter/subscribe')
         .set('x-test-rate-limit', 'bypass')
-        .send({ email: duplicateEmail });
+        .send({ email: duplicateEmail, consent: true });
       expect(res2.status).toBe(200);
       expect(res2.body.success).toBe(true);
       expect(res2.body.alreadySubscribed).toBe(true);
@@ -94,13 +125,13 @@ describe('Newsletter Subscription API', () => {
 
   describe('Unsubscribe API', () => {
     it('should process unsubscribe request successfully', async () => {
-      const unsubEmail = `unsub.${Date.now()}@example.com`;
+      const unsubEmail = `unsub.${Date.now()}@leadersperformance.ae`;
 
       // First subscribe
       await request(app)
         .post('/api/newsletter/subscribe')
         .set('x-test-rate-limit', 'bypass')
-        .send({ email: unsubEmail });
+        .send({ email: unsubEmail, consent: true });
 
       // Then unsubscribe
       const res = await request(app)

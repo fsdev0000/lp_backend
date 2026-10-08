@@ -110,6 +110,7 @@ const contact_1 = require("./api/routes/contact");
 const articles_routes_1 = require("./api/routes/articles.routes");
 const unmaskedPrivate_1 = require("./api/routes/unmaskedPrivate");
 const newsletter_1 = require("./api/routes/newsletter");
+const masterclass_1 = require("./api/routes/masterclass");
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({
     verify: (req, _res, buf) => {
@@ -131,6 +132,9 @@ app.use('/api/v1/articles', articles_routes_1.articlesRoutes);
 app.use('/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/api/v1/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
+app.use('/masterclass', masterclass_1.masterclassRouter);
+app.use('/api/masterclass', masterclass_1.masterclassRouter);
+app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
 app.use('/api/v1', routes_1.apiRoutes);
 app.use('/', newsletter_1.newsletterRouter);
 const swaggerAuth_1 = require("./middleware/swaggerAuth");

@@ -200,5 +200,88 @@ model NewsletterCampaignRecipient {
   @@map("newsletter_campaign_recipients")
 }
 
+model MasterclassEnrollment {
+  id                    String    @id @default(uuid())
+  email                 String
+  fullName              String    @map("full_name")
+  company               String
+  role                  String?
+  phone                 String?
+  marketingConsent      Boolean   @default(false) @map("marketing_consent")
+  privacyConsent        Boolean   @default(true) @map("privacy_consent")
+  amount                Int       @default(50000)
+  currency              String    @default("usd")
+  paymentStatus         String    @default("pending") @map("payment_status")
+  stripeSessionId       String?   @unique @map("stripe_session_id")
+  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
+  accessGranted         Boolean   @default(false) @map("access_granted")
+  sessionToken          String?   @unique @map("session_token")
+  courseProgress        Int       @default(0) @map("course_progress")
+  currentStage          Int       @default(1) @map("current_stage")
+  source                String?
+  metadata              String?
+  paidAt                DateTime? @map("paid_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  submissions           MasterclassWorkbookSubmission[]
+  bookings              MasterclassBooking[]
+
+  @@index([email])
+  @@map("masterclass_enrollments")
+}
+
+model MasterclassWorkbookSubmission {
+  id            String    @id @default(uuid())
+  submissionRef String    @unique @map("submission_ref")
+  enrollmentId  String?   @map("enrollment_id")
+  email         String
+  fullName      String    @map("full_name")
+  company       String
+  role          String?
+  phone         String?
+  status        String    @default("draft")
+  currentStage  Int       @default(1) @map("current_stage")
+  formData      String
+  personalNotes String?   @map("personal_notes")
+  submittedAt   DateTime? @map("submitted_at")
+  lastSavedAt   DateTime  @default(now()) @map("last_saved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  enrollment    MasterclassEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  bookings      MasterclassBooking[]
+
+  @@index([email])
+  @@index([submissionRef])
+  @@map("masterclass_workbook_submissions")
+}
+
+model MasterclassBooking {
+  id               String    @id @default(uuid())
+  bookingRef       String    @unique @map("booking_ref")
+  enrollmentId     String?   @map("enrollment_id")
+  submissionId     String?   @map("submission_id")
+  email            String
+  fullName         String    @map("full_name")
+  company          String
+  slotTime         String    @map("slot_time")
+  scheduledAt      DateTime? @map("scheduled_at")
+  timezone         String    @default("GST (UTC+4)")
+  status           String    @default("confirmed")
+  meetingLink      String?   @map("meeting_link")
+  ghlAppointmentId String?   @map("ghl_appointment_id")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  enrollment       MasterclassEnrollment?         @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  submission       MasterclassWorkbookSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@map("masterclass_bookings")
+}
+
+
 
 

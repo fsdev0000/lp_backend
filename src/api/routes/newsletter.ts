@@ -65,27 +65,10 @@ export async function authenticateInternalApiKey(req: Request, res: Response, ne
   next();
 }
 
-export function validateNewsletterEmail(emailStr: string | undefined | null): { valid: boolean; error?: string; email?: string } {
-  if (!emailStr || typeof emailStr !== 'string') {
-    return { valid: false, error: 'Please enter your email address.' };
-  }
+import { validateNewsletterEmailStrict, validateEmailBasic } from '../../services/emailValidation';
 
-  const trimmed = emailStr.trim().toLowerCase();
-  if (!trimmed) {
-    return { valid: false, error: 'Please enter your email address.' };
-  }
-
-  if (trimmed.length > 254) {
-    return { valid: false, error: 'Email address cannot exceed 254 characters.' };
-  }
-
-  // RFC5322 compliant email regex check
-  const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-  if (!emailRegex.test(trimmed)) {
-    return { valid: false, error: 'Please enter a valid email address (e.g. founder@company.com).' };
-  }
-
-  return { valid: true, email: trimmed };
+export function validateNewsletterEmail(emailStr: string | undefined | null): { valid: boolean; error?: string; email?: string; suggestion?: string } {
+  return validateEmailBasic(emailStr);
 }
 
 export function getEmailUnsubscribeUrl(tokenOrEmail: string): string {
@@ -316,10 +299,13 @@ newsletterRouter.post('/subscribe', newsletterRateLimiter, async (req: Request, 
     const firstNameInput = typeof req.body?.firstName === 'string' ? req.body.firstName.trim() : null;
     const consentInput = req.body?.consent;
 
-    // 1. Server-side validation
-    const validation = validateNewsletterEmail(emailInput);
+    // 1. Server-side validation (Syntax, Disposable blocklist, Typo detector, DNS MX check)
+    const validation = await validateNewsletterEmailStrict(emailInput);
     if (!validation.valid || !validation.email) {
-      return res.status(400).json({ error: validation.error });
+      return res.status(400).json({
+        error: validation.error,
+        suggestion: validation.suggestion,
+      });
     }
 
     // Explicit consent requirement

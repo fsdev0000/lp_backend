@@ -38,6 +38,10 @@ const swaggerOptions = {
                 name: 'Newsletter',
                 description: 'The Founder Performance Newsletter subscription, suppression, and monthly campaign dispatch',
             },
+            {
+                name: 'Masterclass',
+                description: 'The Founder’s Next Move — Executive Masterclass, Interactive Workbook, Stripe Enrollment & 1-on-1 Strategic Review Scheduling',
+            },
         ],
         paths: {
             '/health': {
