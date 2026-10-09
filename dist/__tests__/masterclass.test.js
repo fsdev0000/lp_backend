@@ -156,7 +156,7 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.success).toBe(true);
             (0, globals_1.expect)(res.body.totalVideos).toBe(6);
             (0, globals_1.expect)(res.body.videos).toHaveLength(6);
-            (0, globals_1.expect)(res.body.videos[1].fileName).toBe('STAGE -01.mp4');
+            (0, globals_1.expect)(res.body.videos[1].fileName).toBe('STAGE-01.mp4');
             (0, globals_1.expect)(res.body.videos[1].signedUrl).toContain('supabase.co');
         });
         (0, globals_1.it)('should allow updating masterclass questions via PUT /config/questions', async () => {

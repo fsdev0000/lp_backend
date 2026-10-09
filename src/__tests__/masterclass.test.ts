@@ -179,7 +179,7 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.totalVideos).toBe(6);
       expect(res.body.videos).toHaveLength(6);
-      expect(res.body.videos[1].fileName).toBe('STAGE -01.mp4');
+      expect(res.body.videos[1].fileName).toBe('STAGE-01.mp4');
       expect(res.body.videos[1].signedUrl).toContain('supabase.co');
     });
 
