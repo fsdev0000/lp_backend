@@ -14,6 +14,15 @@ function getPrisma(): any {
 }
 const prisma = getPrisma();
 
+// Helper to obtain Stripe client
+function getStripe(): Stripe {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error('STRIPE_SECRET_KEY environment variable is not configured');
+  }
+  return new Stripe(secretKey);
+}
+
 /**
  * Validates whether an email domain exists on the internet and can receive email (via DNS MX/A lookup)
  */
