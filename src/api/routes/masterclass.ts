@@ -19,17 +19,16 @@ import { createRateLimiter } from '../../middleware/rateLimiter';
 
 export const masterclassRouter = Router();
 
-// Rate limiter for masterclass public forms (bypassed / commented out per request)
-// const masterclassLimiter = createRateLimiter({
-//   max: 30,
-//   windowMs: 15 * 60 * 1000,
-//   message: {
-//     success: false,
-//     error: 'TOO_MANY_REQUESTS',
-//     message: 'Too many requests. Please try again later.',
-//   },
-// });
-const masterclassLimiter = (_req: Request, _res: Response, next: any) => next();
+// Rate limiter for masterclass public forms
+const masterclassLimiter = createRateLimiter({
+  max: 30,
+  windowMs: 15 * 60 * 1000,
+  message: {
+    success: false,
+    error: 'TOO_MANY_REQUESTS',
+    message: 'Too many requests. Please try again later.',
+  },
+});
 
 // ==========================================
 // ZOD VALIDATION SCHEMAS

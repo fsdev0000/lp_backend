@@ -24,15 +24,14 @@ import {
 
 export const unmaskedPrivateRouter = Router();
 
-// Rate limiter dedicated to UNMASKED PRIVATE submissions (bypassed / commented out per request)
-// const unmaskedPrivateLimiter = createRateLimiter({
-//   message: {
-//     success: false,
-//     error: 'TOO_MANY_REQUESTS',
-//     message: 'Too many requests. Please try again later.',
-//   },
-// });
-const unmaskedPrivateLimiter = (_req: Request, _res: Response, next: any) => next();
+// Rate limiter dedicated to UNMASKED PRIVATE submissions (5 per hour per IP)
+const unmaskedPrivateLimiter = createRateLimiter({
+  message: {
+    success: false,
+    error: 'TOO_MANY_REQUESTS',
+    message: 'Too many requests. Please try again later.',
+  },
+});
 
 // Zod Validation Schemas
 const Step1Schema = z
