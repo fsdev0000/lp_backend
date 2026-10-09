@@ -6,6 +6,7 @@ import fs from 'fs';
 
 export const UNMASKED_BUCKET = 'unmasked-private';
 export const UNMASKED_VIDEO_OBJECT = 'unmasked-private.mp4';
+export const MASTERCLASS_BUCKET = 'masterclass';
 // Effectively permanent / long-lived (10 years)
 export const DEFAULT_EXPIRES_IN_SECONDS = 315360000;
 
@@ -165,3 +166,46 @@ export async function generateUnmaskedVideoSignedUrl(
     videoUrl: data.signedUrl,
   };
 }
+
+/**
+ * Lists all files inside the private 'masterclass' Supabase storage bucket.
+ */
+export async function getMasterclassBucketFiles(): Promise<any[]> {
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage.from(MASTERCLASS_BUCKET).list('', { limit: 100 });
+    if (error) {
+      console.error('[SupabaseStorage] Error listing masterclass bucket files:', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err: any) {
+    console.error('[SupabaseStorage] Exception listing masterclass bucket files:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Creates a signed URL for a file in the 'masterclass' Supabase storage bucket.
+ */
+export async function createMasterclassSignedUrl(
+  fileName: string,
+  expiresInSeconds: number = DEFAULT_EXPIRES_IN_SECONDS
+): Promise<string | null> {
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from(MASTERCLASS_BUCKET)
+      .createSignedUrl(fileName, expiresInSeconds);
+
+    if (error || !data?.signedUrl) {
+      console.warn(`[SupabaseStorage] Could not create signed url for ${fileName}:`, error?.message);
+      return null;
+    }
+    return data.signedUrl;
+  } catch (err: any) {
+    console.warn(`[SupabaseStorage] Exception generating signed url for ${fileName}:`, err.message);
+    return null;
+  }
+}
+

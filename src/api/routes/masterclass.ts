@@ -11,6 +11,9 @@ import {
   getSubmission,
   getAvailableSlots,
   bookReviewSlot,
+  getMasterclassAppConfig,
+  updateMasterclassQuestionsConfig,
+  getMasterclassVideosList,
 } from '../../services/masterclassService';
 import { createRateLimiter } from '../../middleware/rateLimiter';
 
@@ -1008,3 +1011,205 @@ masterclassRouter.post('/webhook', async (req: Request, res: Response) => {
 
   res.status(200).json({ received: true });
 });
+
+/**
+ * @openapi
+ * /masterclass/config:
+ *   get:
+ *     summary: Get Masterclass Dynamic Config, Questions & Videos
+ *     description: Checks if the participant email exists in system and returns the 4-stage questions, dynamic prompts, reflection pauses, and the 6 private video signed URLs generated from Supabase storage.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         schema:
+ *           type: string
+ *         description: Optional participant email to check recognition and unlock private session
+ *     responses:
+ *       200:
+ *         description: Masterclass configuration, dynamic questions, and private video stream URLs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 userExists:
+ *                   type: boolean
+ *                 isEnrolled:
+ *                   type: boolean
+ *                 hasPaid:
+ *                   type: boolean
+ *                 accessGranted:
+ *                   type: boolean
+ *                 videos:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       stage:
+ *                         type: integer
+ *                       stageName:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       fileName:
+ *                         type: string
+ *                       signedUrl:
+ *                         type: string
+ *                       isAvailable:
+ *                         type: boolean
+ *                 stages:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *   post:
+ *     summary: Check Email & Get Masterclass Config
+ *     description: POST variant allowing email submission in request body to verify enrollment and fetch 6 private videos with signed URLs plus all 4-stage questions.
+ *     tags:
+ *       - Masterclass
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: alexander@apexdynamics.com
+ *     responses:
+ *       200:
+ *         description: Configuration, videos, and stage questions returned
+ */
+masterclassRouter.get('/config', async (req: Request, res: Response) => {
+  try {
+    const email = (req.query.email as string) || '';
+    const config = await getMasterclassAppConfig(email);
+    res.status(200).json(config);
+  } catch (err: any) {
+    console.error('[Masterclass] Error fetching app config:', err);
+    res.status(500).json({
+      success: false,
+      error: 'CONFIG_FETCH_ERROR',
+      message: err.message || 'Failed to retrieve masterclass configuration.',
+    });
+  }
+});
+
+masterclassRouter.post('/config', async (req: Request, res: Response) => {
+  try {
+    const email = (req.body?.email as string) || (req.query?.email as string) || '';
+    const config = await getMasterclassAppConfig(email);
+    res.status(200).json(config);
+  } catch (err: any) {
+    console.error('[Masterclass] Error in POST config:', err);
+    res.status(500).json({
+      success: false,
+      error: 'CONFIG_FETCH_ERROR',
+      message: err.message || 'Failed to retrieve masterclass configuration.',
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /masterclass/config/questions:
+ *   put:
+ *     summary: Update Masterclass 4-Stage Questions (Backend / Admin)
+ *     description: Dynamically updates the questions, labels, placeholders, and reflection prompts stored in the database without frontend redeployment.
+ *     tags:
+ *       - Masterclass
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               stages:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       200:
+ *         description: Questions configuration updated in database
+ */
+masterclassRouter.put('/config/questions', async (req: Request, res: Response) => {
+  try {
+    const updated = await updateMasterclassQuestionsConfig(req.body);
+    res.status(200).json({
+      success: true,
+      message: 'Masterclass questions configuration updated successfully.',
+      config: updated,
+    });
+  } catch (err: any) {
+    console.error('[Masterclass] Error updating questions config:', err);
+    res.status(500).json({
+      success: false,
+      error: 'CONFIG_UPDATE_ERROR',
+      message: err.message || 'Failed to update masterclass questions config.',
+    });
+  }
+});
+
+masterclassRouter.put('/config', async (req: Request, res: Response) => {
+  try {
+    const updated = await updateMasterclassQuestionsConfig(req.body);
+    res.status(200).json({
+      success: true,
+      message: 'Masterclass configuration updated successfully.',
+      config: updated,
+    });
+  } catch (err: any) {
+    console.error('[Masterclass] Error updating config:', err);
+    res.status(500).json({
+      success: false,
+      error: 'CONFIG_UPDATE_ERROR',
+      message: err.message || 'Failed to update masterclass configuration.',
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /masterclass/videos:
+ *   get:
+ *     summary: Get All 6 Masterclass Videos with Signed URLs
+ *     description: Returns the catalog of all 6 private videos with signed URLs directly generated from Supabase private storage bucket.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: query
+ *         name: expiresIn
+ *         schema:
+ *           type: integer
+ *         description: Optional signed URL expiry in seconds (defaults to long-lived)
+ *     responses:
+ *       200:
+ *         description: 6 Masterclass video objects with private signed URLs
+ */
+masterclassRouter.get('/videos', async (req: Request, res: Response) => {
+  try {
+    const expiresIn = req.query.expiresIn ? Number(req.query.expiresIn) : 315360000;
+    const videos = await getMasterclassVideosList(expiresIn);
+    res.status(200).json({
+      success: true,
+      totalVideos: videos.length,
+      videos,
+    });
+  } catch (err: any) {
+    console.error('[Masterclass] Error fetching video streams:', err);
+    res.status(500).json({
+      success: false,
+      error: 'VIDEOS_FETCH_ERROR',
+      message: err.message || 'Failed to generate private video signed URLs.',
+    });
+  }
+});
+
