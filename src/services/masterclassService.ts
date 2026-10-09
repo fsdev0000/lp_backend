@@ -317,8 +317,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
 
   const sessionToken = enrollment?.sessionToken || randomUUID();
 
-  // TODO: Uncomment later - Commented for testing Stripe Checkout redirect even if user is already paid/access granted
-  /*
+  // Verify if participant already enrolled with verified payment
   if (enrollment && enrollment.accessGranted && enrollment.paymentStatus === 'paid') {
     return {
       recognized: true,
@@ -339,7 +338,6 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       message: 'Participant already enrolled with verified payment. Direct access unlocked.',
     };
   }
-  */
 
   // Upsert or create enrollment
   if (enrollment) {

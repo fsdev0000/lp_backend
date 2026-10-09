@@ -20,8 +20,6 @@ import { createRateLimiter } from '../../middleware/rateLimiter';
 export const masterclassRouter = Router();
 
 // Rate limiter for masterclass public forms
-// TODO: Uncomment later when ready for production rate limiting
-/*
 const masterclassLimiter = createRateLimiter({
   max: 30,
   windowMs: 15 * 60 * 1000,
@@ -31,8 +29,6 @@ const masterclassLimiter = createRateLimiter({
     message: 'Too many requests. Please try again later.',
   },
 });
-*/
-const masterclassLimiter = (_req: Request, _res: Response, next: any) => next();
 
 // ==========================================
 // ZOD VALIDATION SCHEMAS
