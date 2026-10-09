@@ -97,7 +97,7 @@ function getEmailUnsubscribeHeaders(tokenOrEmail: string): Record<string, string
 /**
  * Send welcome email to subscriber via GoHighLevel
  */
-export async function sendNewsletterWelcomeEmail(email: string, contactId?: string, unsubscribeToken?: string): Promise<void> {
+export async function sendNewsletterWelcomeEmail(email: string, contactId?: string, unsubscribeToken?: string, firstNameInput?: string | null): Promise<void> {
   // STRICT SUPPRESSION CHECK:
   // If subscriber is unsubscribed, abort immediately
   const sub = await db.newsletterSubscriber.findUnique({ where: { email } });
@@ -117,8 +117,19 @@ export async function sendNewsletterWelcomeEmail(email: string, contactId?: stri
   const token = unsubscribeToken || sub?.unsubscribeToken || email;
   const unsubscribeUrl = getEmailUnsubscribeUrl(token);
 
+  const frontendBase = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const privacyUrl = `${frontendBase}/privacy`;
+  const octoberIssueUrl = `${frontendBase}/knowledge?issue=2026-10`;
+
+  const firstName = (sub?.firstName || firstNameInput || '').trim();
+  const displayName = firstName ? firstName : 'Founder';
+
   const html = renderTemplate(rawTemplate, {
+    first_name: displayName,
+    name: displayName,
     unsubscribe_url: unsubscribeUrl,
+    privacy_url: privacyUrl,
+    october_issue_url: octoberIssueUrl,
     email: email,
   });
 
@@ -130,6 +141,7 @@ export async function sendNewsletterWelcomeEmail(email: string, contactId?: stri
   if (!targetContactId) {
     targetContactId = await upsertContact({
       email,
+      firstName: firstName || undefined,
       source: 'Leaders Performance Website Footer',
       tags: ['The Founder Performance Newsletter', 'Newsletter Subscriber'],
     });
@@ -231,7 +243,7 @@ async function processBackgroundSubscription(email: string, firstName?: string |
       }).catch(() => null);
 
       // Send Welcome Email immediately
-      await sendNewsletterWelcomeEmail(email, ghlContactId, token);
+      await sendNewsletterWelcomeEmail(email, ghlContactId, token, firstName);
     }
   } catch (err) {
     console.error('[Newsletter] Background processing error:', err);
