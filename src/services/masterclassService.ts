@@ -1,18 +1,72 @@
 import { PrismaClient } from '@prisma/client';
 import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
+import { promises as dnsPromises } from 'dns';
 import { upsertContact, sendEmail, getFreeSlots, getCalendarInfo, bookAppointment } from './ghl';
 import { escapeHtml, formatOperationalSubmissionDate } from './email';
 
-const prisma = new PrismaClient();
-
-// Helper to obtain Stripe client
-function getStripe(): Stripe {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    throw new Error('STRIPE_SECRET_KEY environment variable is not configured');
+let prismaInstance: PrismaClient | null = null;
+function getPrisma(): any {
+  if (!prismaInstance) {
+    prismaInstance = new PrismaClient();
   }
-  return new Stripe(secretKey);
+  return prismaInstance;
+}
+const prisma = getPrisma();
+
+/**
+ * Validates whether an email domain exists on the internet and can receive email (via DNS MX/A lookup)
+ */
+export async function verifyEmailDomainExistence(email: string): Promise<{ valid: boolean; reason?: string }> {
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2 || !parts[1]) {
+    return { valid: false, reason: 'Invalid email structure.' };
+  }
+  const domain = parts[1];
+
+  // Common domain typo mappings
+  const typoMap: Record<string, string> = {
+    'gmail.co': 'gmail.com',
+    'gamil.com': 'gmail.com',
+    'gmial.com': 'gmail.com',
+    'gmal.com': 'gmail.com',
+    'yahoo.co': 'yahoo.com',
+    'yaho.com': 'yahoo.com',
+    'hotmail.co': 'hotmail.com',
+    'outlok.com': 'outlook.com',
+    'outlook.co': 'outlook.com',
+  };
+
+  if (typoMap[domain]) {
+    return {
+      valid: false,
+      reason: `Did you mean @${typoMap[domain]}? "@${domain}" appears to be a typo.`,
+    };
+  }
+
+  try {
+    const mxRecords = await dnsPromises.resolveMx(domain);
+    if (mxRecords && mxRecords.length > 0) {
+      return { valid: true };
+    }
+  } catch (err: any) {
+    try {
+      const aRecords = await dnsPromises.resolve(domain);
+      if (aRecords && aRecords.length > 0) {
+        return { valid: true };
+      }
+    } catch (aErr: any) {
+      return {
+        valid: false,
+        reason: `The domain "@${domain}" does not exist or has no active mail servers on the internet.`,
+      };
+    }
+  }
+
+  return {
+    valid: false,
+    reason: `The domain "@${domain}" cannot receive emails. Please enter a valid email address.`,
+  };
 }
 
 // Generates unique reference number for Masterclass Workbook: FNM-YYYY-XXXX
@@ -35,6 +89,9 @@ export interface MasterclassUserPayload {
   company: string;
   role?: string;
   phone?: string;
+  how_did_you_hear?: string;
+  how_did_you_hear_other?: string;
+  attribution?: Record<string, any>;
   marketingConsent?: boolean;
   privacyConsent?: boolean;
   source?: string;
@@ -112,23 +169,53 @@ export interface MasterclassBookingPayload {
 export async function identifyUser(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
   
-  const enrollment = await prisma.masterclassEnrollment.findFirst({
-    where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      submissions: {
-        orderBy: { updatedAt: 'desc' },
-        take: 1,
-      },
-      bookings: {
+  // Validate domain existence via DNS lookup
+  const domainCheck = await verifyEmailDomainExistence(normalizedEmail);
+  if (!domainCheck.valid) {
+    return {
+      success: false,
+      domainValid: false,
+      error: 'DOMAIN_INVALID',
+      message: domainCheck.reason,
+      recognized: false,
+      isExistingUser: false,
+      hasPaid: false,
+      accessGranted: false,
+      user: null,
+      enrollment: null,
+      submission: null,
+      booking: null,
+      token: null,
+    };
+  }
+
+  let enrollment: any = null;
+  try {
+    const db = getPrisma();
+    if (db.masterclassEnrollment) {
+      enrollment = await db.masterclassEnrollment.findFirst({
+        where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
         orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
-  });
+        include: {
+          submissions: {
+            orderBy: { updatedAt: 'desc' },
+            take: 1,
+          },
+          bookings: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+    }
+  } catch (err: any) {
+    console.warn('[Masterclass] Database lookup notice in identifyUser:', err.message);
+  }
 
   if (!enrollment) {
     return {
+      success: true,
+      domainValid: true,
       recognized: false,
       isExistingUser: false,
       hasPaid: false,
@@ -324,7 +411,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
     data: { stripeSessionId: session.id },
   });
 
-  // Optionally register lead in GHL
+  // Optionally register lead in GHL with attribution & how_did_you_hear
   try {
     await upsertContact({
       email: normalizedEmail,
@@ -333,6 +420,8 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       phone: payload.phone,
       source: `Masterclass Enrollment (${payload.source || 'Direct'})`,
       tags: ['Masterclass Lead', 'The Founders Next Move'],
+      howDidYouHear: payload.how_did_you_hear,
+      attribution: payload.attribution,
     });
   } catch (err: any) {
     console.warn('[GHL] Non-fatal upsert error during masterclass registration:', err.message);
