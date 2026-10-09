@@ -30,13 +30,37 @@ const masterclassLimiter = createRateLimiter({
   message: {
     success: false,
     error: 'TOO_MANY_REQUESTS',
-    message: 'Too many requests. Please try again later.',
+    message: 'For your security, access attempts are temporarily limited. Please wait a few moments before trying again, or reach out to our team for immediate assistance.',
   },
 });
 
 // ==========================================
 // ZOD VALIDATION SCHEMAS
 // ==========================================
+
+const MAX_ANSWER_LENGTH = 1000;
+
+const validateMaxLengthMap = (data: Record<string, any>) => {
+  if (!data || typeof data !== 'object') return true;
+  for (const [key, val] of Object.entries(data)) {
+    if (typeof val === 'string' && val.length > MAX_ANSWER_LENGTH) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const answerField = (label: string) =>
+  z.string({ message: `${label} is required.` })
+    .trim()
+    .min(1, `${label} is required.`)
+    .max(MAX_ANSWER_LENGTH, `${label} cannot exceed ${MAX_ANSWER_LENGTH} characters.`);
+
+const optionalAnswerField = (label: string) =>
+  z.string()
+    .trim()
+    .max(MAX_ANSWER_LENGTH, `${label} cannot exceed ${MAX_ANSWER_LENGTH} characters.`)
+    .optional();
 
 const IdentifySchema = z.object({
   email: z
@@ -77,8 +101,12 @@ const SaveDraftSchema = z.object({
     .trim()
     .email('Please enter a valid email address.'),
   currentStage: z.number().int().min(1).max(4).optional().default(1),
-  formData: z.record(z.string(), z.any()),
-  personalNotes: z.record(z.string(), z.any()).optional().default({}),
+  formData: z.record(z.string(), z.any()).refine(validateMaxLengthMap, {
+    message: `Answers cannot exceed ${MAX_ANSWER_LENGTH} characters per question.`,
+  }),
+  personalNotes: z.record(z.string(), z.any()).optional().default({}).refine(validateMaxLengthMap, {
+    message: `Personal notes cannot exceed ${MAX_ANSWER_LENGTH} characters.`,
+  }),
 });
 
 const SubmitWorkbookSchema = z.object({
@@ -86,7 +114,8 @@ const SubmitWorkbookSchema = z.object({
     fullName: z
       .string({ message: 'Full name is required.' })
       .trim()
-      .min(2, 'Full name must be at least 2 characters.'),
+      .min(2, 'Full name must be at least 2 characters.')
+      .max(100, 'Full name cannot exceed 100 characters.'),
     email: z
       .string({ message: 'Email address is required.' })
       .trim()
@@ -94,46 +123,54 @@ const SubmitWorkbookSchema = z.object({
     company: z
       .string({ message: 'Company name is required.' })
       .trim()
-      .min(1, 'Company name is required.'),
-    role: z.string().trim().optional(),
-    phone: z.string().trim().optional(),
+      .min(1, 'Company name is required.')
+      .max(150, 'Company name cannot exceed 150 characters.'),
+    role: z.string().trim().max(100).optional(),
+    phone: z.string().trim().max(50).optional(),
   }),
   formData: z.object({
     // Stage 1
-    stage1_nextStage: z.string().trim().min(1, 'Stage 1 next stage is required.'),
-    stage1_possibility: z.string().trim().min(1, 'Stage 1 possibility is required.'),
-    stage1_strength: z.string().trim().min(1, 'Stage 1 core strength is required.'),
+    stage1_nextStage: answerField('Stage 1 next stage'),
+    stage1_possibility: answerField('Stage 1 possibility'),
+    stage1_strength: answerField('Stage 1 core strength'),
     // Stage 2
-    stage2_changes: z.string().trim().min(1, 'Stage 2 operational changes is required.'),
-    stage2_demand1: z.string().trim().min(1, 'Stage 2 primary demand is required.'),
-    stage2_demand2: z.string().trim().optional(),
-    stage2_demand3: z.string().trim().optional(),
-    stage2_investment: z.string().trim().min(1, 'Stage 2 performance investment is required.'),
+    stage2_changes: answerField('Stage 2 operational changes'),
+    stage2_demand1: answerField('Stage 2 primary demand'),
+    stage2_demand2: optionalAnswerField('Stage 2 demand 2'),
+    stage2_demand3: optionalAnswerField('Stage 2 demand 3'),
+    stage2_investment: answerField('Stage 2 performance investment'),
     // Stage 3
-    stage3_founderStrength: z.string().trim().min(1, 'Stage 3 founder capability is required.'),
-    stage3_founderStandard: z.string().trim().optional(),
-    stage3_teamStrength: z.string().trim().min(1, 'Stage 3 team capability is required.'),
-    stage3_teamStandard: z.string().trim().optional(),
-    stage3_orgStrength: z.string().trim().min(1, 'Stage 3 organizational standard is required.'),
-    stage3_orgInvestment: z.string().trim().optional(),
-    stage3_focusArea: z.string().trim().optional(),
+    stage3_founderStrength: answerField('Stage 3 founder capability'),
+    stage3_founderStandard: optionalAnswerField('Stage 3 founder standard'),
+    stage3_teamStrength: answerField('Stage 3 team capability'),
+    stage3_teamStandard: optionalAnswerField('Stage 3 team standard'),
+    stage3_orgStrength: answerField('Stage 3 organizational standard'),
+    stage3_orgInvestment: optionalAnswerField('Stage 3 organizational investment'),
+    stage3_focusArea: optionalAnswerField('Stage 3 focus area'),
     // Stage 4
-    stage4_priority90Days: z.string().trim().min(1, 'Stage 4 90-day priority is required.'),
-    stage4_milestone1: z.string().trim().optional(),
-    stage4_milestone2: z.string().trim().optional(),
-    stage4_milestone3: z.string().trim().optional(),
-    stage4_action7Days: z.string().trim().min(1, 'Stage 4 7-day action is required.'),
-    stage4_actionTiming: z.string().trim().optional(),
-    stage4_evidence: z.string().trim().min(1, 'Stage 4 evidence is required.'),
+    stage4_priority90Days: answerField('Stage 4 90-day priority'),
+    stage4_milestone1: optionalAnswerField('Stage 4 milestone 1'),
+    stage4_milestone2: optionalAnswerField('Stage 4 milestone 2'),
+    stage4_milestone3: optionalAnswerField('Stage 4 milestone 3'),
+    stage4_action7Days: answerField('Stage 4 7-day action'),
+    stage4_actionTiming: optionalAnswerField('Stage 4 action timing'),
+    stage4_evidence: answerField('Stage 4 evidence'),
+  }).passthrough().refine(validateMaxLengthMap, {
+    message: `Answers cannot exceed ${MAX_ANSWER_LENGTH} characters per question.`,
   }),
   personalNotes: z
     .object({
-      stage1_notes: z.string().optional(),
-      stage2_notes: z.string().optional(),
-      stage3_notes: z.string().optional(),
-      stage4_notes: z.string().optional(),
+      stage1_notes: optionalAnswerField('Stage 1 notes'),
+      stage2_notes: optionalAnswerField('Stage 2 notes'),
+      stage3_notes: optionalAnswerField('Stage 3 notes'),
+      stage4_notes: optionalAnswerField('Stage 4 notes'),
     })
-    .optional(),
+    .passthrough()
+    .optional()
+    .refine(
+      (data) => !data || validateMaxLengthMap(data),
+      { message: `Personal notes cannot exceed ${MAX_ANSWER_LENGTH} characters.` }
+    ),
   submissionRef: z.string().trim().optional(),
 });
 

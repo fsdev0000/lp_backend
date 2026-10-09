@@ -459,6 +459,21 @@ async function saveDraft(payload) {
         },
         orderBy: { updatedAt: 'desc' },
     });
+    // Validate maximum answer length (1000 characters)
+    if (payload.formData && typeof payload.formData === 'object') {
+        for (const [key, val] of Object.entries(payload.formData)) {
+            if (typeof val === 'string' && val.length > 1000) {
+                throw new Error(`Answer for ${key} cannot exceed 1,000 characters.`);
+            }
+        }
+    }
+    if (payload.personalNotes && typeof payload.personalNotes === 'object') {
+        for (const [key, val] of Object.entries(payload.personalNotes)) {
+            if (typeof val === 'string' && val.length > 1000) {
+                throw new Error(`Personal note for ${key} cannot exceed 1,000 characters.`);
+            }
+        }
+    }
     const serializedFormData = JSON.stringify(payload.formData || {});
     const serializedNotes = JSON.stringify(payload.personalNotes || {});
     const stage = payload.currentStage || 1;
@@ -555,6 +570,21 @@ async function submitWorkbook(payload) {
     let enrollment = await prisma.masterclassEnrollment.findFirst({
         where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
     });
+    // Validate maximum answer length (1000 characters)
+    if (formData && typeof formData === 'object') {
+        for (const [key, val] of Object.entries(formData)) {
+            if (typeof val === 'string' && val.length > 1000) {
+                throw new Error(`Answer for ${key} cannot exceed 1,000 characters.`);
+            }
+        }
+    }
+    if (personalNotes && typeof personalNotes === 'object') {
+        for (const [key, val] of Object.entries(personalNotes)) {
+            if (typeof val === 'string' && val.length > 1000) {
+                throw new Error(`Personal note for ${key} cannot exceed 1,000 characters.`);
+            }
+        }
+    }
     // Use provided ref or existing draft ref or generate a new unique ref
     const submissionRef = payload.submissionRef || generateMasterclassReference();
     const serializedFormData = JSON.stringify(formData);
@@ -885,6 +915,8 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
     reflectionPauseDurationSeconds: 45,
     totalStages: 4,
     totalVideos: 6,
+    welcomeThumbnail: 'WELCOME.jpg',
+    closingThumbnail: 'CLOSING.jpg',
     stages: [
         {
             stageNumber: 1,
@@ -894,6 +926,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
             subtitle: 'Clarity on the business stage you are building for and what makes it distinct from where you stand today.',
             videoId: 2,
             videoKey: 'stage_1',
+            thumbnailFileName: 'STAGE-01.jpg',
             reflectionPauseSeconds: 45,
             reflectionPrompt: 'Reflect on the next stage you are preparing your business for and what you want that stage to make possible. Record your answers in Stage 1.',
             questions: [
@@ -902,6 +935,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '1. What is the next stage of business growth you are preparing for? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Scaling from $5M to $15M ARR across 3 GCC markets...',
                     helpText: 'Define the clear operational horizon and scale target.',
                 },
@@ -910,6 +944,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '2. What will that next stage make possible that is not possible today? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Attracting Tier-1 strategic partners and running self-sufficient business units...',
                     helpText: 'Articulate the strategic unlock and enterprise advantage.',
                 },
@@ -918,6 +953,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '3. What single core strength from today must carry through into that next stage? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Our obsessive standard for product quality and client trust...',
                     helpText: 'Identify your non-negotiable competitive foundation.',
                 },
@@ -931,6 +967,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
             subtitle: 'Recognizing how scale changes the demands on leadership, time allocation, and organizational standards.',
             videoId: 3,
             videoKey: 'stage_2',
+            thumbnailFileName: 'STAGE-02.jpg',
             reflectionPauseSeconds: 45,
             reflectionPrompt: 'Reflect on how operational pace, scale, and demands will change as you grow. Record your answers in Stage 2.',
             questions: [
@@ -939,6 +976,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '1. What changes most as your company scales to that next stage? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Direct founder execution stops working; management infrastructure becomes mandatory...',
                     helpText: 'What fundamental shifts occur in your day-to-day role?',
                 },
@@ -947,6 +985,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '2. Demand 1: Leadership & Strategic Bandwidth *',
                     type: 'text',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Stepping out of daily tactical troubleshooting...',
                 },
                 {
@@ -954,6 +993,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Demand 2: Team Execution & Accountability',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Expecting directors to own KPIs without escalation...',
                 },
                 {
@@ -961,6 +1001,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Demand 3: Operational Pace & Governance',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Weekly operating cadence replacing informal chat alignment...',
                 },
                 {
@@ -968,6 +1009,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '3. What performance investment must you make to prepare for those demands? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Hire a VP Operations and install a rigorous executive review rhythm...',
                     helpText: 'Capital, talent, or operational governance investments.',
                 },
@@ -981,6 +1023,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
             subtitle: 'Aligning personal founder capabilities, leadership team ownership, and organizational standards.',
             videoId: 4,
             videoKey: 'stage_3',
+            thumbnailFileName: 'STAGE-03.jpg',
             reflectionPauseSeconds: 45,
             reflectionPrompt: 'Reflect on the performance capabilities and standards required across Founder, Leadership Team, and Organisation. Record your answers in Stage 3.',
             questions: [
@@ -989,6 +1032,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '1. Founder Capability: What standard must YOU personally elevate? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Ruthless calendar discipline and strategic delegation...',
                 },
                 {
@@ -996,6 +1040,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Founder Standard to uphold',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. No meetings without pre-read memos...',
                 },
                 {
@@ -1003,6 +1048,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '2. Leadership Team: What capability must your executives embody? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. End-to-end accountability without awaiting founder intervention...',
                 },
                 {
@@ -1010,6 +1056,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Leadership Team Standard to uphold',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Metric-backed weekly business reviews...',
                 },
                 {
@@ -1017,6 +1064,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '3. Organisation: What system requires reinforcement? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Transparent reporting rhythm and clear delegation thresholds...',
                 },
                 {
@@ -1024,6 +1072,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Organizational Investment needed',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Executive operating cadence...',
                 },
                 {
@@ -1031,6 +1080,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Primary focus area across founder, team, and org',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Elevate executive team autonomy and operational reporting...',
                 },
             ],
@@ -1043,6 +1093,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
             subtitle: 'Transforming reflections into a high-leverage 90-day roadmap and one immediate action within 7 days.',
             videoId: 5,
             videoKey: 'stage_4',
+            thumbnailFileName: 'STAGE-04.jpg',
             reflectionPauseSeconds: 45,
             reflectionPrompt: 'Reflect on your top 90-day preparation priority and the single high-leverage action you will take within 7 days. Record your answers in Stage 4.',
             questions: [
@@ -1051,6 +1102,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '1. What is your main preparation priority for the next 90 days? *',
                     type: 'textarea',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Structure clear quarterly KPIs and delegate core revenue operations.',
                 },
                 {
@@ -1058,6 +1110,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Milestone 1: 30-Day progress marker',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'Milestone 1: e.g. Executive alignment framework signed off by Day 30',
                 },
                 {
@@ -1065,6 +1118,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Milestone 2: 60-Day progress marker',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'Milestone 2: e.g. Operational handover completed by Day 60',
                 },
                 {
@@ -1072,6 +1126,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: 'Milestone 3: 90-Day progress marker',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'Milestone 3: e.g. Full performance reset review with Lionel by Day 90',
                 },
                 {
@@ -1079,6 +1134,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '3. One action within 7 days *',
                     type: 'text',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. Audit top 3 time bottlenecks',
                 },
                 {
@@ -1086,6 +1142,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '4. When will you take it? *',
                     type: 'text',
                     required: false,
+                    maxLength: 1000,
                     placeholder: 'e.g. Next Monday morning 9 AM',
                 },
                 {
@@ -1093,6 +1150,7 @@ exports.DEFAULT_MASTERCLASS_CONFIG = {
                     label: '5. What evidence will you look for afterward? *',
                     type: 'text',
                     required: true,
+                    maxLength: 1000,
                     placeholder: 'e.g. 5 hours saved weekly and clear executive team ownership.',
                 },
             ],
@@ -1191,6 +1249,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'WELCOME VIDEO.mp4',
             candidates: ['WELCOME VIDEO.mp4', 'WELCOME_VIDEO.mp4', 'Welcome Video.mp4', 'Intro Video.mp4', 'Overview Video.mp4', 'Intro.mp4'],
             fallbackName: 'WELCOME VIDEO.mp4',
+            thumbnailFileName: 'WELCOME.jpg',
+            thumbnailCandidates: ['WELCOME.jpg', 'WELCOME.png', 'Welcome.jpg', 'welcome.jpg', 'WELCOME_THUMBNAIL.jpg'],
+            thumbnailFallback: 'WELCOME.jpg',
         },
         {
             id: 2,
@@ -1201,6 +1262,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'STAGE-01.mp4',
             candidates: ['STAGE-01.mp4', 'STAGE -01.mp4', 'STAGE_01.mp4', 'Stage 1.mp4'],
             fallbackName: 'STAGE-01.mp4',
+            thumbnailFileName: 'STAGE-01.jpg',
+            thumbnailCandidates: ['STAGE-01.jpg', 'STAGE -01.jpg', 'STAGE-01.png', 'STAGE_01.jpg', 'stage-01.jpg'],
+            thumbnailFallback: 'STAGE-01.jpg',
         },
         {
             id: 3,
@@ -1211,6 +1275,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'STAGE-02.mp4',
             candidates: ['STAGE-02.mp4', 'STAGE -02.mp4', 'STAGE_02.mp4', 'Stage 2.mp4'],
             fallbackName: 'STAGE-02.mp4',
+            thumbnailFileName: 'STAGE-02.jpg',
+            thumbnailCandidates: ['STAGE-02.jpg', 'STAGE -02.jpg', 'STAGE-02.png', 'STAGE_02.jpg', 'stage-02.jpg'],
+            thumbnailFallback: 'STAGE-02.jpg',
         },
         {
             id: 4,
@@ -1221,6 +1288,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'STAGE-03.mp4',
             candidates: ['STAGE-03.mp4', 'STAGE -03.mp4', 'STAGE_03.mp4', 'Stage 3.mp4'],
             fallbackName: 'STAGE-03.mp4',
+            thumbnailFileName: 'STAGE-03.jpg',
+            thumbnailCandidates: ['STAGE-03.jpg', 'STAGE -03.jpg', 'STAGE-03.png', 'STAGE_03.jpg', 'stage-03.jpg'],
+            thumbnailFallback: 'STAGE-03.jpg',
         },
         {
             id: 5,
@@ -1231,6 +1301,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'STAGE-04.mp4',
             candidates: ['STAGE-04.mp4', 'STAGE -04.mp4', 'STAGE_04.mp4', 'Stage 4.mp4'],
             fallbackName: 'STAGE-04.mp4',
+            thumbnailFileName: 'STAGE-04.jpg',
+            thumbnailCandidates: ['STAGE-04.jpg', 'STAGE -04.jpg', 'STAGE-04.png', 'STAGE_04.jpg', 'stage-04.jpg'],
+            thumbnailFallback: 'STAGE-04.jpg',
         },
         {
             id: 6,
@@ -1241,6 +1314,9 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: 'CLOSING VIDEO.mp4',
             candidates: ['CLOSING VIDEO.mp4', 'Closing Video.mp4', 'CLOSING_VIDEO.mp4', 'Closing Video (1).mp4', 'Closing.mp4', 'STAGE-05.mp4'],
             fallbackName: 'CLOSING VIDEO.mp4',
+            thumbnailFileName: 'CLOSING.jpg',
+            thumbnailCandidates: ['CLOSING.jpg', 'CLOSING.png', 'Closing.jpg', 'Closing.png', 'closing.jpg', 'STAGE-05.jpg'],
+            thumbnailFallback: 'CLOSING.jpg',
         },
     ];
     const videos = await Promise.all(slotDefs.map(async (slot) => {
@@ -1252,7 +1328,17 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             signedUrl = await (0, supabaseStorageService_1.createMasterclassSignedUrl)(matchedFileName, expiresInSeconds);
             isAvailable = Boolean(signedUrl);
         }
+        // Generate signed thumbnail URL
+        const matchedThumbnailName = findMatch(slot.thumbnailCandidates);
+        const targetThumbnail = matchedThumbnailName || slot.thumbnailFallback;
+        let thumbnailUrl = null;
+        let hasThumbnail = false;
+        if (matchedThumbnailName) {
+            thumbnailUrl = await (0, supabaseStorageService_1.createMasterclassSignedUrl)(matchedThumbnailName, expiresInSeconds);
+            hasThumbnail = Boolean(thumbnailUrl);
+        }
         const fileMeta = bucketFiles.find((f) => f.name === matchedFileName);
+        const thumbMeta = bucketFiles.find((f) => f.name === matchedThumbnailName);
         return {
             id: slot.id,
             stage: slot.stage,
@@ -1262,9 +1348,14 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             fileName: targetFile,
             isAvailable,
             signedUrl,
+            thumbnailFileName: targetThumbnail,
+            thumbnailUrl,
+            thumbnail: thumbnailUrl, // Convenient alias for frontend
+            hasThumbnail,
             reflectionPauseSeconds: slot.stage >= 1 && slot.stage <= 4 ? 45 : 0,
             sizeBytes: fileMeta?.metadata?.size || undefined,
             updatedAt: fileMeta?.updated_at || undefined,
+            thumbnailSizeBytes: thumbMeta?.metadata?.size || undefined,
         };
     }));
     // Fallback missing signed URLs to first available video stream so all 6 catalog slots are playable
@@ -1280,15 +1371,36 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
     return videos;
 }
 /**
- * Returns dynamic configuration, questions for all 4 stages, and private video URLs.
+ * Returns dynamic configuration, questions for all 4 stages, and private video & thumbnail URLs.
  * Recognizes user if email is supplied.
  */
 async function getMasterclassAppConfig(email) {
     // 1. Fetch dynamic questions from DB
     const questionsConfig = await getMasterclassQuestionsConfig();
-    // 2. Fetch 6 private signed video URLs
+    // 2. Fetch 6 private signed video and thumbnail URLs
     const videos = await getMasterclassVideosList();
-    // 3. User check if email provided
+    // 3. Map thumbnail signed URLs onto stages for direct access
+    const enrichedStages = (questionsConfig.stages || []).map((stage) => {
+        const stageVideo = videos.find((v) => v.stage === stage.stageNumber);
+        return {
+            ...stage,
+            thumbnailFileName: stage.thumbnailFileName || stageVideo?.thumbnailFileName,
+            thumbnailUrl: stageVideo?.thumbnailUrl || null,
+            thumbnail: stageVideo?.thumbnailUrl || null,
+            videoUrl: stageVideo?.signedUrl || null,
+        };
+    });
+    const welcomeVideo = videos.find((v) => v.id === 1) || null;
+    const closingVideo = videos.find((v) => v.id === 6) || null;
+    const thumbnails = {
+        welcome: welcomeVideo?.thumbnailUrl || null,
+        stage1: videos.find((v) => v.id === 2)?.thumbnailUrl || null,
+        stage2: videos.find((v) => v.id === 3)?.thumbnailUrl || null,
+        stage3: videos.find((v) => v.id === 4)?.thumbnailUrl || null,
+        stage4: videos.find((v) => v.id === 5)?.thumbnailUrl || null,
+        closing: closingVideo?.thumbnailUrl || null,
+    };
+    // 4. User check if email provided
     if (email && email.trim()) {
         const normalizedEmail = email.trim().toLowerCase();
         const enrollment = await prisma.masterclassEnrollment.findFirst({
@@ -1364,7 +1476,11 @@ async function getMasterclassAppConfig(email) {
                     }
                     : null,
                 videos,
+                thumbnails,
+                welcomeVideo,
+                closingVideo,
                 ...questionsConfig,
+                stages: enrichedStages,
             };
         }
         // Email provided but not found in DB
@@ -1377,7 +1493,11 @@ async function getMasterclassAppConfig(email) {
             user: null,
             message: 'Participant email not found in masterclass records. Proceed to enrollment checkout.',
             videos,
+            thumbnails,
+            welcomeVideo,
+            closingVideo,
             ...questionsConfig,
+            stages: enrichedStages,
         };
     }
     // General config request without email
@@ -1388,6 +1508,10 @@ async function getMasterclassAppConfig(email) {
         hasPaid: false,
         accessGranted: false,
         videos,
+        thumbnails,
+        welcomeVideo,
+        closingVideo,
         ...questionsConfig,
+        stages: enrichedStages,
     };
 }

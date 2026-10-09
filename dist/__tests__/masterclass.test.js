@@ -81,6 +81,20 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.success).toBe(false);
             (0, globals_1.expect)(res.body.error).toBe('MISSING_EMAIL');
         });
+        (0, globals_1.it)('should reject draft save when an answer exceeds 1,000 characters', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/masterclass/save-draft')
+                .send({
+                email: 'alexander@example.com',
+                currentStage: 1,
+                formData: {
+                    stage1_nextStage: 'A'.repeat(1001),
+                },
+            });
+            (0, globals_1.expect)(res.status).toBe(400);
+            (0, globals_1.expect)(res.body.success).toBe(false);
+            (0, globals_1.expect)(res.body.error).toBe('VALIDATION_ERROR');
+        });
     });
     (0, globals_1.describe)('Stage 3: Workbook Submission & Storage Validation', () => {
         (0, globals_1.it)('should reject workbook submission when required fields are missing', async () => {
@@ -95,6 +109,34 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
                 formData: {
                     // Missing all stage 1-4 fields
                     stage1_nextStage: '',
+                },
+            });
+            (0, globals_1.expect)(res.status).toBe(400);
+            (0, globals_1.expect)(res.body.success).toBe(false);
+            (0, globals_1.expect)(res.body.error).toBe('VALIDATION_ERROR');
+        });
+        (0, globals_1.it)('should reject workbook submission when an answer exceeds 1,000 characters', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/masterclass/submit-workbook')
+                .send({
+                participantDetails: {
+                    fullName: 'Alexander Wright',
+                    email: 'alexander@example.com',
+                    company: 'Apex Dynamics',
+                },
+                formData: {
+                    stage1_nextStage: 'A'.repeat(1005),
+                    stage1_possibility: 'Valid unlock',
+                    stage1_strength: 'Valid strength',
+                    stage2_changes: 'Valid changes',
+                    stage2_demand1: 'Valid demand',
+                    stage2_investment: 'Valid investment',
+                    stage3_founderStrength: 'Valid standard',
+                    stage3_teamStrength: 'Valid team standard',
+                    stage3_orgStrength: 'Valid org standard',
+                    stage4_priority90Days: 'Valid priority',
+                    stage4_action7Days: 'Valid action',
+                    stage4_evidence: 'Valid evidence',
                 },
             });
             (0, globals_1.expect)(res.status).toBe(400);

@@ -92,6 +92,22 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error).toBe('MISSING_EMAIL');
     });
+
+    it('should reject draft save when an answer exceeds 1,000 characters', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/save-draft')
+        .send({
+          email: 'alexander@example.com',
+          currentStage: 1,
+          formData: {
+            stage1_nextStage: 'A'.repeat(1001),
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
   });
 
   describe('Stage 3: Workbook Submission & Storage Validation', () => {
@@ -107,6 +123,36 @@ describe('Masterclass API & Recognition Endpoints', () => {
           formData: {
             // Missing all stage 1-4 fields
             stage1_nextStage: '',
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject workbook submission when an answer exceeds 1,000 characters', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/submit-workbook')
+        .send({
+          participantDetails: {
+            fullName: 'Alexander Wright',
+            email: 'alexander@example.com',
+            company: 'Apex Dynamics',
+          },
+          formData: {
+            stage1_nextStage: 'A'.repeat(1005),
+            stage1_possibility: 'Valid unlock',
+            stage1_strength: 'Valid strength',
+            stage2_changes: 'Valid changes',
+            stage2_demand1: 'Valid demand',
+            stage2_investment: 'Valid investment',
+            stage3_founderStrength: 'Valid standard',
+            stage3_teamStrength: 'Valid team standard',
+            stage3_orgStrength: 'Valid org standard',
+            stage4_priority90Days: 'Valid priority',
+            stage4_action7Days: 'Valid action',
+            stage4_evidence: 'Valid evidence',
           },
         });
 

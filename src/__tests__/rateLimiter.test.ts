@@ -176,7 +176,7 @@ describe('Public Form Submission Rate Limiter', () => {
         message: {
           success: false,
           error: 'TOO_MANY_REQUESTS',
-          message: 'Too many requests. Please try again later.',
+          message: 'For your security, access attempts are temporarily limited. Please wait a few moments before trying again, or reach out to our team for immediate assistance.',
         },
       });
       const customApp = express();
@@ -197,7 +197,7 @@ describe('Public Form Submission Rate Limiter', () => {
       expect(res11.body).toEqual({
         success: false,
         error: 'TOO_MANY_REQUESTS',
-        message: 'Too many requests. Please try again later.',
+        message: 'For your security, access attempts are temporarily limited. Please wait a few moments before trying again, or reach out to our team for immediate assistance.',
       });
     });
   });
