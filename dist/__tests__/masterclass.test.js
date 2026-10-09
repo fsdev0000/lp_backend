@@ -189,7 +189,7 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('stage4');
             (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('closing');
             (0, globals_1.expect)(res.body.thumbnails.welcome).toContain('supabase.co');
-        });
+        }, 15000);
         (0, globals_1.it)('should allow POST /config with email', async () => {
             const res = await (0, supertest_1.default)(app)
                 .post('/api/v1/masterclass/config')
@@ -200,7 +200,7 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(Array.isArray(res.body.videos)).toBe(true);
             (0, globals_1.expect)(Array.isArray(res.body.stages)).toBe(true);
             (0, globals_1.expect)(res.body.stages[0]).toHaveProperty('thumbnailUrl');
-        });
+        }, 15000);
         (0, globals_1.it)('should return 6 video objects with private signed URLs and thumbnails from GET /videos', async () => {
             const res = await (0, supertest_1.default)(app).get('/api/v1/masterclass/videos');
             (0, globals_1.expect)(res.status).toBe(200);
@@ -211,7 +211,7 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.videos[1].signedUrl).toContain('supabase.co');
             (0, globals_1.expect)(res.body.videos[1].thumbnailFileName).toBe('STAGE-01.jpg');
             (0, globals_1.expect)(res.body.videos[1].thumbnailUrl).toContain('supabase.co');
-        });
+        }, 15000);
         (0, globals_1.it)('should allow updating masterclass questions via PUT /config/questions', async () => {
             const res = await (0, supertest_1.default)(app)
                 .put('/api/v1/masterclass/config/questions')

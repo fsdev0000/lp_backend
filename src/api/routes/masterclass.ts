@@ -30,7 +30,7 @@ const masterclassLimiter = createRateLimiter({
   message: {
     success: false,
     error: 'TOO_MANY_REQUESTS',
-    message: 'For your security, access attempts are temporarily limited. Please wait a few moments before trying again, or reach out to our team for immediate assistance.',
+    message: 'You’ve made several attempts. Please wait a little and try again.',
   },
 });
 
