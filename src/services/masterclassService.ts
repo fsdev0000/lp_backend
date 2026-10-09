@@ -561,6 +561,7 @@ export async function saveDraft(payload: MasterclassDraftPayload) {
     submissionRecord = await prisma.masterclassWorkbookSubmission.update({
       where: { id: existingSubmission.id },
       data: {
+        enrollmentId: enrollment?.id || existingSubmission.enrollmentId,
         currentStage: stage,
         formData: serializedFormData,
         personalNotes: serializedNotes,
@@ -1464,23 +1465,31 @@ export async function getMasterclassAppConfig(email?: string) {
       const isPaid = enrollment.paymentStatus === 'paid';
       const accessGranted = enrollment.accessGranted || isPaid;
 
+      let latestSubmission = enrollment.submissions[0] || null;
+      if (!latestSubmission) {
+        latestSubmission = await prisma.masterclassWorkbookSubmission.findFirst({
+          where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+          orderBy: { updatedAt: 'desc' },
+        });
+      }
+
       let draftData = null;
-      if (enrollment.submissions[0]) {
+      if (latestSubmission) {
         try {
           draftData = {
-            submissionRef: enrollment.submissions[0].submissionRef,
-            status: enrollment.submissions[0].status,
-            currentStage: enrollment.submissions[0].currentStage,
-            lastSavedAt: enrollment.submissions[0].lastSavedAt,
-            formData: JSON.parse(enrollment.submissions[0].formData),
-            personalNotes: enrollment.submissions[0].personalNotes ? JSON.parse(enrollment.submissions[0].personalNotes) : {},
+            submissionRef: latestSubmission.submissionRef,
+            status: latestSubmission.status,
+            currentStage: latestSubmission.currentStage,
+            lastSavedAt: latestSubmission.lastSavedAt,
+            formData: JSON.parse(latestSubmission.formData),
+            personalNotes: latestSubmission.personalNotes ? JSON.parse(latestSubmission.personalNotes) : {},
           };
         } catch {
           draftData = {
-            submissionRef: enrollment.submissions[0].submissionRef,
-            status: enrollment.submissions[0].status,
-            currentStage: enrollment.submissions[0].currentStage,
-            lastSavedAt: enrollment.submissions[0].lastSavedAt,
+            submissionRef: latestSubmission.submissionRef,
+            status: latestSubmission.status,
+            currentStage: latestSubmission.currentStage,
+            lastSavedAt: latestSubmission.lastSavedAt,
           };
         }
       }
