@@ -107,11 +107,11 @@ const SubmitWorkbookSchema = zod_1.z.object({
     }),
     personalNotes: zod_1.z
         .object({
-        stage1_notes: zod_1.z.string().optional(),
-        stage2_notes: zod_1.z.string().optional(),
-        stage3_notes: zod_1.z.string().optional(),
-        stage4_notes: zod_1.z.string().optional(),
-    })
+            stage1_notes: zod_1.z.string().optional(),
+            stage2_notes: zod_1.z.string().optional(),
+            stage3_notes: zod_1.z.string().optional(),
+            stage4_notes: zod_1.z.string().optional(),
+        })
         .optional(),
     submissionRef: zod_1.z.string().trim().optional(),
 });
@@ -321,7 +321,7 @@ exports.masterclassRouter.get('/auth/me', async (req, res) => {
  * /masterclass/create-session:
  *   post:
  *     summary: Create Masterclass Registration & Stripe Checkout Session
- *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for US$500 Masterclass enrollment. If user already paid, unlocks direct access immediately.
+ *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for USD 500 Masterclass enrollment. If user already paid, unlocks direct access immediately.
  *     tags:
  *       - Masterclass
  *     requestBody:
@@ -526,7 +526,7 @@ exports.masterclassRouter.get('/modules', (_req, res) => {
         success: true,
         title: 'The Founder’s Next Move — Executive Masterclass',
         host: 'Lionel Eersteling',
-        investment: 'US$500',
+        investment: 'USD 500',
         totalModules: 4,
         reflectionPauseDurationSeconds: 45,
         modules: [

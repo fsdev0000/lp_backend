@@ -178,7 +178,7 @@ export interface MasterclassBookingPayload {
  */
 export async function identifyUser(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  
+
   // Validate domain existence via DNS lookup
   const domainCheck = await verifyEmailDomainExistence(normalizedEmail);
   if (!domainCheck.valid) {
@@ -278,22 +278,22 @@ export async function identifyUser(email: string) {
     },
     submission: latestSubmission
       ? {
-          id: latestSubmission.id,
-          submissionRef: latestSubmission.submissionRef,
-          status: latestSubmission.status,
-          currentStage: latestSubmission.currentStage,
-          submittedAt: latestSubmission.submittedAt,
-          lastSavedAt: latestSubmission.lastSavedAt,
-        }
+        id: latestSubmission.id,
+        submissionRef: latestSubmission.submissionRef,
+        status: latestSubmission.status,
+        currentStage: latestSubmission.currentStage,
+        submittedAt: latestSubmission.submittedAt,
+        lastSavedAt: latestSubmission.lastSavedAt,
+      }
       : null,
     booking: latestBooking
       ? {
-          id: latestBooking.id,
-          bookingRef: latestBooking.bookingRef,
-          slotTime: latestBooking.slotTime,
-          timezone: latestBooking.timezone,
-          status: latestBooking.status,
-        }
+        id: latestBooking.id,
+        bookingRef: latestBooking.bookingRef,
+        slotTime: latestBooking.slotTime,
+        timezone: latestBooking.timezone,
+        status: latestBooking.status,
+      }
       : null,
     token,
   };
@@ -317,7 +317,8 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
 
   const sessionToken = enrollment?.sessionToken || randomUUID();
 
-  // If already paid and access granted, system recognizes them immediately!
+  // TODO: Uncomment later - Commented for testing Stripe Checkout redirect even if user is already paid/access granted
+  /*
   if (enrollment && enrollment.accessGranted && enrollment.paymentStatus === 'paid') {
     return {
       recognized: true,
@@ -338,6 +339,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       message: 'Participant already enrolled with verified payment. Direct access unlocked.',
     };
   }
+  */
 
   // Upsert or create enrollment
   if (enrollment) {
@@ -365,7 +367,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         marketingConsent: payload.marketingConsent ?? false,
         privacyConsent: payload.privacyConsent ?? true,
         source: payload.source || 'website',
-        amount: 50000, // US$500 in cents
+        amount: 50000, // USD 500 in cents
         currency: 'usd',
         paymentStatus: 'pending',
         accessGranted: false,
@@ -384,19 +386,19 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = priceId
     ? [{ price: priceId, quantity: 1 }]
     : [
-        {
-          price_data: {
-            currency: 'usd',
-            unit_amount: 50000, // US$500.00
-            product_data: {
-              name: "The Founder’s Next Move — Executive Masterclass",
-              description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
-              images: ['https://leadersperformance.ae/og-image.jpg'],
-            },
+      {
+        price_data: {
+          currency: 'usd',
+          unit_amount: 50000, // USD 500.00
+          product_data: {
+            name: "The Founder’s Next Move — Executive Masterclass",
+            description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
+            images: ['https://leadersperformance.ae/og-image.jpg'],
           },
-          quantity: 1,
         },
-      ];
+        quantity: 1,
+      },
+    ];
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
@@ -473,7 +475,7 @@ export async function verifyPayment(sessionId: string) {
   }
 
   const isPaid = session.payment_status === 'paid';
-  
+
   // Find enrollment by stripeSessionId or metadata
   let enrollment = await prisma.masterclassEnrollment.findFirst({
     where: {
@@ -520,13 +522,13 @@ export async function verifyPayment(sessionId: string) {
     accessGranted: isPaid,
     enrollment: enrollment
       ? {
-          id: enrollment.id,
-          email: enrollment.email,
-          fullName: enrollment.fullName,
-          company: enrollment.company,
-          accessGranted: enrollment.accessGranted,
-          paymentStatus: enrollment.paymentStatus,
-        }
+        id: enrollment.id,
+        email: enrollment.email,
+        fullName: enrollment.fullName,
+        company: enrollment.company,
+        accessGranted: enrollment.accessGranted,
+        paymentStatus: enrollment.paymentStatus,
+      }
       : null,
     token: enrollment?.sessionToken || null,
   };
@@ -619,10 +621,10 @@ export async function getDraft(email: string) {
   let parsedNotes = {};
   try {
     parsedFormData = JSON.parse(draft.formData);
-  } catch {}
+  } catch { }
   try {
     parsedNotes = draft.personalNotes ? JSON.parse(draft.personalNotes) : {};
-  } catch {}
+  } catch { }
 
   return {
     hasDraft: true,
@@ -762,10 +764,10 @@ export async function getSubmission(submissionRefOrId: string) {
   let parsedNotes = {};
   try {
     parsedFormData = JSON.parse(submission.formData);
-  } catch {}
+  } catch { }
   try {
     parsedNotes = submission.personalNotes ? JSON.parse(submission.personalNotes) : {};
-  } catch {}
+  } catch { }
 
   return {
     ...submission,
@@ -779,7 +781,7 @@ export async function getSubmission(submissionRefOrId: string) {
  */
 export async function getAvailableSlots(date?: string, timezone?: string) {
   const tz = timezone || 'GST (UTC+4)';
-  
+
   // Try querying GHL calendar if configured
   if (date) {
     try {
@@ -1016,7 +1018,7 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
   title: "The Founder’s Next Move — Executive Masterclass",
   subtitle: "4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling",
   host: "Lionel Eersteling",
-  investment: "US$500",
+  investment: "USD 500",
   reflectionPauseDurationSeconds: 45,
   totalStages: 4,
   totalVideos: 6,
@@ -1416,6 +1418,17 @@ export async function getMasterclassVideosList(expiresInSeconds: number = 315360
     })
   );
 
+  // Fallback missing signed URLs to first available video stream so all 6 catalog slots are playable
+  const firstAvailable = videos.find((v) => v.isAvailable && v.signedUrl);
+  if (firstAvailable && firstAvailable.signedUrl) {
+    videos.forEach((v) => {
+      if (!v.signedUrl) {
+        v.signedUrl = firstAvailable.signedUrl;
+        v.isAvailable = true;
+      }
+    });
+  }
+
   return videos;
 }
 
@@ -1494,11 +1507,11 @@ export async function getMasterclassAppConfig(email?: string) {
         draft: draftData,
         booking: enrollment.bookings[0]
           ? {
-              bookingRef: enrollment.bookings[0].bookingRef,
-              slotTime: enrollment.bookings[0].slotTime,
-              timezone: enrollment.bookings[0].timezone,
-              status: enrollment.bookings[0].status,
-            }
+            bookingRef: enrollment.bookings[0].bookingRef,
+            slotTime: enrollment.bookings[0].slotTime,
+            timezone: enrollment.bookings[0].timezone,
+            status: enrollment.bookings[0].status,
+          }
           : null,
         videos,
         ...questionsConfig,

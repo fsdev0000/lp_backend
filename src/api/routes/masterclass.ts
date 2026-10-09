@@ -20,6 +20,8 @@ import { createRateLimiter } from '../../middleware/rateLimiter';
 export const masterclassRouter = Router();
 
 // Rate limiter for masterclass public forms
+// TODO: Uncomment later when ready for production rate limiting
+/*
 const masterclassLimiter = createRateLimiter({
   max: 30,
   windowMs: 15 * 60 * 1000,
@@ -29,6 +31,8 @@ const masterclassLimiter = createRateLimiter({
     message: 'Too many requests. Please try again later.',
   },
 });
+*/
+const masterclassLimiter = (_req: Request, _res: Response, next: any) => next();
 
 // ==========================================
 // ZOD VALIDATION SCHEMAS
@@ -344,7 +348,7 @@ masterclassRouter.get('/auth/me', async (req: Request, res: Response) => {
  * /masterclass/create-session:
  *   post:
  *     summary: Create Masterclass Registration & Stripe Checkout Session
- *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for US$500 Masterclass enrollment. If user already paid, unlocks direct access immediately.
+ *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for USD 500 Masterclass enrollment. If user already paid, unlocks direct access immediately.
  *     tags:
  *       - Masterclass
  *     requestBody:
@@ -552,7 +556,7 @@ masterclassRouter.get('/modules', (_req: Request, res: Response) => {
     success: true,
     title: 'The Founder’s Next Move — Executive Masterclass',
     host: 'Lionel Eersteling',
-    investment: 'US$500',
+    investment: 'USD 500',
     totalModules: 4,
     reflectionPauseDurationSeconds: 45,
     modules: [
