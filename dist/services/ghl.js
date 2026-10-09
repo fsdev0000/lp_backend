@@ -33,6 +33,37 @@ async function upsertContact(payload) {
     const locationId = await (0, secrets_1.getSecret)('GHL_LOCATION_ID');
     if (!locationId)
         throw new Error('GHL_LOCATION_ID not configured in Vault or env');
+    const formattedCustomFields = payload.customFields ? [...payload.customFields] : [];
+    if (payload.howDidYouHear) {
+        formattedCustomFields.push({ name: 'Lead Source — User', value: payload.howDidYouHear });
+    }
+    if (payload.attribution) {
+        const attr = payload.attribution;
+        const ft = attr.first_touch || {};
+        const lt = attr.latest_touch || {};
+        if (attr.utm_source)
+            formattedCustomFields.push({ name: 'UTM Source', value: attr.utm_source });
+        if (attr.utm_medium)
+            formattedCustomFields.push({ name: 'UTM Medium', value: attr.utm_medium });
+        if (attr.utm_campaign)
+            formattedCustomFields.push({ name: 'UTM Campaign', value: attr.utm_campaign });
+        if (attr.utm_content)
+            formattedCustomFields.push({ name: 'UTM Content', value: attr.utm_content });
+        if (attr.referrer)
+            formattedCustomFields.push({ name: 'Referrer', value: attr.referrer });
+        const ftSource = ft.utm_source || ft.referrer || attr.utm_source || payload.source || '';
+        const ltSource = lt.utm_source || lt.referrer || attr.utm_source || payload.source || '';
+        const ftLanding = ft.landing_page || attr.landing_page || '';
+        const ltLanding = lt.landing_page || attr.landing_page || '';
+        if (ftSource)
+            formattedCustomFields.push({ name: 'Lead Source — First Touch', value: ftSource });
+        if (ltSource)
+            formattedCustomFields.push({ name: 'Lead Source — Latest Touch', value: ltSource });
+        if (ftLanding)
+            formattedCustomFields.push({ name: 'First Landing Page', value: ftLanding });
+        if (ltLanding)
+            formattedCustomFields.push({ name: 'Latest Landing Page', value: ltLanding });
+    }
     const body = {
         locationId,
         email: payload.email,
@@ -42,6 +73,9 @@ async function upsertContact(payload) {
         source: payload.source || 'Leaders Performance Website',
         tags: payload.tags || ['Scan Lead'],
     };
+    if (formattedCustomFields.length > 0) {
+        body.customFields = formattedCustomFields;
+    }
     const headers = await ghlHeaders();
     const res = await fetch(`${GHL_BASE}/contacts/upsert`, {
         method: 'POST',

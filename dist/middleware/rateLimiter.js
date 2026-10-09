@@ -18,9 +18,9 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const ONE_HOUR_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 const MAX_REQUESTS = 5;
 const createRateLimiter = (customOptions) => {
+    const limit = customOptions?.limit ?? customOptions?.max ?? MAX_REQUESTS;
     return (0, express_rate_limit_1.default)({
         windowMs: ONE_HOUR_MS,
-        limit: MAX_REQUESTS,
         statusCode: 429,
         standardHeaders: true, // draft-7 RateLimit headers
         legacyHeaders: false, // Disable X-RateLimit-* headers
@@ -42,6 +42,7 @@ const createRateLimiter = (customOptions) => {
             res.status(options.statusCode).json(options.message);
         },
         ...customOptions,
+        limit,
     });
 };
 exports.createRateLimiter = createRateLimiter;

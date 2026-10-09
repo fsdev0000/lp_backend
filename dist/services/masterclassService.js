@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_MASTERCLASS_CONFIG = void 0;
+exports.verifyEmailDomainExistence = verifyEmailDomainExistence;
 exports.generateMasterclassReference = generateMasterclassReference;
 exports.generateBookingReference = generateBookingReference;
 exports.identifyUser = identifyUser;
@@ -22,10 +23,18 @@ exports.getMasterclassAppConfig = getMasterclassAppConfig;
 const client_1 = require("@prisma/client");
 const stripe_1 = __importDefault(require("stripe"));
 const crypto_1 = require("crypto");
+const dns_1 = require("dns");
 const ghl_1 = require("./ghl");
 const email_1 = require("./email");
 const supabaseStorageService_1 = require("./supabaseStorageService");
-const prisma = new client_1.PrismaClient();
+let prismaInstance = null;
+function getPrisma() {
+    if (!prismaInstance) {
+        prismaInstance = new client_1.PrismaClient();
+    }
+    return prismaInstance;
+}
+const prisma = getPrisma();
 // Helper to obtain Stripe client
 function getStripe() {
     const secretKey = process.env.STRIPE_SECRET_KEY;
@@ -33,6 +42,58 @@ function getStripe() {
         throw new Error('STRIPE_SECRET_KEY environment variable is not configured');
     }
     return new stripe_1.default(secretKey);
+}
+/**
+ * Validates whether an email domain exists on the internet and can receive email (via DNS MX/A lookup)
+ */
+async function verifyEmailDomainExistence(email) {
+    const parts = email.trim().toLowerCase().split('@');
+    if (parts.length !== 2 || !parts[1]) {
+        return { valid: false, reason: 'Invalid email structure.' };
+    }
+    const domain = parts[1];
+    // Common domain typo mappings
+    const typoMap = {
+        'gmail.co': 'gmail.com',
+        'gamil.com': 'gmail.com',
+        'gmial.com': 'gmail.com',
+        'gmal.com': 'gmail.com',
+        'yahoo.co': 'yahoo.com',
+        'yaho.com': 'yahoo.com',
+        'hotmail.co': 'hotmail.com',
+        'outlok.com': 'outlook.com',
+        'outlook.co': 'outlook.com',
+    };
+    if (typoMap[domain]) {
+        return {
+            valid: false,
+            reason: `Did you mean @${typoMap[domain]}? "@${domain}" appears to be a typo.`,
+        };
+    }
+    try {
+        const mxRecords = await dns_1.promises.resolveMx(domain);
+        if (mxRecords && mxRecords.length > 0) {
+            return { valid: true };
+        }
+    }
+    catch (err) {
+        try {
+            const aRecords = await dns_1.promises.resolve(domain);
+            if (aRecords && aRecords.length > 0) {
+                return { valid: true };
+            }
+        }
+        catch (aErr) {
+            return {
+                valid: false,
+                reason: `The domain "@${domain}" does not exist or has no active mail servers on the internet.`,
+            };
+        }
+    }
+    return {
+        valid: false,
+        reason: `The domain "@${domain}" cannot receive emails. Please enter a valid email address.`,
+    };
 }
 // Generates unique reference number for Masterclass Workbook: FNM-YYYY-XXXX
 function generateMasterclassReference() {
@@ -52,22 +113,52 @@ function generateBookingReference() {
  */
 async function identifyUser(email) {
     const normalizedEmail = email.trim().toLowerCase();
-    const enrollment = await prisma.masterclassEnrollment.findFirst({
-        where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-        orderBy: { createdAt: 'desc' },
-        include: {
-            submissions: {
-                orderBy: { updatedAt: 'desc' },
-                take: 1,
-            },
-            bookings: {
+    // Validate domain existence via DNS lookup
+    const domainCheck = await verifyEmailDomainExistence(normalizedEmail);
+    if (!domainCheck.valid) {
+        return {
+            success: false,
+            domainValid: false,
+            error: 'DOMAIN_INVALID',
+            message: domainCheck.reason,
+            recognized: false,
+            isExistingUser: false,
+            hasPaid: false,
+            accessGranted: false,
+            user: null,
+            enrollment: null,
+            submission: null,
+            booking: null,
+            token: null,
+        };
+    }
+    let enrollment = null;
+    try {
+        const db = getPrisma();
+        if (db.masterclassEnrollment) {
+            enrollment = await db.masterclassEnrollment.findFirst({
+                where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
                 orderBy: { createdAt: 'desc' },
-                take: 1,
-            },
-        },
-    });
+                include: {
+                    submissions: {
+                        orderBy: { updatedAt: 'desc' },
+                        take: 1,
+                    },
+                    bookings: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1,
+                    },
+                },
+            });
+        }
+    }
+    catch (err) {
+        console.warn('[Masterclass] Database lookup notice in identifyUser:', err.message);
+    }
     if (!enrollment) {
         return {
+            success: true,
+            domainValid: true,
             recognized: false,
             isExistingUser: false,
             hasPaid: false,
@@ -152,7 +243,7 @@ async function createSessionAndEnrollment(payload) {
         orderBy: { createdAt: 'desc' },
     });
     const sessionToken = enrollment?.sessionToken || (0, crypto_1.randomUUID)();
-    // If already paid and access granted, system recognizes them immediately!
+    // Verify if participant already enrolled with verified payment
     if (enrollment && enrollment.accessGranted && enrollment.paymentStatus === 'paid') {
         return {
             recognized: true,
@@ -251,7 +342,7 @@ async function createSessionAndEnrollment(payload) {
         where: { id: enrollment.id },
         data: { stripeSessionId: session.id },
     });
-    // Optionally register lead in GHL
+    // Optionally register lead in GHL with attribution & how_did_you_hear
     try {
         await (0, ghl_1.upsertContact)({
             email: normalizedEmail,
@@ -260,6 +351,8 @@ async function createSessionAndEnrollment(payload) {
             phone: payload.phone,
             source: `Masterclass Enrollment (${payload.source || 'Direct'})`,
             tags: ['Masterclass Lead', 'The Founders Next Move'],
+            howDidYouHear: payload.how_did_you_hear,
+            attribution: payload.attribution,
         });
     }
     catch (err) {
@@ -374,6 +467,7 @@ async function saveDraft(payload) {
         submissionRecord = await prisma.masterclassWorkbookSubmission.update({
             where: { id: existingSubmission.id },
             data: {
+                enrollmentId: enrollment?.id || existingSubmission.enrollmentId,
                 currentStage: stage,
                 formData: serializedFormData,
                 personalNotes: serializedNotes,
@@ -1173,6 +1267,16 @@ async function getMasterclassVideosList(expiresInSeconds = 315360000) {
             updatedAt: fileMeta?.updated_at || undefined,
         };
     }));
+    // Fallback missing signed URLs to first available video stream so all 6 catalog slots are playable
+    const firstAvailable = videos.find((v) => v.isAvailable && v.signedUrl);
+    if (firstAvailable && firstAvailable.signedUrl) {
+        videos.forEach((v) => {
+            if (!v.signedUrl) {
+                v.signedUrl = firstAvailable.signedUrl;
+                v.isAvailable = true;
+            }
+        });
+    }
     return videos;
 }
 /**
@@ -1203,24 +1307,31 @@ async function getMasterclassAppConfig(email) {
         if (enrollment) {
             const isPaid = enrollment.paymentStatus === 'paid';
             const accessGranted = enrollment.accessGranted || isPaid;
+            let latestSubmission = enrollment.submissions[0] || null;
+            if (!latestSubmission) {
+                latestSubmission = await prisma.masterclassWorkbookSubmission.findFirst({
+                    where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+                    orderBy: { updatedAt: 'desc' },
+                });
+            }
             let draftData = null;
-            if (enrollment.submissions[0]) {
+            if (latestSubmission) {
                 try {
                     draftData = {
-                        submissionRef: enrollment.submissions[0].submissionRef,
-                        status: enrollment.submissions[0].status,
-                        currentStage: enrollment.submissions[0].currentStage,
-                        lastSavedAt: enrollment.submissions[0].lastSavedAt,
-                        formData: JSON.parse(enrollment.submissions[0].formData),
-                        personalNotes: enrollment.submissions[0].personalNotes ? JSON.parse(enrollment.submissions[0].personalNotes) : {},
+                        submissionRef: latestSubmission.submissionRef,
+                        status: latestSubmission.status,
+                        currentStage: latestSubmission.currentStage,
+                        lastSavedAt: latestSubmission.lastSavedAt,
+                        formData: JSON.parse(latestSubmission.formData),
+                        personalNotes: latestSubmission.personalNotes ? JSON.parse(latestSubmission.personalNotes) : {},
                     };
                 }
                 catch {
                     draftData = {
-                        submissionRef: enrollment.submissions[0].submissionRef,
-                        status: enrollment.submissions[0].status,
-                        currentStage: enrollment.submissions[0].currentStage,
-                        lastSavedAt: enrollment.submissions[0].lastSavedAt,
+                        submissionRef: latestSubmission.submissionRef,
+                        status: latestSubmission.status,
+                        currentStage: latestSubmission.currentStage,
+                        lastSavedAt: latestSubmission.lastSavedAt,
                     };
                 }
             }

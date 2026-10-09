@@ -10,10 +10,13 @@ const stripe_1 = __importDefault(require("stripe"));
 const masterclassService_1 = require("../../services/masterclassService");
 const rateLimiter_1 = require("../../middleware/rateLimiter");
 exports.masterclassRouter = (0, express_1.Router)();
-// Rate limiter for masterclass public forms
+// Rate limiter for masterclass public forms: 10 requests per IP
+const masterclassLimit = Number(process.env.RATE_LIMIT_MASTERCLASS_MAX) || 10;
+const masterclassWindowMs = Number(process.env.RATE_LIMIT_MASTERCLASS_WINDOW_MS) || 15 * 60 * 1000;
 const masterclassLimiter = (0, rateLimiter_1.createRateLimiter)({
-    max: 30,
-    windowMs: 15 * 60 * 1000,
+    limit: masterclassLimit,
+    max: masterclassLimit,
+    windowMs: masterclassWindowMs,
     message: {
         success: false,
         error: 'TOO_MANY_REQUESTS',
@@ -46,6 +49,9 @@ const CreateSessionSchema = zod_1.z.object({
         .max(150, 'Company name cannot exceed 150 characters.'),
     role: zod_1.z.string().trim().optional(),
     phone: zod_1.z.string().trim().optional(),
+    how_did_you_hear: zod_1.z.string().trim().optional(),
+    how_did_you_hear_other: zod_1.z.string().trim().optional(),
+    attribution: zod_1.z.record(zod_1.z.string(), zod_1.z.any()).optional().default({}),
     marketingConsent: zod_1.z.boolean().optional().default(false),
     privacyConsent: zod_1.z.boolean().optional().default(true),
     source: zod_1.z.string().trim().optional(),
@@ -107,11 +113,11 @@ const SubmitWorkbookSchema = zod_1.z.object({
     }),
     personalNotes: zod_1.z
         .object({
-            stage1_notes: zod_1.z.string().optional(),
-            stage2_notes: zod_1.z.string().optional(),
-            stage3_notes: zod_1.z.string().optional(),
-            stage4_notes: zod_1.z.string().optional(),
-        })
+        stage1_notes: zod_1.z.string().optional(),
+        stage2_notes: zod_1.z.string().optional(),
+        stage3_notes: zod_1.z.string().optional(),
+        stage4_notes: zod_1.z.string().optional(),
+    })
         .optional(),
     submissionRef: zod_1.z.string().trim().optional(),
 });

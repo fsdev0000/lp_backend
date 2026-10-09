@@ -144,26 +144,33 @@ app.use('/api/v1', contact_1.contactRouter);
             (0, globals_1.expect)(res.body.error).toContain('valid email address');
         });
     });
-    (0, globals_1.describe)('3. Window Expiration Simulation', () => {
-        (0, globals_1.it)('automatically allows submissions after windowMs expires', async () => {
-            // Test short window (50ms) to verify native timer expiration
-            const shortLimiter = (0, rateLimiter_1.createRateLimiter)({ windowMs: 50, limit: 1 });
-            const expApp = (0, express_1.default)();
-            expApp.set('trust proxy', 1);
-            expApp.post('/test-expiry', shortLimiter, (_req, res) => res.json({ ok: true }));
-            const testIp = '198.51.100.99';
-            // 1st request succeeds
-            const r1 = await (0, supertest_1.default)(expApp).post('/test-expiry').set('x-forwarded-for', testIp);
-            (0, globals_1.expect)(r1.status).toBe(200);
-            // 2nd request immediately fails with 429
-            const r2 = await (0, supertest_1.default)(expApp).post('/test-expiry').set('x-forwarded-for', testIp);
-            (0, globals_1.expect)(r2.status).toBe(429);
-            (0, globals_1.expect)(r2.body).toEqual({ error: 'Too many requests. Please try again later.' });
-            // Wait for window to expire (>50ms)
-            await new Promise((resolve) => setTimeout(resolve, 60));
-            // 3rd request succeeds again
-            const r3 = await (0, supertest_1.default)(expApp).post('/test-expiry').set('x-forwarded-for', testIp);
-            (0, globals_1.expect)(r3.status).toBe(200);
+    (0, globals_1.describe)('4. Masterclass & Custom Limit (10 requests per IP)', () => {
+        (0, globals_1.it)('allows 10 requests from the same IP and returns 429 on request 11', async () => {
+            const tenLimiter = (0, rateLimiter_1.createRateLimiter)({
+                limit: 10,
+                message: {
+                    success: false,
+                    error: 'TOO_MANY_REQUESTS',
+                    message: 'Too many requests. Please try again later.',
+                },
+            });
+            const customApp = (0, express_1.default)();
+            customApp.set('trust proxy', 1);
+            customApp.post('/test-ten', tenLimiter, (_req, res) => res.json({ ok: true }));
+            const testIp = '168.231.114.33';
+            // First 10 requests should succeed
+            for (let i = 1; i <= 10; i++) {
+                const res = await (0, supertest_1.default)(customApp).post('/test-ten').set('x-forwarded-for', testIp);
+                (0, globals_1.expect)(res.status).toBe(200);
+            }
+            // 11th request must receive 429 TOO_MANY_REQUESTS
+            const res11 = await (0, supertest_1.default)(customApp).post('/test-ten').set('x-forwarded-for', testIp);
+            (0, globals_1.expect)(res11.status).toBe(429);
+            (0, globals_1.expect)(res11.body).toEqual({
+                success: false,
+                error: 'TOO_MANY_REQUESTS',
+                message: 'Too many requests. Please try again later.',
+            });
         });
     });
 });

@@ -14,10 +14,10 @@ import rateLimit, { Options } from 'express-rate-limit';
 const ONE_HOUR_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 const MAX_REQUESTS = 5;
 
-export const createRateLimiter = (customOptions?: Partial<Options>) => {
+export const createRateLimiter = (customOptions?: Partial<Options> & { max?: number }) => {
+  const limit = customOptions?.limit ?? (customOptions as any)?.max ?? MAX_REQUESTS;
   return rateLimit({
     windowMs: ONE_HOUR_MS,
-    limit: MAX_REQUESTS,
     statusCode: 429,
     standardHeaders: true, // draft-7 RateLimit headers
     legacyHeaders: false, // Disable X-RateLimit-* headers
@@ -39,6 +39,7 @@ export const createRateLimiter = (customOptions?: Partial<Options>) => {
       res.status(options.statusCode).json(options.message);
     },
     ...customOptions,
+    limit,
   });
 };
 

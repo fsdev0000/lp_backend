@@ -19,10 +19,14 @@ import { createRateLimiter } from '../../middleware/rateLimiter';
 
 export const masterclassRouter = Router();
 
-// Rate limiter for masterclass public forms
+// Rate limiter for masterclass public forms: 10 requests per IP
+const masterclassLimit = Number(process.env.RATE_LIMIT_MASTERCLASS_MAX) || 10;
+const masterclassWindowMs = Number(process.env.RATE_LIMIT_MASTERCLASS_WINDOW_MS) || 15 * 60 * 1000;
+
 const masterclassLimiter = createRateLimiter({
-  max: 30,
-  windowMs: 15 * 60 * 1000,
+  limit: masterclassLimit,
+  max: masterclassLimit,
+  windowMs: masterclassWindowMs,
   message: {
     success: false,
     error: 'TOO_MANY_REQUESTS',
