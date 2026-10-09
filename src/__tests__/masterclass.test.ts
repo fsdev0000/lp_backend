@@ -204,6 +204,14 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(Array.isArray(res.body.videos)).toBe(true);
       expect(res.body.videos.length).toBe(6);
       expect(res.body.stages[0]).toHaveProperty('questions');
+      expect(res.body).toHaveProperty('thumbnails');
+      expect(res.body.thumbnails).toHaveProperty('welcome');
+      expect(res.body.thumbnails).toHaveProperty('stage1');
+      expect(res.body.thumbnails).toHaveProperty('stage2');
+      expect(res.body.thumbnails).toHaveProperty('stage3');
+      expect(res.body.thumbnails).toHaveProperty('stage4');
+      expect(res.body.thumbnails).toHaveProperty('closing');
+      expect(res.body.thumbnails.welcome).toContain('supabase.co');
     });
 
     it('should allow POST /config with email', async () => {
@@ -216,9 +224,10 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.userExists).toBe(false);
       expect(Array.isArray(res.body.videos)).toBe(true);
       expect(Array.isArray(res.body.stages)).toBe(true);
+      expect(res.body.stages[0]).toHaveProperty('thumbnailUrl');
     });
 
-    it('should return 6 video objects with private signed URLs from GET /videos', async () => {
+    it('should return 6 video objects with private signed URLs and thumbnails from GET /videos', async () => {
       const res = await request(app).get('/api/v1/masterclass/videos');
 
       expect(res.status).toBe(200);
@@ -227,6 +236,8 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.videos).toHaveLength(6);
       expect(res.body.videos[1].fileName).toBe('STAGE-01.mp4');
       expect(res.body.videos[1].signedUrl).toContain('supabase.co');
+      expect(res.body.videos[1].thumbnailFileName).toBe('STAGE-01.jpg');
+      expect(res.body.videos[1].thumbnailUrl).toContain('supabase.co');
     });
 
     it('should allow updating masterclass questions via PUT /config/questions', async () => {

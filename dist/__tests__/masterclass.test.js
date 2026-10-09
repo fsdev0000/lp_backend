@@ -181,6 +181,14 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(Array.isArray(res.body.videos)).toBe(true);
             (0, globals_1.expect)(res.body.videos.length).toBe(6);
             (0, globals_1.expect)(res.body.stages[0]).toHaveProperty('questions');
+            (0, globals_1.expect)(res.body).toHaveProperty('thumbnails');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('welcome');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('stage1');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('stage2');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('stage3');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('stage4');
+            (0, globals_1.expect)(res.body.thumbnails).toHaveProperty('closing');
+            (0, globals_1.expect)(res.body.thumbnails.welcome).toContain('supabase.co');
         });
         (0, globals_1.it)('should allow POST /config with email', async () => {
             const res = await (0, supertest_1.default)(app)
@@ -191,8 +199,9 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.userExists).toBe(false);
             (0, globals_1.expect)(Array.isArray(res.body.videos)).toBe(true);
             (0, globals_1.expect)(Array.isArray(res.body.stages)).toBe(true);
+            (0, globals_1.expect)(res.body.stages[0]).toHaveProperty('thumbnailUrl');
         });
-        (0, globals_1.it)('should return 6 video objects with private signed URLs from GET /videos', async () => {
+        (0, globals_1.it)('should return 6 video objects with private signed URLs and thumbnails from GET /videos', async () => {
             const res = await (0, supertest_1.default)(app).get('/api/v1/masterclass/videos');
             (0, globals_1.expect)(res.status).toBe(200);
             (0, globals_1.expect)(res.body.success).toBe(true);
@@ -200,6 +209,8 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.videos).toHaveLength(6);
             (0, globals_1.expect)(res.body.videos[1].fileName).toBe('STAGE-01.mp4');
             (0, globals_1.expect)(res.body.videos[1].signedUrl).toContain('supabase.co');
+            (0, globals_1.expect)(res.body.videos[1].thumbnailFileName).toBe('STAGE-01.jpg');
+            (0, globals_1.expect)(res.body.videos[1].thumbnailUrl).toContain('supabase.co');
         });
         (0, globals_1.it)('should allow updating masterclass questions via PUT /config/questions', async () => {
             const res = await (0, supertest_1.default)(app)
