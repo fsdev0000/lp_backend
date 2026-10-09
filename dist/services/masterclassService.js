@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_MASTERCLASS_CONFIG = void 0;
 exports.generateMasterclassReference = generateMasterclassReference;
 exports.generateBookingReference = generateBookingReference;
 exports.identifyUser = identifyUser;
@@ -14,11 +15,16 @@ exports.submitWorkbook = submitWorkbook;
 exports.getSubmission = getSubmission;
 exports.getAvailableSlots = getAvailableSlots;
 exports.bookReviewSlot = bookReviewSlot;
+exports.getMasterclassQuestionsConfig = getMasterclassQuestionsConfig;
+exports.updateMasterclassQuestionsConfig = updateMasterclassQuestionsConfig;
+exports.getMasterclassVideosList = getMasterclassVideosList;
+exports.getMasterclassAppConfig = getMasterclassAppConfig;
 const client_1 = require("@prisma/client");
 const stripe_1 = __importDefault(require("stripe"));
 const crypto_1 = require("crypto");
 const ghl_1 = require("./ghl");
 const email_1 = require("./email");
+const supabaseStorageService_1 = require("./supabaseStorageService");
 const prisma = new client_1.PrismaClient();
 // Helper to obtain Stripe client
 function getStripe() {
@@ -770,4 +776,501 @@ async function sendBookingConfirmationEmail(data) {
     catch (err) {
         console.warn('[Email] Fallback booking email notice:', err.message);
     }
+}
+// ==========================================
+// 8. MASTERCLASS DYNAMIC CONFIG & 6 VIDEOS LOGIC
+// ==========================================
+let cachedMasterclassConfig = null;
+let masterclassConfigCacheTime = 0;
+const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 mins
+exports.DEFAULT_MASTERCLASS_CONFIG = {
+    title: "The Founder’s Next Move — Executive Masterclass",
+    subtitle: "4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling",
+    host: "Lionel Eersteling",
+    investment: "US$500",
+    reflectionPauseDurationSeconds: 45,
+    totalStages: 4,
+    totalVideos: 6,
+    stages: [
+        {
+            stageNumber: 1,
+            id: 'stage1',
+            title: 'Define the Next Stage',
+            moduleTitle: 'Module 1: Operating System & Shift',
+            subtitle: 'Clarity on the business stage you are building for and what makes it distinct from where you stand today.',
+            videoId: 2,
+            videoKey: 'stage_1',
+            reflectionPauseSeconds: 45,
+            reflectionPrompt: 'Reflect on the next stage you are preparing your business for and what you want that stage to make possible. Record your answers in Stage 1.',
+            questions: [
+                {
+                    id: 'stage1_nextStage',
+                    label: '1. What is the next stage of business growth you are preparing for? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Scaling from $5M to $15M ARR across 3 GCC markets...',
+                    helpText: 'Define the clear operational horizon and scale target.',
+                },
+                {
+                    id: 'stage1_possibility',
+                    label: '2. What will that next stage make possible that is not possible today? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Attracting Tier-1 strategic partners and running self-sufficient business units...',
+                    helpText: 'Articulate the strategic unlock and enterprise advantage.',
+                },
+                {
+                    id: 'stage1_strength',
+                    label: '3. What single core strength from today must carry through into that next stage? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Our obsessive standard for product quality and client trust...',
+                    helpText: 'Identify your non-negotiable competitive foundation.',
+                },
+            ],
+        },
+        {
+            stageNumber: 2,
+            id: 'stage2',
+            title: 'Success Changes the Game',
+            moduleTitle: 'Module 2: Evaluation & Resonance',
+            subtitle: 'Recognizing how scale changes the demands on leadership, time allocation, and organizational standards.',
+            videoId: 3,
+            videoKey: 'stage_2',
+            reflectionPauseSeconds: 45,
+            reflectionPrompt: 'Reflect on how operational pace, scale, and demands will change as you grow. Record your answers in Stage 2.',
+            questions: [
+                {
+                    id: 'stage2_changes',
+                    label: '1. What changes most as your company scales to that next stage? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Direct founder execution stops working; management infrastructure becomes mandatory...',
+                    helpText: 'What fundamental shifts occur in your day-to-day role?',
+                },
+                {
+                    id: 'stage2_demand1',
+                    label: '2. Demand 1: Leadership & Strategic Bandwidth *',
+                    type: 'text',
+                    required: true,
+                    placeholder: 'e.g. Stepping out of daily tactical troubleshooting...',
+                },
+                {
+                    id: 'stage2_demand2',
+                    label: 'Demand 2: Team Execution & Accountability',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Expecting directors to own KPIs without escalation...',
+                },
+                {
+                    id: 'stage2_demand3',
+                    label: 'Demand 3: Operational Pace & Governance',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Weekly operating cadence replacing informal chat alignment...',
+                },
+                {
+                    id: 'stage2_investment',
+                    label: '3. What performance investment must you make to prepare for those demands? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Hire a VP Operations and install a rigorous executive review rhythm...',
+                    helpText: 'Capital, talent, or operational governance investments.',
+                },
+            ],
+        },
+        {
+            stageNumber: 3,
+            id: 'stage3',
+            title: 'Prepare for Performance',
+            moduleTitle: 'Module 3: Capabilities & Standards',
+            subtitle: 'Aligning personal founder capabilities, leadership team ownership, and organizational standards.',
+            videoId: 4,
+            videoKey: 'stage_3',
+            reflectionPauseSeconds: 45,
+            reflectionPrompt: 'Reflect on the performance capabilities and standards required across Founder, Leadership Team, and Organisation. Record your answers in Stage 3.',
+            questions: [
+                {
+                    id: 'stage3_founderStrength',
+                    label: '1. Founder Capability: What standard must YOU personally elevate? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Ruthless calendar discipline and strategic delegation...',
+                },
+                {
+                    id: 'stage3_founderStandard',
+                    label: 'Founder Standard to uphold',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. No meetings without pre-read memos...',
+                },
+                {
+                    id: 'stage3_teamStrength',
+                    label: '2. Leadership Team: What capability must your executives embody? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. End-to-end accountability without awaiting founder intervention...',
+                },
+                {
+                    id: 'stage3_teamStandard',
+                    label: 'Leadership Team Standard to uphold',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Metric-backed weekly business reviews...',
+                },
+                {
+                    id: 'stage3_orgStrength',
+                    label: '3. Organisation: What system requires reinforcement? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Transparent reporting rhythm and clear delegation thresholds...',
+                },
+                {
+                    id: 'stage3_orgInvestment',
+                    label: 'Organizational Investment needed',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Executive operating cadence...',
+                },
+                {
+                    id: 'stage3_focusArea',
+                    label: 'Primary focus area across founder, team, and org',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Elevate executive team autonomy and operational reporting...',
+                },
+            ],
+        },
+        {
+            stageNumber: 4,
+            id: 'stage4',
+            title: 'Your Next Move',
+            moduleTitle: 'Module 4: Exploration Blueprint & Execution',
+            subtitle: 'Transforming reflections into a high-leverage 90-day roadmap and one immediate action within 7 days.',
+            videoId: 5,
+            videoKey: 'stage_4',
+            reflectionPauseSeconds: 45,
+            reflectionPrompt: 'Reflect on your top 90-day preparation priority and the single high-leverage action you will take within 7 days. Record your answers in Stage 4.',
+            questions: [
+                {
+                    id: 'stage4_priority90Days',
+                    label: '1. What is your main preparation priority for the next 90 days? *',
+                    type: 'textarea',
+                    required: true,
+                    placeholder: 'e.g. Structure clear quarterly KPIs and delegate core revenue operations.',
+                },
+                {
+                    id: 'stage4_milestone1',
+                    label: 'Milestone 1: 30-Day progress marker',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'Milestone 1: e.g. Executive alignment framework signed off by Day 30',
+                },
+                {
+                    id: 'stage4_milestone2',
+                    label: 'Milestone 2: 60-Day progress marker',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'Milestone 2: e.g. Operational handover completed by Day 60',
+                },
+                {
+                    id: 'stage4_milestone3',
+                    label: 'Milestone 3: 90-Day progress marker',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'Milestone 3: e.g. Full performance reset review with Lionel by Day 90',
+                },
+                {
+                    id: 'stage4_action7Days',
+                    label: '3. One action within 7 days *',
+                    type: 'text',
+                    required: true,
+                    placeholder: 'e.g. Audit top 3 time bottlenecks',
+                },
+                {
+                    id: 'stage4_actionTiming',
+                    label: '4. When will you take it? *',
+                    type: 'text',
+                    required: false,
+                    placeholder: 'e.g. Next Monday morning 9 AM',
+                },
+                {
+                    id: 'stage4_evidence',
+                    label: '5. What evidence will you look for afterward? *',
+                    type: 'text',
+                    required: true,
+                    placeholder: 'e.g. 5 hours saved weekly and clear executive team ownership.',
+                },
+            ],
+        },
+    ],
+};
+/**
+ * Retrieves dynamic masterclass questions from DB (SystemConfig), fallback to default.
+ */
+async function getMasterclassQuestionsConfig() {
+    const now = Date.now();
+    if (cachedMasterclassConfig && now - masterclassConfigCacheTime < CONFIG_CACHE_TTL) {
+        return cachedMasterclassConfig;
+    }
+    try {
+        const record = await prisma.systemConfig.findUnique({
+            where: { key: 'masterclass_config' },
+        });
+        if (record && record.value) {
+            const parsed = JSON.parse(record.value);
+            if (parsed && Array.isArray(parsed.stages)) {
+                cachedMasterclassConfig = parsed;
+                masterclassConfigCacheTime = now;
+                return cachedMasterclassConfig;
+            }
+        }
+    }
+    catch (err) {
+        console.warn('[Masterclass] Failed reading config from DB, falling back to default:', err.message);
+    }
+    // Auto-seed to DB if not present
+    try {
+        await prisma.systemConfig.upsert({
+            where: { key: 'masterclass_config' },
+            update: { value: JSON.stringify(exports.DEFAULT_MASTERCLASS_CONFIG) },
+            create: { key: 'masterclass_config', value: JSON.stringify(exports.DEFAULT_MASTERCLASS_CONFIG) },
+        });
+    }
+    catch (seedErr) {
+        console.warn('[Masterclass] Non-fatal auto-seed notice:', seedErr.message);
+    }
+    cachedMasterclassConfig = exports.DEFAULT_MASTERCLASS_CONFIG;
+    masterclassConfigCacheTime = now;
+    return cachedMasterclassConfig;
+}
+/**
+ * Updates dynamic masterclass questions and settings in database.
+ */
+async function updateMasterclassQuestionsConfig(newConfig) {
+    const mergedConfig = {
+        ...exports.DEFAULT_MASTERCLASS_CONFIG,
+        ...newConfig,
+    };
+    const serialized = JSON.stringify(mergedConfig);
+    const updated = await prisma.systemConfig.upsert({
+        where: { key: 'masterclass_config' },
+        update: { value: serialized },
+        create: { key: 'masterclass_config', value: serialized },
+    });
+    cachedMasterclassConfig = JSON.parse(updated.value);
+    masterclassConfigCacheTime = Date.now();
+    return cachedMasterclassConfig;
+}
+/**
+ * Generates signed URLs for all 6 videos in the 'masterclass' Supabase storage bucket.
+ */
+async function getMasterclassVideosList(expiresInSeconds = 315360000) {
+    const bucketFiles = await (0, supabaseStorageService_1.getMasterclassBucketFiles)();
+    const fileNames = bucketFiles.map((f) => f.name);
+    // Helper for matching candidate filenames
+    const findMatch = (candidates) => {
+        for (const cand of candidates) {
+            const exact = fileNames.find((name) => name.toLowerCase() === cand.toLowerCase());
+            if (exact)
+                return exact;
+        }
+        // Substring fallback
+        for (const cand of candidates) {
+            const cleanCand = cand.replace('.mp4', '').toLowerCase().replace(/\s+/g, '');
+            const partial = fileNames.find((name) => {
+                const cleanName = name.replace('.mp4', '').toLowerCase().replace(/\s+/g, '');
+                return cleanName.includes(cleanCand) || cleanCand.includes(cleanName);
+            });
+            if (partial)
+                return partial;
+        }
+        return null;
+    };
+    const slotDefs = [
+        {
+            id: 1,
+            stage: 0,
+            stageName: 'Introduction & Briefing',
+            title: "The Founder's Next Move — Strategic Briefing",
+            subtitle: 'Executive introduction and participant orientation by Lionel Eersteling',
+            candidates: ['Intro Video.mp4', 'Overview Video.mp4', 'STAGE -00.mp4', 'Intro.mp4', 'Overview.mp4'],
+            fallbackName: 'Intro Video.mp4',
+        },
+        {
+            id: 2,
+            stage: 1,
+            stageName: 'Stage 1',
+            title: 'Module 1: Operating System & Shift',
+            subtitle: 'Define the next business stage and the foundational strengths required to achieve it',
+            candidates: ['STAGE -01.mp4', 'STAGE-01.mp4', 'STAGE_01.mp4', 'Stage 1.mp4'],
+            fallbackName: 'STAGE -01.mp4',
+        },
+        {
+            id: 3,
+            stage: 2,
+            stageName: 'Stage 2',
+            title: 'Module 2: Evaluation & Resonance',
+            subtitle: 'Success changes the game: analyzing operational demands, scale, and leadership load',
+            candidates: ['STAGE-02.mp4', 'STAGE -02.mp4', 'STAGE_02.mp4', 'Stage 2.mp4'],
+            fallbackName: 'STAGE-02.mp4',
+        },
+        {
+            id: 4,
+            stage: 3,
+            stageName: 'Stage 3',
+            title: 'Module 3: Capabilities & Standards',
+            subtitle: 'Prepare for performance: aligning personal founder capability, executive team, and org',
+            candidates: ['STAGE-03.mp4', 'STAGE -03.mp4', 'STAGE_03.mp4', 'Stage 3.mp4'],
+            fallbackName: 'STAGE-03.mp4',
+        },
+        {
+            id: 5,
+            stage: 4,
+            stageName: 'Stage 4',
+            title: 'Module 4: Exploration Blueprint & Execution',
+            subtitle: 'Turn reflections into 90-day milestones and a single high-leverage 7-day action',
+            candidates: ['STAGE-04.mp4', 'STAGE -04.mp4', 'STAGE_04.mp4', 'Stage 4.mp4'],
+            fallbackName: 'STAGE-04.mp4',
+        },
+        {
+            id: 6,
+            stage: 5,
+            stageName: 'Closing & Strategic Review',
+            title: 'Closing Video: Strategic Review Preparation',
+            subtitle: 'Final reflections briefing and guidelines for your 1-on-1 strategic session with Lionel',
+            candidates: ['Closing Video.mp4', 'Closing Video (1).mp4', 'Closing.mp4', 'STAGE-05.mp4'],
+            fallbackName: 'Closing Video.mp4',
+        },
+    ];
+    const videos = await Promise.all(slotDefs.map(async (slot) => {
+        const matchedFileName = findMatch(slot.candidates);
+        const targetFile = matchedFileName || slot.fallbackName;
+        let signedUrl = null;
+        let isAvailable = false;
+        if (matchedFileName) {
+            signedUrl = await (0, supabaseStorageService_1.createMasterclassSignedUrl)(matchedFileName, expiresInSeconds);
+            isAvailable = Boolean(signedUrl);
+        }
+        const fileMeta = bucketFiles.find((f) => f.name === matchedFileName);
+        return {
+            id: slot.id,
+            stage: slot.stage,
+            stageName: slot.stageName,
+            title: slot.title,
+            subtitle: slot.subtitle,
+            fileName: targetFile,
+            isAvailable,
+            signedUrl,
+            reflectionPauseSeconds: slot.stage >= 1 && slot.stage <= 4 ? 45 : 0,
+            sizeBytes: fileMeta?.metadata?.size || undefined,
+            updatedAt: fileMeta?.updated_at || undefined,
+        };
+    }));
+    return videos;
+}
+/**
+ * Returns dynamic configuration, questions for all 4 stages, and private video URLs.
+ * Recognizes user if email is supplied.
+ */
+async function getMasterclassAppConfig(email) {
+    // 1. Fetch dynamic questions from DB
+    const questionsConfig = await getMasterclassQuestionsConfig();
+    // 2. Fetch 6 private signed video URLs
+    const videos = await getMasterclassVideosList();
+    // 3. User check if email provided
+    if (email && email.trim()) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const enrollment = await prisma.masterclassEnrollment.findFirst({
+            where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+            include: {
+                submissions: {
+                    orderBy: { updatedAt: 'desc' },
+                    take: 1,
+                },
+                bookings: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                },
+            },
+        });
+        if (enrollment) {
+            const isPaid = enrollment.paymentStatus === 'paid';
+            const accessGranted = enrollment.accessGranted || isPaid;
+            let draftData = null;
+            if (enrollment.submissions[0]) {
+                try {
+                    draftData = {
+                        submissionRef: enrollment.submissions[0].submissionRef,
+                        status: enrollment.submissions[0].status,
+                        currentStage: enrollment.submissions[0].currentStage,
+                        lastSavedAt: enrollment.submissions[0].lastSavedAt,
+                        formData: JSON.parse(enrollment.submissions[0].formData),
+                        personalNotes: enrollment.submissions[0].personalNotes ? JSON.parse(enrollment.submissions[0].personalNotes) : {},
+                    };
+                }
+                catch {
+                    draftData = {
+                        submissionRef: enrollment.submissions[0].submissionRef,
+                        status: enrollment.submissions[0].status,
+                        currentStage: enrollment.submissions[0].currentStage,
+                        lastSavedAt: enrollment.submissions[0].lastSavedAt,
+                    };
+                }
+            }
+            return {
+                success: true,
+                userExists: true,
+                isEnrolled: true,
+                hasPaid: isPaid,
+                accessGranted,
+                paymentStatus: enrollment.paymentStatus,
+                token: enrollment.sessionToken,
+                user: {
+                    id: enrollment.id,
+                    email: enrollment.email,
+                    fullName: enrollment.fullName,
+                    company: enrollment.company,
+                    role: enrollment.role,
+                    phone: enrollment.phone,
+                    courseProgress: enrollment.courseProgress,
+                    currentStage: enrollment.currentStage,
+                    paidAt: enrollment.paidAt,
+                },
+                draft: draftData,
+                booking: enrollment.bookings[0]
+                    ? {
+                        bookingRef: enrollment.bookings[0].bookingRef,
+                        slotTime: enrollment.bookings[0].slotTime,
+                        timezone: enrollment.bookings[0].timezone,
+                        status: enrollment.bookings[0].status,
+                    }
+                    : null,
+                videos,
+                ...questionsConfig,
+            };
+        }
+        // Email provided but not found in DB
+        return {
+            success: true,
+            userExists: false,
+            isEnrolled: false,
+            hasPaid: false,
+            accessGranted: false,
+            user: null,
+            message: 'Participant email not found in masterclass records. Proceed to enrollment checkout.',
+            videos,
+            ...questionsConfig,
+        };
+    }
+    // General config request without email
+    return {
+        success: true,
+        userExists: false,
+        isEnrolled: false,
+        hasPaid: false,
+        accessGranted: false,
+        videos,
+        ...questionsConfig,
+    };
 }

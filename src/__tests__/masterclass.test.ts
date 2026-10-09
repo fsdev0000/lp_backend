@@ -146,4 +146,52 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.details).toHaveProperty('selectedSlot');
     });
   });
+
+  describe('Stage 2: Dynamic Config, 4-Stage Questions & 6 Private Videos', () => {
+    it('should return masterclass dynamic config with 4 stages and 6 videos', async () => {
+      const res = await request(app).get('/api/v1/masterclass/config');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.stages)).toBe(true);
+      expect(res.body.stages.length).toBe(4);
+      expect(Array.isArray(res.body.videos)).toBe(true);
+      expect(res.body.videos.length).toBe(6);
+      expect(res.body.stages[0]).toHaveProperty('questions');
+    });
+
+    it('should allow POST /config with email', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/config')
+        .send({ email: 'newfounder@company.com' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.userExists).toBe(false);
+      expect(Array.isArray(res.body.videos)).toBe(true);
+      expect(Array.isArray(res.body.stages)).toBe(true);
+    });
+
+    it('should return 6 video objects with private signed URLs from GET /videos', async () => {
+      const res = await request(app).get('/api/v1/masterclass/videos');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.totalVideos).toBe(6);
+      expect(res.body.videos).toHaveLength(6);
+      expect(res.body.videos[1].fileName).toBe('STAGE -01.mp4');
+      expect(res.body.videos[1].signedUrl).toContain('supabase.co');
+    });
+
+    it('should allow updating masterclass questions via PUT /config/questions', async () => {
+      const res = await request(app)
+        .put('/api/v1/masterclass/config/questions')
+        .send({ reflectionPauseDurationSeconds: 45 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.config.reflectionPauseDurationSeconds).toBe(45);
+    });
+  });
 });
+

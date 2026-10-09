@@ -87,7 +87,7 @@ function getEmailUnsubscribeHeaders(tokenOrEmail) {
 /**
  * Send welcome email to subscriber via GoHighLevel
  */
-async function sendNewsletterWelcomeEmail(email, contactId, unsubscribeToken) {
+async function sendNewsletterWelcomeEmail(email, contactId, unsubscribeToken, firstNameInput) {
     // STRICT SUPPRESSION CHECK:
     // If subscriber is unsubscribed, abort immediately
     const sub = await db.newsletterSubscriber.findUnique({ where: { email } });
@@ -103,8 +103,17 @@ async function sendNewsletterWelcomeEmail(email, contactId, unsubscribeToken) {
     const rawTemplate = fs_1.default.readFileSync(templatePath, 'utf8');
     const token = unsubscribeToken || sub?.unsubscribeToken || email;
     const unsubscribeUrl = getEmailUnsubscribeUrl(token);
+    const frontendBase = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+    const privacyUrl = `${frontendBase}/privacy`;
+    const octoberIssueUrl = `${frontendBase}/knowledge?issue=2026-10`;
+    const firstName = (sub?.firstName || firstNameInput || '').trim();
+    const displayName = firstName ? firstName : 'Founder';
     const html = (0, email_1.renderTemplate)(rawTemplate, {
+        first_name: displayName,
+        name: displayName,
         unsubscribe_url: unsubscribeUrl,
+        privacy_url: privacyUrl,
+        october_issue_url: octoberIssueUrl,
         email: email,
     });
     const subject = 'Welcome to The Founder Performance Newsletter';
@@ -113,6 +122,7 @@ async function sendNewsletterWelcomeEmail(email, contactId, unsubscribeToken) {
     if (!targetContactId) {
         targetContactId = await (0, ghl_1.upsertContact)({
             email,
+            firstName: firstName || undefined,
             source: 'Leaders Performance Website Footer',
             tags: ['The Founder Performance Newsletter', 'Newsletter Subscriber'],
         });
@@ -200,7 +210,7 @@ async function processBackgroundSubscription(email, firstName, token) {
                 data: { ghlContactId },
             }).catch(() => null);
             // Send Welcome Email immediately
-            await sendNewsletterWelcomeEmail(email, ghlContactId, token);
+            await sendNewsletterWelcomeEmail(email, ghlContactId, token, firstName);
         }
     }
     catch (err) {
