@@ -142,6 +142,13 @@ app.get('/review', (req, res) => {
 app.get('/review/:ref', (req, res) => {
     res.redirect(302, `/masterclass/review/${encodeURIComponent(req.params.ref)}`);
 });
+app.get('/api/review', (req, res) => {
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(302, `/api/masterclass/review${query}`);
+});
+app.get('/api/review/:ref', (req, res) => {
+    res.redirect(302, `/api/masterclass/review/${encodeURIComponent(req.params.ref)}`);
+});
 app.use('/api/v1', routes_1.apiRoutes);
 app.use('/', newsletter_1.newsletterRouter);
 const swaggerAuth_1 = require("./middleware/swaggerAuth");

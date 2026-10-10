@@ -3370,7 +3370,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
     .topbar {
       background-color: var(--navy-900);
       border-bottom: 1px solid var(--gold-500);
-      padding: 14px 28px;
+      padding: 14px 0;
       position: sticky;
       top: 0;
       z-index: 100;
@@ -3378,12 +3378,13 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
     }
 
     .topbar-content {
-      max-width: 1200px;
+      max-width: 1120px;
       margin: 0 auto;
+      padding: 0 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 20px;
+      gap: 16px;
       flex-wrap: wrap;
     }
 
@@ -3417,7 +3418,8 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
     .topbar-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
+      justify-content: flex-end;
+      gap: 10px;
       flex-wrap: wrap;
     }
 
@@ -3510,6 +3512,17 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       background-color: var(--navy-700);
     }
 
+    .btn-outline-navy {
+      background-color: transparent;
+      border: 1px solid var(--navy-700);
+      color: var(--navy-900);
+    }
+
+    .btn-outline-navy:hover {
+      background-color: var(--navy-900);
+      color: #fff;
+    }
+
     /* Main Container */
     .container {
       max-width: 1120px;
@@ -3526,6 +3539,26 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       margin-bottom: 28px;
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
       position: relative;
+    }
+
+    .hero-header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .hero-header-meta {
+      flex: 1 1 500px;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     .hero-eyebrow {
@@ -3953,11 +3986,6 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       </div>
 
       <div class="topbar-controls">
-        <form class="search-box" action="" method="GET">
-          <input type="text" name="ref" placeholder="Search Ref, Booking, Email..." value="${escapeHtml(searchRef || '')}">
-          <button type="submit">Look Up</button>
-        </form>
-
         <button onclick="window.print()" class="btn btn-navy">
           🖨️ Print Dossier
         </button>
@@ -3983,7 +4011,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       !found && searchRef
         ? `
       <div class="hero-header" style="border-left: 4px solid #ef4444;">
-        <div class="hero-eyebrow" style="color:#b91c1c;">REFERENCE LOOKUP NOTICE</div>
+        <div class="hero-eyebrow" style="color:#b91c1c;">REFERENCE NOTICE</div>
         <h1 class="hero-title">WorkSheet Record Not Found</h1>
         <p class="hero-subtitle">
           No WorkSheet submission or booking matched reference <code>"${escapeHtml(searchRef)}"</code>.
@@ -3996,10 +4024,30 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
 
     <!-- Hero Header -->
     <section class="hero-header">
-      <div class="hero-eyebrow">THE FOUNDER’S NEXT MOVE · EXECUTIVE MASTERCLASS</div>
-      <h1 class="hero-title">${escapeHtml(fullName)}</h1>
-      <div class="hero-subtitle">
-        ${escapeHtml(role)} at <strong>${escapeHtml(company)}</strong> · Submitted ${escapeHtml(formattedSubmittedDate)}
+      <div class="hero-header-top">
+        <div class="hero-header-meta">
+          <div class="hero-eyebrow">THE FOUNDER’S NEXT MOVE · EXECUTIVE MASTERCLASS</div>
+          <h1 class="hero-title">${escapeHtml(fullName)}</h1>
+          <div class="hero-subtitle">
+            ${escapeHtml(role)} at <strong>${escapeHtml(company)}</strong> · Submitted ${escapeHtml(formattedSubmittedDate)}
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <button onclick="window.print()" class="btn btn-navy">
+            🖨️ Print Dossier
+          </button>
+          ${
+            email
+              ? `<a href="${replyMailto}" class="btn btn-outline-navy">
+                  ✉️ Email Founder
+                </a>`
+              : ''
+          }
+          <a href="${escapeHtml(LIONEL_MEETING_ROOM.url)}" target="_blank" class="btn btn-gold">
+            🎥 Launch Zoom Meeting
+          </a>
+        </div>
       </div>
 
       <div class="badge-bar">

@@ -1343,11 +1343,31 @@ function loadMasterclassTemplate(filename) {
     return null;
 }
 function getMasterclassReviewUrl(ref) {
-    const backendBaseUrl = process.env.BACKEND_URL ||
-        process.env.API_BASE_URL ||
-        (process.env.NODE_ENV === 'production'
-            ? 'https://api.leadersperformance.ae'
-            : 'http://localhost:4000');
+    const frontendUrl = process.env.FRONTEND_URL || '';
+    const customBackend = process.env.BACKEND_URL || process.env.API_BASE_URL;
+    let backendBaseUrl;
+    const isStaging = frontendUrl.includes('staging.leadersperformance.ae') ||
+        (customBackend ? customBackend.includes('staging.leadersperformance.ae') : false) ||
+        process.env.APP_ENV === 'staging';
+    if (isStaging) {
+        // On staging, Traefik edge reverse proxy routes backend endpoints exclusively via the /api prefix
+        if (customBackend && customBackend.includes('staging.leadersperformance.ae')) {
+            const trimmed = customBackend.replace(/\/+$/, '');
+            backendBaseUrl = trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+        }
+        else {
+            backendBaseUrl = 'https://staging.leadersperformance.ae/api';
+        }
+    }
+    else if (customBackend) {
+        backendBaseUrl = customBackend;
+    }
+    else if (process.env.NODE_ENV === 'production') {
+        backendBaseUrl = 'https://api.leadersperformance.ae';
+    }
+    else {
+        backendBaseUrl = 'http://localhost:4000';
+    }
     const cleanBase = backendBaseUrl.replace(/\/+$/, '');
     const cleanRef = encodeURIComponent((ref || '').trim());
     return `${cleanBase}/masterclass/review/${cleanRef}`;
@@ -2950,7 +2970,7 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
         const active = sub.submissionRef === submissionRef ? 'directory-item-active' : '';
         const bRef = sub.bookings?.[0]?.bookingRef || 'No Booking';
         return `
-        <a href="/masterclass/review/${encodeURIComponent(sub.submissionRef)}" class="directory-row ${active}">
+        <a href="?ref=${encodeURIComponent(sub.submissionRef)}" class="directory-row ${active}">
           <div class="dir-name">${(0, email_1.escapeHtml)(sub.fullName || 'Participant')}</div>
           <div class="dir-company">${(0, email_1.escapeHtml)(sub.company || '—')}</div>
           <div class="dir-refs">
@@ -3013,7 +3033,7 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
     .topbar {
       background-color: var(--navy-900);
       border-bottom: 1px solid var(--gold-500);
-      padding: 14px 28px;
+      padding: 14px 0;
       position: sticky;
       top: 0;
       z-index: 100;
@@ -3021,12 +3041,13 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
     }
 
     .topbar-content {
-      max-width: 1200px;
+      max-width: 1120px;
       margin: 0 auto;
+      padding: 0 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 20px;
+      gap: 16px;
       flex-wrap: wrap;
     }
 
@@ -3060,7 +3081,8 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
     .topbar-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
+      justify-content: flex-end;
+      gap: 10px;
       flex-wrap: wrap;
     }
 
@@ -3153,6 +3175,17 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
       background-color: var(--navy-700);
     }
 
+    .btn-outline-navy {
+      background-color: transparent;
+      border: 1px solid var(--navy-700);
+      color: var(--navy-900);
+    }
+
+    .btn-outline-navy:hover {
+      background-color: var(--navy-900);
+      color: #fff;
+    }
+
     /* Main Container */
     .container {
       max-width: 1120px;
@@ -3169,6 +3202,26 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
       margin-bottom: 28px;
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
       position: relative;
+    }
+
+    .hero-header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .hero-header-meta {
+      flex: 1 1 500px;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     .hero-eyebrow {
@@ -3596,11 +3649,6 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
       </div>
 
       <div class="topbar-controls">
-        <form class="search-box" action="/masterclass/review" method="GET">
-          <input type="text" name="ref" placeholder="Search Ref, Booking, Email..." value="${(0, email_1.escapeHtml)(searchRef || '')}">
-          <button type="submit">Look Up</button>
-        </form>
-
         <button onclick="window.print()" class="btn btn-navy">
           🖨️ Print Dossier
         </button>
@@ -3623,7 +3671,7 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
     ${!found && searchRef
         ? `
       <div class="hero-header" style="border-left: 4px solid #ef4444;">
-        <div class="hero-eyebrow" style="color:#b91c1c;">REFERENCE LOOKUP NOTICE</div>
+        <div class="hero-eyebrow" style="color:#b91c1c;">REFERENCE NOTICE</div>
         <h1 class="hero-title">WorkSheet Record Not Found</h1>
         <p class="hero-subtitle">
           No WorkSheet submission or booking matched reference <code>"${(0, email_1.escapeHtml)(searchRef)}"</code>.
@@ -3635,10 +3683,28 @@ function renderWorksheetReviewHtml(searchRef, dossier) {
 
     <!-- Hero Header -->
     <section class="hero-header">
-      <div class="hero-eyebrow">THE FOUNDER’S NEXT MOVE · EXECUTIVE MASTERCLASS</div>
-      <h1 class="hero-title">${(0, email_1.escapeHtml)(fullName)}</h1>
-      <div class="hero-subtitle">
-        ${(0, email_1.escapeHtml)(role)} at <strong>${(0, email_1.escapeHtml)(company)}</strong> · Submitted ${(0, email_1.escapeHtml)(formattedSubmittedDate)}
+      <div class="hero-header-top">
+        <div class="hero-header-meta">
+          <div class="hero-eyebrow">THE FOUNDER’S NEXT MOVE · EXECUTIVE MASTERCLASS</div>
+          <h1 class="hero-title">${(0, email_1.escapeHtml)(fullName)}</h1>
+          <div class="hero-subtitle">
+            ${(0, email_1.escapeHtml)(role)} at <strong>${(0, email_1.escapeHtml)(company)}</strong> · Submitted ${(0, email_1.escapeHtml)(formattedSubmittedDate)}
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <button onclick="window.print()" class="btn btn-navy">
+            🖨️ Print Dossier
+          </button>
+          ${email
+        ? `<a href="${replyMailto}" class="btn btn-outline-navy">
+                  ✉️ Email Founder
+                </a>`
+        : ''}
+          <a href="${(0, email_1.escapeHtml)(exports.LIONEL_MEETING_ROOM.url)}" target="_blank" class="btn btn-gold">
+            🎥 Launch Zoom Meeting
+          </a>
+        </div>
       </div>
 
       <div class="badge-bar">
