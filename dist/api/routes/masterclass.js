@@ -173,6 +173,13 @@ const BookSlotSchema = zod_1.z.object({
     submissionRef: zod_1.z.string().trim().optional(),
     notes: zod_1.z.string().trim().optional(),
 });
+const RescheduleSlotSchema = zod_1.z.object({
+    bookingRef: zod_1.z.string({ message: 'Booking reference is required.' }).trim().min(3),
+    newDate: zod_1.z.string({ message: 'Valid date is required.' }).trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Valid date in YYYY-MM-DD format is required.'),
+    newSlotTime: zod_1.z.string({ message: 'New slot time is required.' }).trim().min(3),
+    timezone: zod_1.z.string().trim().optional().default('GST (UTC+4)'),
+    reason: zod_1.z.string().trim().optional(),
+});
 // ==========================================
 // OPENAPI SWAGGER SPECIFICATIONS & ROUTES
 // ==========================================
@@ -885,10 +892,7 @@ exports.masterclassRouter.get('/available-slots', async (req, res) => {
         const timezone = req.query.timezone || 'GST (UTC+4)';
         const date = req.query.date;
         const slotsData = await (0, masterclassService_1.getAvailableSlots)(date, timezone);
-        res.status(200).json({
-            success: true,
-            ...slotsData,
-        });
+        res.status(200).json(slotsData);
     }
     catch (err) {
         console.error('[Masterclass] Error fetching slots:', err);
@@ -957,10 +961,70 @@ exports.masterclassRouter.post('/book-slot', masterclassLimiter, async (req, res
     }
     catch (err) {
         console.error('[Masterclass] Error booking slot:', err);
+        const statusCode = err.statusCode || (err.code === 'CONFLICT' ? 409 : 500);
+        res.status(statusCode).json({
+            success: false,
+            error: err.code || 'BOOKING_ERROR',
+            message: err.message || 'Failed to confirm 1-on-1 review booking.',
+        });
+    }
+});
+/**
+ * @openapi
+ * /masterclass/availability/month:
+ *   get:
+ *     summary: Month Availability Mapping for Calendar Widget
+ *     description: Returns availability mapping (Record<YYYY-MM-DD, string[]>) for the month, compatible with DaisyBookingScreen.
+ *     tags:
+ *       - Masterclass
+ */
+exports.masterclassRouter.get('/availability/month', async (req, res) => {
+    try {
+        const year = parseInt(req.query.year) || new Date().getFullYear();
+        const month = parseInt(req.query.month) || (new Date().getMonth() + 1);
+        const timezone = req.query.timezone;
+        const availability = await (0, masterclassService_1.getMasterclassMonthAvailability)(year, month, timezone);
+        res.status(200).json(availability);
+    }
+    catch (err) {
+        console.error('[Masterclass] Error fetching month availability:', err);
         res.status(500).json({
             success: false,
-            error: 'BOOKING_ERROR',
-            message: err.message || 'Failed to confirm 1-on-1 review booking.',
+            error: 'CALENDAR_ERROR',
+            message: err.message || 'Failed to retrieve month availability.',
+        });
+    }
+});
+/**
+ * @openapi
+ * /masterclass/reschedule:
+ *   post:
+ *     summary: Reschedule Strategic Review Slot
+ *     description: Reschedules an existing confirmed 1-on-1 review session, checks for conflicts, updates calendar invite, and dispatches email notifications.
+ *     tags:
+ *       - Masterclass
+ */
+exports.masterclassRouter.post('/reschedule', masterclassLimiter, async (req, res) => {
+    try {
+        const parsed = RescheduleSlotSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: 'VALIDATION_ERROR',
+                details: parsed.error.flatten().fieldErrors,
+            });
+            return;
+        }
+        const result = await (0, masterclassService_1.rescheduleReviewSlot)(parsed.data);
+        res.status(200).json(result);
+    }
+    catch (err) {
+        console.error('[Masterclass] Error rescheduling slot:', err);
+        const statusCode = err.statusCode || 500;
+        res.status(statusCode).json({
+            success: false,
+            error: err.code || 'RESCHEDULE_ERROR',
+            message: err.message || 'Failed to reschedule 1-on-1 review booking.',
         });
     }
 });
@@ -1210,3 +1274,62 @@ exports.masterclassRouter.get('/videos', async (req, res) => {
         });
     }
 });
+/**
+ * @openapi
+ * /masterclass/review/{ref}:
+ *   get:
+ *     summary: Review Submitted WorkSheet UI Dossier
+ *     description: Renders the complete, responsive executive WorkSheet review UI for Lionel Eersteling. Resolves by submissionRef, bookingRef, or email.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: path
+ *         name: ref
+ *         schema:
+ *           type: string
+ *         description: WorkSheet reference (e.g. FNM-2026-9281), Booking reference (e.g. MBK-2026-7667), or participant email
+ *     responses:
+ *       200:
+ *         description: Responsive HTML WorkSheet review dossier
+ */
+const handleWorksheetReview = async (req, res) => {
+    try {
+        const extractString = (val) => {
+            if (typeof val === 'string')
+                return val.trim();
+            if (Array.isArray(val) && typeof val[0] === 'string')
+                return val[0].trim();
+            return '';
+        };
+        const rawRef = extractString(req.params.ref) ||
+            extractString(req.query.ref) ||
+            extractString(req.query.booking_ref) ||
+            extractString(req.query.worksheet_ref) ||
+            extractString(req.query.bookingRef) ||
+            extractString(req.query.submissionRef) ||
+            extractString(req.query.id);
+        const dossier = await (0, masterclassService_1.getWorksheetReviewDossier)(rawRef);
+        // If client requested JSON via Accept header or format=json
+        if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+            return res.status(200).json({
+                success: true,
+                dossier,
+            });
+        }
+        const html = (0, masterclassService_1.renderWorksheetReviewHtml)(rawRef, dossier);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.status(200).send(html);
+    }
+    catch (err) {
+        console.error('[Masterclass] Error rendering review dossier:', err);
+        return res.status(500).send(`
+      <div style="font-family:sans-serif;padding:40px;text-align:center;">
+        <h2>Error Loading Review Dossier</h2>
+        <p>${err.message || 'An unexpected error occurred.'}</p>
+        <p><a href="/masterclass/review">Return to Dossier Directory</a></p>
+      </div>
+    `);
+    }
+};
+exports.masterclassRouter.get('/review', handleWorksheetReview);
+exports.masterclassRouter.get('/review/:ref', handleWorksheetReview);

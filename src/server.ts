@@ -146,6 +146,13 @@ app.use('/api/v1/unmasked-private', unmaskedPrivateRouter);
 app.use('/masterclass', masterclassRouter);
 app.use('/api/masterclass', masterclassRouter);
 app.use('/api/v1/masterclass', masterclassRouter);
+app.get('/review', (req, res) => {
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(302, `/masterclass/review${query}`);
+});
+app.get('/review/:ref', (req, res) => {
+  res.redirect(302, `/masterclass/review/${encodeURIComponent(req.params.ref)}`);
+});
 app.use('/api/v1', apiRoutes);
 app.use('/', newsletterRouter);
 

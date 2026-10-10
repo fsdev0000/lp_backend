@@ -6,12 +6,39 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const globals_1 = require("@jest/globals");
 const supertest_1 = __importDefault(require("supertest"));
 const express_1 = __importDefault(require("express"));
+const client_1 = require("@prisma/client");
 const masterclass_1 = require("../api/routes/masterclass");
+const prisma = new client_1.PrismaClient();
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use('/masterclass', masterclass_1.masterclassRouter);
 app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
 (0, globals_1.describe)('Masterclass API & Recognition Endpoints', () => {
+    (0, globals_1.beforeAll)(async () => {
+        await prisma.masterclassBooking.deleteMany({
+            where: {
+                OR: [
+                    { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
+                    { slotTime: { contains: '2026-11-10' } },
+                    { slotTime: { contains: '2026-11-11' } },
+                    { slotTime: { contains: '2026-11-12' } },
+                ],
+            },
+        });
+    });
+    (0, globals_1.afterAll)(async () => {
+        await prisma.masterclassBooking.deleteMany({
+            where: {
+                OR: [
+                    { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
+                    { slotTime: { contains: '2026-11-10' } },
+                    { slotTime: { contains: '2026-11-11' } },
+                    { slotTime: { contains: '2026-11-12' } },
+                ],
+            },
+        });
+        await prisma.$disconnect();
+    });
     (0, globals_1.beforeEach)(() => {
         process.env.STRIPE_SECRET_KEY = 'sk_test_mock_stripe_key';
         process.env.FRONTEND_URL = 'https://leadersperformance.ae';
@@ -155,6 +182,38 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(Array.isArray(res.body.availableSlots)).toBe(true);
             (0, globals_1.expect)(res.body.availableSlots.length).toBeGreaterThan(0);
             (0, globals_1.expect)(Array.isArray(res.body.timezones)).toBe(true);
+        }, 10000);
+        (0, globals_1.it)('should return exact 3 canonical slots (1:30 PM, 2:30 PM, 3:30 PM) for a specific date', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .get('/api/v1/masterclass/available-slots')
+                .query({ date: '2026-11-09', timezone: 'GST (UTC+4)' });
+            (0, globals_1.expect)(res.status).toBe(200);
+            (0, globals_1.expect)(res.body.success).toBe(true);
+            (0, globals_1.expect)(res.body.slots).toHaveLength(3);
+            (0, globals_1.expect)(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:15 PM GST');
+            (0, globals_1.expect)(res.body.slots[1].dubaiLabel).toBe('2:30 PM – 3:15 PM GST');
+            (0, globals_1.expect)(res.body.slots[2].dubaiLabel).toBe('3:30 PM – 4:15 PM GST');
+        });
+        (0, globals_1.it)('should correctly format slots in participant local timezone (e.g. EST)', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .get('/api/v1/masterclass/available-slots')
+                .query({ date: '2026-11-09', timezone: 'EST (UTC-5)' });
+            (0, globals_1.expect)(res.status).toBe(200);
+            (0, globals_1.expect)(res.body.success).toBe(true);
+            (0, globals_1.expect)(res.body.slots).toHaveLength(3);
+            (0, globals_1.expect)(res.body.slots[0].localRange).toContain('4:30 AM');
+            (0, globals_1.expect)(res.body.slots[1].localRange).toContain('5:30 AM');
+            (0, globals_1.expect)(res.body.slots[2].localRange).toContain('6:30 AM');
+        });
+        (0, globals_1.it)('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .get('/api/v1/masterclass/availability/month')
+                .query({ year: 2026, month: 11 });
+            (0, globals_1.expect)(res.status).toBe(200);
+            (0, globals_1.expect)(typeof res.body).toBe('object');
+            (0, globals_1.expect)(res.body).toHaveProperty('2026-11-09');
+            (0, globals_1.expect)(Array.isArray(res.body['2026-11-09'])).toBe(true);
+            (0, globals_1.expect)(res.body['2026-11-09']).toEqual(globals_1.expect.arrayContaining(['13:30', '14:30', '15:30']));
         });
         (0, globals_1.it)('should reject booking slot when participant info is missing', async () => {
             const res = await (0, supertest_1.default)(app)
@@ -170,6 +229,49 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.details).toHaveProperty('company');
             (0, globals_1.expect)(res.body.details).toHaveProperty('selectedSlot');
         });
+        (0, globals_1.it)('should prevent overlapping or duplicate bookings with 409 Conflict', async () => {
+            // First booking
+            const res1 = await (0, supertest_1.default)(app)
+                .post('/api/v1/masterclass/book-slot')
+                .send({
+                email: 'founder_alpha@enterprise.com',
+                fullName: 'Founder Alpha',
+                company: 'Alpha Corp',
+                selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+                timezone: 'GST (UTC+4)',
+                submissionRef: 'FNM-2026-ALPHA',
+            });
+            (0, globals_1.expect)(res1.status).toBe(200);
+            (0, globals_1.expect)(res1.body.success).toBe(true);
+            (0, globals_1.expect)(res1.body.bookingRef).toMatch(/^MBK-2026-\d{4}$/);
+            // Attempt conflicting booking for same date and slot
+            const res2 = await (0, supertest_1.default)(app)
+                .post('/api/v1/masterclass/book-slot')
+                .send({
+                email: 'founder_beta@enterprise.com',
+                fullName: 'Founder Beta',
+                company: 'Beta Corp',
+                selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+                timezone: 'GST (UTC+4)',
+                submissionRef: 'FNM-2026-BETA',
+            });
+            (0, globals_1.expect)(res2.status).toBe(409);
+            (0, globals_1.expect)(res2.body.success).toBe(false);
+            (0, globals_1.expect)(res2.body.message).toContain('no longer available');
+            // Reschedule first booking to a different time
+            const resResched = await (0, supertest_1.default)(app)
+                .post('/api/v1/masterclass/reschedule')
+                .send({
+                bookingRef: res1.body.bookingRef,
+                newDate: '2026-11-11',
+                newSlotTime: '2:30 PM – 3:15 PM',
+                timezone: 'GST (UTC+4)',
+                reason: 'Founder board meeting rescheduled',
+            });
+            (0, globals_1.expect)(resResched.status).toBe(200);
+            (0, globals_1.expect)(resResched.body.success).toBe(true);
+            (0, globals_1.expect)(resResched.body.slotTime).toContain('2026-11-11');
+        }, 30000);
     });
     (0, globals_1.describe)('Stage 2: Dynamic Config, 4-Stage Questions & 6 Private Videos', () => {
         (0, globals_1.it)('should return masterclass dynamic config with 4 stages and 6 videos', async () => {

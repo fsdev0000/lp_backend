@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, jest } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
+import { PrismaClient } from '@prisma/client';
 import { masterclassRouter } from '../api/routes/masterclass';
+
+const prisma = new PrismaClient();
 
 const app = express();
 app.use(express.json());
@@ -9,6 +12,33 @@ app.use('/masterclass', masterclassRouter);
 app.use('/api/v1/masterclass', masterclassRouter);
 
 describe('Masterclass API & Recognition Endpoints', () => {
+  beforeAll(async () => {
+    await prisma.masterclassBooking.deleteMany({
+      where: {
+        OR: [
+          { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
+          { slotTime: { contains: '2026-11-10' } },
+          { slotTime: { contains: '2026-11-11' } },
+          { slotTime: { contains: '2026-11-12' } },
+        ],
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.masterclassBooking.deleteMany({
+      where: {
+        OR: [
+          { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
+          { slotTime: { contains: '2026-11-10' } },
+          { slotTime: { contains: '2026-11-11' } },
+          { slotTime: { contains: '2026-11-12' } },
+        ],
+      },
+    });
+    await prisma.$disconnect();
+  });
+
   beforeEach(() => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_mock_stripe_key';
     process.env.FRONTEND_URL = 'https://leadersperformance.ae';
@@ -174,6 +204,44 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(Array.isArray(res.body.availableSlots)).toBe(true);
       expect(res.body.availableSlots.length).toBeGreaterThan(0);
       expect(Array.isArray(res.body.timezones)).toBe(true);
+    }, 10000);
+
+    it('should return exact 3 canonical slots (1:30 PM, 2:30 PM, 3:30 PM) for a specific date', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-11-09', timezone: 'GST (UTC+4)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      expect(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:15 PM GST');
+      expect(res.body.slots[1].dubaiLabel).toBe('2:30 PM – 3:15 PM GST');
+      expect(res.body.slots[2].dubaiLabel).toBe('3:30 PM – 4:15 PM GST');
+    });
+
+    it('should correctly format slots in participant local timezone (e.g. EST)', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-11-09', timezone: 'EST (UTC-5)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      expect(res.body.slots[0].localRange).toContain('4:30 AM');
+      expect(res.body.slots[1].localRange).toContain('5:30 AM');
+      expect(res.body.slots[2].localRange).toContain('6:30 AM');
+    });
+
+    it('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/availability/month')
+        .query({ year: 2026, month: 11 });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body).toBe('object');
+      expect(res.body).toHaveProperty('2026-11-09');
+      expect(Array.isArray(res.body['2026-11-09'])).toBe(true);
+      expect(res.body['2026-11-09']).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
     });
 
     it('should reject booking slot when participant info is missing', async () => {
@@ -191,6 +259,55 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.details).toHaveProperty('company');
       expect(res.body.details).toHaveProperty('selectedSlot');
     });
+
+    it('should prevent overlapping or duplicate bookings with 409 Conflict', async () => {
+      // First booking
+      const res1 = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'founder_alpha@enterprise.com',
+          fullName: 'Founder Alpha',
+          company: 'Alpha Corp',
+          selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+          timezone: 'GST (UTC+4)',
+          submissionRef: 'FNM-2026-ALPHA',
+        });
+
+      expect(res1.status).toBe(200);
+      expect(res1.body.success).toBe(true);
+      expect(res1.body.bookingRef).toMatch(/^MBK-2026-\d{4}$/);
+
+      // Attempt conflicting booking for same date and slot
+      const res2 = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'founder_beta@enterprise.com',
+          fullName: 'Founder Beta',
+          company: 'Beta Corp',
+          selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+          timezone: 'GST (UTC+4)',
+          submissionRef: 'FNM-2026-BETA',
+        });
+
+      expect(res2.status).toBe(409);
+      expect(res2.body.success).toBe(false);
+      expect(res2.body.message).toContain('no longer available');
+
+      // Reschedule first booking to a different time
+      const resResched = await request(app)
+        .post('/api/v1/masterclass/reschedule')
+        .send({
+          bookingRef: res1.body.bookingRef,
+          newDate: '2026-11-11',
+          newSlotTime: '2:30 PM – 3:15 PM',
+          timezone: 'GST (UTC+4)',
+          reason: 'Founder board meeting rescheduled',
+        });
+
+      expect(resResched.status).toBe(200);
+      expect(resResched.body.success).toBe(true);
+      expect(resResched.body.slotTime).toContain('2026-11-11');
+    }, 30000);
   });
 
   describe('Stage 2: Dynamic Config, 4-Stage Questions & 6 Private Videos', () => {

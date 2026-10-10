@@ -135,6 +135,13 @@ app.use('/api/v1/unmasked-private', unmaskedPrivate_1.unmaskedPrivateRouter);
 app.use('/masterclass', masterclass_1.masterclassRouter);
 app.use('/api/masterclass', masterclass_1.masterclassRouter);
 app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
+app.get('/review', (req, res) => {
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(302, `/masterclass/review${query}`);
+});
+app.get('/review/:ref', (req, res) => {
+    res.redirect(302, `/masterclass/review/${encodeURIComponent(req.params.ref)}`);
+});
 app.use('/api/v1', routes_1.apiRoutes);
 app.use('/', newsletter_1.newsletterRouter);
 const swaggerAuth_1 = require("./middleware/swaggerAuth");
