@@ -1,5 +1,12 @@
 import dns from 'dns';
 
+const dnsResolver = new dns.promises.Resolver();
+try {
+  dnsResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch {
+  // Fall back to default system servers
+}
+
 /**
  * Common disposable / burner email domains
  */
@@ -171,7 +178,7 @@ async function checkDomainMxRecords(domain: string): Promise<{ hasMx: boolean; e
 
     const lookupPromise = (async () => {
       try {
-        const mxRecords = await dns.promises.resolveMx(domain);
+        const mxRecords = await dnsResolver.resolveMx(domain);
         if (!mxRecords || mxRecords.length === 0) {
           return { hasMx: false, error: 'The email domain has no mail servers configured to receive emails.' };
         }

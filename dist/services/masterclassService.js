@@ -43,6 +43,13 @@ function getStripe() {
     }
     return new stripe_1.default(secretKey);
 }
+const dnsResolver = new dns_1.promises.Resolver();
+try {
+    dnsResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+}
+catch {
+    // Fall back to default system servers
+}
 /**
  * Validates whether an email domain exists on the internet and can receive email (via DNS MX/A lookup)
  */
@@ -71,29 +78,59 @@ async function verifyEmailDomainExistence(email) {
         };
     }
     try {
-        const mxRecords = await dns_1.promises.resolveMx(domain);
-        if (mxRecords && mxRecords.length > 0) {
-            return { valid: true };
-        }
-    }
-    catch (err) {
-        try {
-            const aRecords = await dns_1.promises.resolve(domain);
-            if (aRecords && aRecords.length > 0) {
+        const lookupPromise = (async () => {
+            try {
+                const mxRecords = await dnsResolver.resolveMx(domain);
+                if (mxRecords && mxRecords.length > 0) {
+                    return { valid: true };
+                }
+            }
+            catch (err) {
+                // ENOTFOUND means the domain definitively does not exist on DNS
+                if (err.code === 'ENOTFOUND') {
+                    return {
+                        valid: false,
+                        reason: `The domain "@${domain}" does not exist on the internet.`,
+                    };
+                }
+                // Try A record fallback if domain exists but uses direct mail host or unusual config
+                try {
+                    const aRecords = await dnsResolver.resolve(domain);
+                    if (aRecords && aRecords.length > 0) {
+                        return { valid: true };
+                    }
+                }
+                catch (aErr) {
+                    if (aErr.code === 'ENOTFOUND') {
+                        return {
+                            valid: false,
+                            reason: `The domain "@${domain}" does not exist on the internet.`,
+                        };
+                    }
+                    if (aErr.code === 'ENODATA') {
+                        return {
+                            valid: false,
+                            reason: `The domain "@${domain}" has no active mail servers configured.`,
+                        };
+                    }
+                }
+                // For local development or network connectivity glitches (ECONNREFUSED, ETIMEOUT, ESERVFAIL),
+                // fail open gracefully so valid email domains are never blocked.
                 return { valid: true };
             }
-        }
-        catch (aErr) {
             return {
                 valid: false,
-                reason: `The domain "@${domain}" does not exist or has no active mail servers on the internet.`,
+                reason: `The domain "@${domain}" cannot receive emails. Please enter a valid email address.`,
             };
-        }
+        })();
+        // 2500ms safety timeout to prevent hanging on slow network lookup
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ valid: true }), 2500));
+        return await Promise.race([lookupPromise, timeoutPromise]);
     }
-    return {
-        valid: false,
-        reason: `The domain "@${domain}" cannot receive emails. Please enter a valid email address.`,
-    };
+    catch {
+        // Fail open on unexpected errors
+        return { valid: true };
+    }
 }
 // Generates unique reference number for Masterclass Workbook: FNM-YYYY-XXXX
 function generateMasterclassReference() {
@@ -653,7 +690,10 @@ async function submitWorkbook(payload) {
             fullName: normalizedName,
             email: normalizedEmail,
             company: normalizedCompany,
+            role: participantDetails.role,
+            phone: participantDetails.phone,
             formData,
+            personalNotes,
         });
     }
     catch (err) {
@@ -823,8 +863,259 @@ async function bookReviewSlot(payload) {
     };
 }
 /**
- * 7. Email Notification Helpers
+ * 7. Email Notification Helpers & Staff Briefings
  */
+const MASTERCLASS_STAFF_RECIPIENTS = [
+    { email: 'info@leadersperformance.ae', firstName: 'Leaders', lastName: 'Performance' },
+];
+function buildMasterclassStaffBriefingHtml(data) {
+    const f = data.formData || {};
+    const notes = data.personalNotes || {};
+    const submittedAt = (0, email_1.formatOperationalSubmissionDate)();
+    const renderField = (label, value) => {
+        if (value === null || value === undefined || !String(value).trim())
+            return '';
+        return `
+      <tr>
+        <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; width: 220px; vertical-align: top; border-bottom: 1px solid #E8E2D5; font-size: 13px;">
+          ${(0, email_1.escapeHtml)(label)}
+        </td>
+        <td style="padding: 10px 14px; color: #1A1A1A; vertical-align: top; border-bottom: 1px solid #E8E2D5; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap;">
+          ${(0, email_1.escapeHtml)(String(value))}
+        </td>
+      </tr>
+    `;
+    };
+    const stage1Rows = [
+        renderField('1. Next Stage of Growth', f.stage1_nextStage),
+        renderField('2. What This Makes Possible', f.stage1_possibility),
+        renderField('3. Core Strength to Carry Through', f.stage1_strength),
+    ].filter(Boolean).join('');
+    const stage2Rows = [
+        renderField('1. What Changes Most as You Scale', f.stage2_changes),
+        renderField('2. Demand 1 (Leadership & Strategy)', f.stage2_demand1),
+        renderField('Demand 2 (Team & Accountability)', f.stage2_demand2),
+        renderField('Demand 3 (Pace & Governance)', f.stage2_demand3),
+        renderField('3. Performance Investment Required', f.stage2_investment),
+    ].filter(Boolean).join('');
+    const stage3Rows = [
+        renderField('1. Founder Capability to Elevate', f.stage3_founderStrength),
+        renderField('Founder Standard to Uphold', f.stage3_founderStandard),
+        renderField('2. Leadership Team Capability', f.stage3_teamStrength),
+        renderField('Leadership Team Standard', f.stage3_teamStandard),
+        renderField('3. Organisation System to Reinforce', f.stage3_orgStrength),
+        renderField('Organizational Investment', f.stage3_orgInvestment),
+        renderField('Primary Focus Area', f.stage3_focusArea),
+    ].filter(Boolean).join('');
+    const stage4Rows = [
+        renderField('1. 90-Day Main Preparation Priority', f.stage4_priority90Days),
+        renderField('Milestone 1 (30-Day Marker)', f.stage4_milestone1),
+        renderField('Milestone 2 (60-Day Marker)', f.stage4_milestone2),
+        renderField('Milestone 3 (90-Day Marker)', f.stage4_milestone3),
+        renderField('2. Single Action Within 7 Days', f.stage4_action7Days),
+        renderField('When Action Will Be Taken', f.stage4_actionTiming),
+        renderField('Evidence to Look For Afterward', f.stage4_evidence),
+    ].filter(Boolean).join('');
+    // Collect any additional dynamic answers that are in formData but not in standard keys
+    const standardKeys = new Set([
+        'stage1_nextStage', 'stage1_possibility', 'stage1_strength',
+        'stage2_changes', 'stage2_demand1', 'stage2_demand2', 'stage2_demand3', 'stage2_investment',
+        'stage3_founderStrength', 'stage3_founderStandard', 'stage3_teamStrength', 'stage3_teamStandard',
+        'stage3_orgStrength', 'stage3_orgInvestment', 'stage3_focusArea',
+        'stage4_priority90Days', 'stage4_milestone1', 'stage4_milestone2', 'stage4_milestone3',
+        'stage4_action7Days', 'stage4_actionTiming', 'stage4_evidence',
+    ]);
+    let extraRows = '';
+    if (typeof f === 'object') {
+        for (const [k, v] of Object.entries(f)) {
+            if (!standardKeys.has(k) && v !== null && v !== undefined && String(v).trim()) {
+                const cleanKey = k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').trim();
+                extraRows += renderField(cleanKey, v);
+            }
+        }
+    }
+    // Personal notes & reflections
+    let personalNotesRows = '';
+    if (notes && typeof notes === 'object') {
+        for (const [k, v] of Object.entries(notes)) {
+            if (v !== null && v !== undefined && String(v).trim()) {
+                const cleanKey = k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').trim();
+                personalNotesRows += renderField(`Note: ${cleanKey}`, v);
+            }
+        }
+    }
+    return `
+    <div style="font-family: Arial, Helvetica, sans-serif; background-color: #F8F6F1; padding: 28px; color: #1A1A1A;">
+      <div style="max-width: 680px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 6px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+        
+        <!-- Header -->
+        <div style="border-bottom: 2px solid #CFA25A; padding-bottom: 16px; margin-bottom: 24px;">
+          <p style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #8A652A; margin: 0 0 4px 0;">
+            Leaders Performance • Executive Masterclass
+          </p>
+          <h2 style="font-size: 22px; font-weight: 700; color: #010D20; margin: 0 0 6px 0;">
+            The Founder’s Next Move — Completed Workbook Briefing
+          </h2>
+          <p style="font-size: 13px; color: #666; margin: 0;">
+            Submission Reference: <strong>${(0, email_1.escapeHtml)(data.submissionRef)}</strong> &bull; Received <strong>${(0, email_1.escapeHtml)(submittedAt)}</strong>
+          </p>
+        </div>
+
+        <!-- Participant Profile -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin-bottom: 28px; background: #FAF8F4; border: 1px solid #E8E2D5; border-radius: 4px;">
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; width: 170px; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Participant Name:</td>
+            <td style="padding: 10px 14px; color: #010D20; font-weight: 700; border-bottom: 1px solid #E8E2D5; font-size: 14px;">${(0, email_1.escapeHtml)(data.fullName)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Email:</td>
+            <td style="padding: 10px 14px; border-bottom: 1px solid #E8E2D5; font-size: 13px;"><a href="mailto:${(0, email_1.escapeHtml)(data.email)}" style="color: #1A365D; text-decoration: underline; font-weight: 600;">${(0, email_1.escapeHtml)(data.email)}</a></td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Company:</td>
+            <td style="padding: 10px 14px; color: #010D20; border-bottom: 1px solid #E8E2D5; font-size: 13px;">${(0, email_1.escapeHtml)(data.company || 'Not provided')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Role:</td>
+            <td style="padding: 10px 14px; color: #010D20; border-bottom: 1px solid #E8E2D5; font-size: 13px;">${(0, email_1.escapeHtml)(data.role || 'Executive')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; font-size: 13px;">Phone / WhatsApp:</td>
+            <td style="padding: 10px 14px; color: #010D20; font-size: 13px;">${data.phone ? `<a href="tel:${(0, email_1.escapeHtml)(data.phone)}" style="color: #1A365D;">${(0, email_1.escapeHtml)(data.phone)}</a>` : 'Not provided'}</td>
+          </tr>
+        </table>
+
+        <!-- Stage 1 -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Stage 1: Define the Next Stage
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5;">
+            ${stage1Rows || '<tr><td style="padding: 10px; color: #777;">No Stage 1 answers submitted.</td></tr>'}
+          </table>
+        </div>
+
+        <!-- Stage 2 -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Stage 2: Success Changes the Game
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5;">
+            ${stage2Rows || '<tr><td style="padding: 10px; color: #777;">No Stage 2 answers submitted.</td></tr>'}
+          </table>
+        </div>
+
+        <!-- Stage 3 -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Stage 3: Prepare for Performance
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5;">
+            ${stage3Rows || '<tr><td style="padding: 10px; color: #777;">No Stage 3 answers submitted.</td></tr>'}
+          </table>
+        </div>
+
+        <!-- Stage 4 -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Stage 4: Your Next Move
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5;">
+            ${stage4Rows || '<tr><td style="padding: 10px; color: #777;">No Stage 4 answers submitted.</td></tr>'}
+          </table>
+        </div>
+
+        ${extraRows ? `
+        <!-- Additional Responses -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Additional Responses
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5;">
+            ${extraRows}
+          </table>
+        </div>
+        ` : ''}
+
+        ${personalNotesRows ? `
+        <!-- Personal Notes -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; font-weight: 700; color: #010D20; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 8px 0; border-left: 3px solid #CFA25A; padding-left: 8px;">
+            Participant Reflections & Personal Notes
+          </h3>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E8E2D5; background: #FAF8F4;">
+            ${personalNotesRows}
+          </table>
+        </div>
+        ` : ''}
+
+        <!-- Actions -->
+        <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #E8E2D5; text-align: center;">
+          <a href="mailto:${(0, email_1.escapeHtml)(data.email)}?subject=Re:%20The%20Founder%E2%80%99s%20Next%20Move%20%E2%80%94%20${encodeURIComponent(data.submissionRef)}" style="display: inline-block; background: #010D20; color: #FFFFFF; font-weight: 600; font-size: 13px; letter-spacing: 0.5px; text-transform: uppercase; padding: 12px 24px; text-decoration: none; border-radius: 4px;">
+            Reply Directly to ${(0, email_1.escapeHtml)(data.fullName)} (${(0, email_1.escapeHtml)(data.email)})
+          </a>
+        </div>
+
+        <p style="margin-top: 24px; font-size: 11px; color: #888; text-align: center;">
+          Internal notification generated for Leaders Performance Advisory Team.
+        </p>
+      </div>
+    </div>
+  `;
+}
+function buildMasterclassBookingStaffAlertHtml(data) {
+    const bookedAt = (0, email_1.formatOperationalSubmissionDate)();
+    return `
+    <div style="font-family: Arial, Helvetica, sans-serif; background-color: #F8F6F1; padding: 28px; color: #1A1A1A;">
+      <div style="max-width: 620px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 6px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+        <div style="border-bottom: 2px solid #CFA25A; padding-bottom: 16px; margin-bottom: 24px;">
+          <p style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #8A652A; margin: 0 0 4px 0;">
+            Leaders Performance • Calendar Confirmation
+          </p>
+          <h2 style="font-size: 20px; font-weight: 700; color: #010D20; margin: 0 0 6px 0;">
+            Private 1-on-1 Strategic Review Booked
+          </h2>
+          <p style="font-size: 13px; color: #666; margin: 0;">
+            Booking Reference: <strong>${(0, email_1.escapeHtml)(data.bookingRef)}</strong> &bull; Recorded <strong>${(0, email_1.escapeHtml)(bookedAt)}</strong>
+          </p>
+        </div>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin-bottom: 24px; background: #FAF8F4; border: 1px solid #E8E2D5;">
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; width: 170px; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Selected Slot:</td>
+            <td style="padding: 10px 14px; color: #010D20; font-weight: 700; border-bottom: 1px solid #E8E2D5; font-size: 14px;">${(0, email_1.escapeHtml)(data.slotTime)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Time Zone:</td>
+            <td style="padding: 10px 14px; color: #010D20; border-bottom: 1px solid #E8E2D5; font-size: 13px;">${(0, email_1.escapeHtml)(data.timezone)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Duration:</td>
+            <td style="padding: 10px 14px; color: #010D20; border-bottom: 1px solid #E8E2D5; font-size: 13px;">45 Minutes (Private 1-on-1 Review with Lionel Eersteling)</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Participant:</td>
+            <td style="padding: 10px 14px; color: #010D20; border-bottom: 1px solid #E8E2D5; font-size: 13px;">${(0, email_1.escapeHtml)(data.fullName)} (${(0, email_1.escapeHtml)(data.company)})</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; border-bottom: 1px solid #E8E2D5; font-size: 13px;">Email:</td>
+            <td style="padding: 10px 14px; border-bottom: 1px solid #E8E2D5; font-size: 13px;"><a href="mailto:${(0, email_1.escapeHtml)(data.email)}" style="color: #1A365D; text-decoration: underline;">${(0, email_1.escapeHtml)(data.email)}</a></td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 14px; font-weight: 600; color: #8A652A; font-size: 13px;">Workbook Ref:</td>
+            <td style="padding: 10px 14px; color: #010D20; font-size: 13px;">${(0, email_1.escapeHtml)(data.submissionRef)}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 24px; text-align: center;">
+          <a href="mailto:${(0, email_1.escapeHtml)(data.email)}?subject=Re:%20Strategic%20Review%20Confirmation%20(${encodeURIComponent(data.bookingRef)})" style="display: inline-block; background: #010D20; color: #FFFFFF; font-weight: 600; font-size: 13px; letter-spacing: 0.5px; text-transform: uppercase; padding: 12px 24px; text-decoration: none; border-radius: 4px;">
+            Reply to ${(0, email_1.escapeHtml)(data.fullName)}
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+}
 async function sendWorkbookSubmissionNotifications(data) {
     const subject = `The Founder’s Next Move — Submission Received (${data.submissionRef})`;
     const html = `
@@ -847,6 +1138,7 @@ async function sendWorkbookSubmissionNotifications(data) {
       </p>
     </div>
   `;
+    // 1. Participant Confirmation Dispatch
     try {
         const contactId = await (0, ghl_1.upsertContact)({
             email: data.email,
@@ -860,6 +1152,31 @@ async function sendWorkbookSubmissionNotifications(data) {
     }
     catch (err) {
         console.warn('[Email] Fallback participant notification notice:', err.message);
+    }
+    // 2. Company Staff Briefing Dispatch (info@leadersperformance.ae)
+    try {
+        const staffSubject = `[Masterclass Workbook Submission] ${data.fullName} (${data.company || 'Individual'}) — ${data.submissionRef}`;
+        const staffHtml = buildMasterclassStaffBriefingHtml(data);
+        for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
+            try {
+                const staffContactId = await (0, ghl_1.upsertContact)({
+                    email: recipient.email,
+                    firstName: recipient.firstName,
+                    lastName: recipient.lastName,
+                    tags: ['lp-staff', 'internal-notification', 'masterclass-admin'],
+                });
+                if (staffContactId) {
+                    await (0, ghl_1.sendEmail)(staffContactId, staffSubject, staffHtml);
+                    console.log(`[Masterclass] Staff workbook briefing delivered to: ${recipient.email}`);
+                }
+            }
+            catch (staffErr) {
+                console.warn(`[Masterclass] Staff notification notice for ${recipient.email}:`, staffErr?.message || staffErr);
+            }
+        }
+    }
+    catch (staffGlobalErr) {
+        console.warn('[Masterclass] Error dispatching staff workbook briefing:', staffGlobalErr?.message || staffGlobalErr);
     }
 }
 async function sendBookingConfirmationEmail(data) {
@@ -886,6 +1203,7 @@ async function sendBookingConfirmationEmail(data) {
       </p>
     </div>
   `;
+    // 1. Participant Confirmation Dispatch
     try {
         const contactId = await (0, ghl_1.upsertContact)({
             email: data.email,
@@ -899,6 +1217,31 @@ async function sendBookingConfirmationEmail(data) {
     }
     catch (err) {
         console.warn('[Email] Fallback booking email notice:', err.message);
+    }
+    // 2. Company Staff Alert Dispatch (info@leadersperformance.ae)
+    try {
+        const staffSubject = `[Masterclass 1:1 Review Booked] ${data.fullName} (${data.company || 'Individual'}) — ${data.bookingRef}`;
+        const staffHtml = buildMasterclassBookingStaffAlertHtml(data);
+        for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
+            try {
+                const staffContactId = await (0, ghl_1.upsertContact)({
+                    email: recipient.email,
+                    firstName: recipient.firstName,
+                    lastName: recipient.lastName,
+                    tags: ['lp-staff', 'internal-notification', 'masterclass-admin'],
+                });
+                if (staffContactId) {
+                    await (0, ghl_1.sendEmail)(staffContactId, staffSubject, staffHtml);
+                    console.log(`[Masterclass] Staff review booking alert delivered to: ${recipient.email}`);
+                }
+            }
+            catch (staffErr) {
+                console.warn(`[Masterclass] Staff booking notice for ${recipient.email}:`, staffErr?.message || staffErr);
+            }
+        }
+    }
+    catch (staffGlobalErr) {
+        console.warn('[Masterclass] Error dispatching staff booking alert:', staffGlobalErr?.message || staffGlobalErr);
     }
 }
 // ==========================================

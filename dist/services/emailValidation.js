@@ -6,6 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateEmailBasic = validateEmailBasic;
 exports.validateNewsletterEmailStrict = validateNewsletterEmailStrict;
 const dns_1 = __importDefault(require("dns"));
+const dnsResolver = new dns_1.default.promises.Resolver();
+try {
+    dnsResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+}
+catch {
+    // Fall back to default system servers
+}
 /**
  * Common disposable / burner email domains
  */
@@ -151,7 +158,7 @@ async function checkDomainMxRecords(domain) {
         const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ hasMx: true }), 1500));
         const lookupPromise = (async () => {
             try {
-                const mxRecords = await dns_1.default.promises.resolveMx(domain);
+                const mxRecords = await dnsResolver.resolveMx(domain);
                 if (!mxRecords || mxRecords.length === 0) {
                     return { hasMx: false, error: 'The email domain has no mail servers configured to receive emails.' };
                 }
