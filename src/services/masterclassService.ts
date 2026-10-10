@@ -444,6 +444,20 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
     payment_method_types: ['card'],
     customer_email: normalizedEmail,
     line_items: lineItems,
+    invoice_creation: {
+      enabled: true,
+      invoice_data: {
+        description: 'The Founder’s Next Move — Executive Masterclass',
+        metadata: {
+          enrollmentId: enrollment.id,
+          product: 'The Founder’s Next Move',
+        },
+      },
+    },
+    payment_intent_data: {
+      receipt_email: normalizedEmail,
+      description: 'The Founder’s Next Move — Executive Masterclass',
+    },
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
