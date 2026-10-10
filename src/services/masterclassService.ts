@@ -1540,12 +1540,32 @@ function loadMasterclassTemplate(filename: string): string | null {
 }
 
 export function getMasterclassReviewUrl(ref: string): string {
-  const backendBaseUrl =
-    process.env.BACKEND_URL ||
-    process.env.API_BASE_URL ||
-    (process.env.NODE_ENV === 'production'
-      ? 'https://api.leadersperformance.ae'
-      : 'http://localhost:4000');
+  const frontendUrl = process.env.FRONTEND_URL || '';
+  const customBackend = process.env.BACKEND_URL || process.env.API_BASE_URL;
+
+  let backendBaseUrl: string;
+
+  const isStaging =
+    frontendUrl.includes('staging.leadersperformance.ae') ||
+    (customBackend ? customBackend.includes('staging.leadersperformance.ae') : false) ||
+    process.env.APP_ENV === 'staging';
+
+  if (isStaging) {
+    // On staging, Traefik edge reverse proxy routes backend endpoints exclusively via the /api prefix
+    if (customBackend && customBackend.includes('staging.leadersperformance.ae')) {
+      const trimmed = customBackend.replace(/\/+$/, '');
+      backendBaseUrl = trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+    } else {
+      backendBaseUrl = 'https://staging.leadersperformance.ae/api';
+    }
+  } else if (customBackend) {
+    backendBaseUrl = customBackend;
+  } else if (process.env.NODE_ENV === 'production') {
+    backendBaseUrl = 'https://api.leadersperformance.ae';
+  } else {
+    backendBaseUrl = 'http://localhost:4000';
+  }
+
   const cleanBase = backendBaseUrl.replace(/\/+$/, '');
   const cleanRef = encodeURIComponent((ref || '').trim());
   return `${cleanBase}/masterclass/review/${cleanRef}`;
@@ -3273,7 +3293,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       const active = sub.submissionRef === submissionRef ? 'directory-item-active' : '';
       const bRef = sub.bookings?.[0]?.bookingRef || 'No Booking';
       return `
-        <a href="/masterclass/review/${encodeURIComponent(sub.submissionRef)}" class="directory-row ${active}">
+        <a href="?ref=${encodeURIComponent(sub.submissionRef)}" class="directory-row ${active}">
           <div class="dir-name">${escapeHtml(sub.fullName || 'Participant')}</div>
           <div class="dir-company">${escapeHtml(sub.company || '—')}</div>
           <div class="dir-refs">
@@ -3920,7 +3940,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       </div>
 
       <div class="topbar-controls">
-        <form class="search-box" action="/masterclass/review" method="GET">
+        <form class="search-box" action="" method="GET">
           <input type="text" name="ref" placeholder="Search Ref, Booking, Email..." value="${escapeHtml(searchRef || '')}">
           <button type="submit">Look Up</button>
         </form>
