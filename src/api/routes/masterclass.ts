@@ -152,7 +152,7 @@ const SubmitWorkbookSchema = z.object({
     stage3_orgInvestment: optionalAnswerField('Stage 3 organizational investment'),
     stage3_focusArea: optionalAnswerField('Stage 3 focus area'),
     // Stage 4
-    stage4_priority90Days: answerField('Stage 4 90-day priority'),
+    stage4_priority30Days: answerField('Stage 4 30-day priority'),
     stage4_milestone1: optionalAnswerField('Stage 4 milestone 1'),
     stage4_milestone2: optionalAnswerField('Stage 4 milestone 2'),
     stage4_milestone3: optionalAnswerField('Stage 4 milestone 3'),
@@ -650,11 +650,11 @@ masterclassRouter.get('/modules', (_req: Request, res: Response) => {
         title: 'Your Next Move',
         videoTitle: 'Module 4: Exploration Blueprint & Execution',
         summary:
-          'Transforming reflections into a high-leverage 90-day roadmap and one immediate action within 7 days.',
+          'Transforming reflections into a high-leverage 30-day roadmap and one immediate action within 24 hours.',
         keyPrompts: [
-          'What is your main preparation priority for the next 90 days?',
+          'What is your main preparation priority for the next 30 days?',
           'What three milestones will prove progress?',
-          'What single action will you take within 7 days?',
+          'What single action will you take within 24 hours?',
         ],
       },
     ],
@@ -822,7 +822,7 @@ masterclassRouter.get('/draft', async (req: Request, res: Response) => {
  *                     type: string
  *                   stage3_orgStrength:
  *                     type: string
- *                   stage4_priority90Days:
+ *                   stage4_priority30Days:
  *                     type: string
  *                   stage4_action7Days:
  *                     type: string
