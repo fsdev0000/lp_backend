@@ -12,6 +12,7 @@ import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntim
 import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
 import { consentRoutes } from './consent';
 import { assessmentRateLimiter } from '../../middleware/rateLimiter';
+import { getMasterclassMonthAvailability } from '../../services/masterclassService';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -752,8 +753,8 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
     }
 
-    if (formattedTime < '14:00' || formattedTime > '16:30') {
-      return res.status(400).json({ error: 'Bookings are strictly limited to 2:00 PM - 4:30 PM (Dubai time).' });
+    if (formattedTime < '13:30' || formattedTime > '18:00') {
+      return res.status(400).json({ error: 'Bookings are limited to 1:30 PM - 7:00 PM (Dubai time).' });
     }
 
     const dateTimeStr = `${date}T${formattedTime}:00`;
@@ -833,7 +834,7 @@ apiRoutes.get('/bookings/availability/month', async (req, res) => {
     const month = parseInt(req.query.month as string); // 1-12
     if (!year || !month) return res.status(400).json({ error: 'Year and month required' });
 
-    const availability = await getMonthAvailability(year, month);
+    const availability = await getMasterclassMonthAvailability(year, month);
     res.status(200).json(availability);
   } catch (error) {
     console.error('Failed to get month availability:', error);

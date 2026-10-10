@@ -206,17 +206,18 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(Array.isArray(res.body.timezones)).toBe(true);
     }, 10000);
 
-    it('should return exact 3 canonical slots (1:30 PM, 2:30 PM, 3:30 PM) for a specific date', async () => {
+    it('should return exact 4 canonical slots (1:30 PM, 3:00 PM, 4:30 PM, 6:00 PM) for a specific date', async () => {
       const res = await request(app)
         .get('/api/v1/masterclass/available-slots')
         .query({ date: '2026-11-09', timezone: 'GST (UTC+4)' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.slots).toHaveLength(3);
-      expect(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:15 PM GST');
-      expect(res.body.slots[1].dubaiLabel).toBe('2:30 PM – 3:15 PM GST');
-      expect(res.body.slots[2].dubaiLabel).toBe('3:30 PM – 4:15 PM GST');
+      expect(res.body.slots).toHaveLength(4);
+      expect(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:30 PM GST');
+      expect(res.body.slots[1].dubaiLabel).toBe('3:00 PM – 4:00 PM GST');
+      expect(res.body.slots[2].dubaiLabel).toBe('4:30 PM – 5:30 PM GST');
+      expect(res.body.slots[3].dubaiLabel).toBe('6:00 PM – 7:00 PM GST');
     });
 
     it('should correctly format slots in participant local timezone (e.g. EST)', async () => {
@@ -226,10 +227,11 @@ describe('Masterclass API & Recognition Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.slots).toHaveLength(3);
+      expect(res.body.slots).toHaveLength(4);
       expect(res.body.slots[0].localRange).toContain('4:30 AM');
-      expect(res.body.slots[1].localRange).toContain('5:30 AM');
-      expect(res.body.slots[2].localRange).toContain('6:30 AM');
+      expect(res.body.slots[1].localRange).toContain('6:00 AM');
+      expect(res.body.slots[2].localRange).toContain('7:30 AM');
+      expect(res.body.slots[3].localRange).toContain('9:00 AM');
     });
 
     it('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
@@ -241,7 +243,7 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(typeof res.body).toBe('object');
       expect(res.body).toHaveProperty('2026-11-09');
       expect(Array.isArray(res.body['2026-11-09'])).toBe(true);
-      expect(res.body['2026-11-09']).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
+      expect(res.body['2026-11-09']).toEqual(expect.arrayContaining(['13:30', '15:00', '16:30', '18:00']));
     });
 
     it('should reject booking slot when participant info is missing', async () => {

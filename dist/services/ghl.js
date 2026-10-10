@@ -163,8 +163,8 @@ async function getFreeSlots(date) {
         for (const slot of slots) {
             try {
                 let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
-                // Limit available slots strictly to 1:30 PM - 4:30 PM (Dubai time)
-                if (timeStr >= '13:30' && timeStr <= '16:30') {
+                // Limit available slots to Masterclass 60-min slot windows (13:30 - 18:00 Dubai time)
+                if (timeStr >= '13:30' && timeStr <= '18:00') {
                     freeSlotTimes.add(timeStr);
                 }
             }
@@ -205,8 +205,8 @@ async function getMonthAvailability(year, month) {
                 for (const slot of slots) {
                     try {
                         let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
-                        // Limit available slots strictly to 2:00 PM - 4:30 PM (Dubai time)
-                        if (timeStr >= '14:00' && timeStr <= '16:30') {
+                        // Limit available slots to Masterclass 60-min slot windows (13:30 - 18:00 Dubai time)
+                        if (timeStr >= '13:30' && timeStr <= '18:00') {
                             freeSlotTimes.add(timeStr);
                         }
                     }

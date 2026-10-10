@@ -190,7 +190,7 @@ export interface MasterclassWorkbookSubmissionPayload {
     stage3_orgStrength: string;
     stage3_orgInvestment?: string;
     stage3_focusArea?: string;
-    stage4_priority90Days: string;
+    stage4_priority30Days: string;
     stage4_milestone1?: string;
     stage4_milestone2?: string;
     stage4_milestone3?: string;
@@ -878,22 +878,23 @@ export async function getSubmission(submissionRefOrId: string) {
 // ==========================================
 // CANONICAL MASTERCLASS STRATEGIC REVIEW SLOTS
 // ==========================================
-// 1. Availability: 1:30 PM to 4:30 PM Dubai time (Asia/Dubai).
-// 2. Session duration: 45 minutes per booking.
-// 3. Rest time: 15-minute buffer between consecutive sessions.
+// 1. Availability: 1:30 PM to 7:00 PM Dubai time (Asia/Dubai).
+// 2. Session duration: 60 minutes per booking.
+// 3. Rest time: 30-minute break between consecutive sessions.
 // 4. Expected slots (Dubai Time / Asia/Dubai / GST / UTC+4):
-//    - Slot 1: 1:30 PM – 2:15 PM (13:30 – 14:15)
-//    - Slot 2: 2:30 PM – 3:15 PM (14:30 – 15:15)
-//    - Slot 3: 3:30 PM – 4:15 PM (15:30 – 16:15)
+//    - Slot 1: 1:30 PM – 2:30 PM (13:30 – 14:30)
+//    - Slot 2: 3:00 PM – 4:00 PM (15:00 – 16:00)
+//    - Slot 3: 4:30 PM – 5:30 PM (16:30 – 17:30)
+//    - Slot 4: 6:00 PM – 7:00 PM (18:00 – 19:00)
 
 export interface CanonicalMasterclassSlot {
   slotIndex: number;
-  time24: string;           // "13:30", "14:30", "15:30"
-  startDubai: string;       // "13:30"
-  endDubai: string;         // "14:15"
-  labelDubai: string;       // "1:30 PM – 2:15 PM"
-  durationMinutes: number;  // 45
-  bufferMinutes: number;    // 15
+  time24: string;           // "13:30", "15:00", "16:30", "18:00"
+  startDubai: string;       // "13:30", "15:00", "16:30", "18:00"
+  endDubai: string;         // "14:30", "16:00", "17:30", "19:00"
+  labelDubai: string;       // "1:30 PM – 2:30 PM"
+  durationMinutes: number;  // 60
+  bufferMinutes: number;    // 30
 }
 
 export const CANONICAL_MASTERCLASS_SLOTS: CanonicalMasterclassSlot[] = [
@@ -901,28 +902,37 @@ export const CANONICAL_MASTERCLASS_SLOTS: CanonicalMasterclassSlot[] = [
     slotIndex: 1,
     time24: '13:30',
     startDubai: '13:30',
-    endDubai: '14:15',
-    labelDubai: '1:30 PM – 2:15 PM',
-    durationMinutes: 45,
-    bufferMinutes: 15,
+    endDubai: '14:30',
+    labelDubai: '1:30 PM – 2:30 PM',
+    durationMinutes: 60,
+    bufferMinutes: 30,
   },
   {
     slotIndex: 2,
-    time24: '14:30',
-    startDubai: '14:30',
-    endDubai: '15:15',
-    labelDubai: '2:30 PM – 3:15 PM',
-    durationMinutes: 45,
-    bufferMinutes: 15,
+    time24: '15:00',
+    startDubai: '15:00',
+    endDubai: '16:00',
+    labelDubai: '3:00 PM – 4:00 PM',
+    durationMinutes: 60,
+    bufferMinutes: 30,
   },
   {
     slotIndex: 3,
-    time24: '15:30',
-    startDubai: '15:30',
-    endDubai: '16:15',
-    labelDubai: '3:30 PM – 4:15 PM',
-    durationMinutes: 45,
-    bufferMinutes: 15,
+    time24: '16:30',
+    startDubai: '16:30',
+    endDubai: '17:30',
+    labelDubai: '4:30 PM – 5:30 PM',
+    durationMinutes: 60,
+    bufferMinutes: 30,
+  },
+  {
+    slotIndex: 4,
+    time24: '18:00',
+    startDubai: '18:00',
+    endDubai: '19:00',
+    labelDubai: '6:00 PM – 7:00 PM',
+    durationMinutes: 60,
+    bufferMinutes: 30,
   },
 ];
 
@@ -1252,15 +1262,16 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
     dateStr = nextDay.toISOString().split('T')[0];
   }
 
-  // Match slot to canonical definitions (13:30, 14:30, 15:30)
+  // Match slot to canonical definitions (13:30, 15:00, 16:30, 18:00)
   const matchedSlot = CANONICAL_MASTERCLASS_SLOTS.find(
     (s) =>
       rawSlot.includes(s.time24) ||
       rawSlot.includes(s.startDubai) ||
       rawSlot.includes(s.labelDubai) ||
-      (s.slotIndex === 1 && (rawSlot.includes('1:30') || rawSlot.includes('01:30'))) ||
-      (s.slotIndex === 2 && (rawSlot.includes('2:30') || rawSlot.includes('02:30'))) ||
-      (s.slotIndex === 3 && (rawSlot.includes('3:30') || rawSlot.includes('03:30')))
+      (s.slotIndex === 1 && (rawSlot.includes('1:30') || rawSlot.includes('01:30') || rawSlot.includes('13:30'))) ||
+      (s.slotIndex === 2 && (rawSlot.includes('3:00') || rawSlot.includes('03:00') || rawSlot.includes('15:00'))) ||
+      (s.slotIndex === 3 && (rawSlot.includes('4:30') || rawSlot.includes('04:30') || rawSlot.includes('16:30'))) ||
+      (s.slotIndex === 4 && (rawSlot.includes('6:00') || rawSlot.includes('06:00') || rawSlot.includes('18:00')))
   ) || CANONICAL_MASTERCLASS_SLOTS[0];
 
   const { startDate, endDate } = getSlotDatesUtc(dateStr, matchedSlot);
@@ -1417,9 +1428,10 @@ export async function rescheduleReviewSlot(payload: MasterclassReschedulePayload
       payload.newSlotTime.includes(s.time24) ||
       payload.newSlotTime.includes(s.startDubai) ||
       payload.newSlotTime.includes(s.labelDubai) ||
-      (s.slotIndex === 1 && (payload.newSlotTime.includes('1:30') || payload.newSlotTime.includes('01:30'))) ||
-      (s.slotIndex === 2 && (payload.newSlotTime.includes('2:30') || payload.newSlotTime.includes('02:30'))) ||
-      (s.slotIndex === 3 && (payload.newSlotTime.includes('3:30') || payload.newSlotTime.includes('03:30')))
+      (s.slotIndex === 1 && (payload.newSlotTime.includes('1:30') || payload.newSlotTime.includes('01:30') || payload.newSlotTime.includes('13:30'))) ||
+      (s.slotIndex === 2 && (payload.newSlotTime.includes('3:00') || payload.newSlotTime.includes('03:00') || payload.newSlotTime.includes('15:00'))) ||
+      (s.slotIndex === 3 && (payload.newSlotTime.includes('4:30') || payload.newSlotTime.includes('04:30') || payload.newSlotTime.includes('16:30'))) ||
+      (s.slotIndex === 4 && (payload.newSlotTime.includes('6:00') || payload.newSlotTime.includes('06:00') || payload.newSlotTime.includes('18:00')))
   ) || CANONICAL_MASTERCLASS_SLOTS[0];
 
   const tz = payload.timezone || booking.timezone;
@@ -1619,11 +1631,12 @@ function buildMasterclassStaffBriefingHtml(data: {
     renderField('Primary Focus Area', f.stage3_focusArea),
   ].filter(Boolean).join('');
 
+  const priority30 = f.stage4_priority30Days || f.stage4_priority90Days || '';
   const stage4Rows = [
-    renderField('1. 90-Day Main Preparation Priority', f.stage4_priority90Days),
-    renderField('Milestone 1 (30-Day Marker)', f.stage4_milestone1),
-    renderField('Milestone 2 (60-Day Marker)', f.stage4_milestone2),
-    renderField('Milestone 3 (90-Day Marker)', f.stage4_milestone3),
+    renderField('1. 30-Day Main Preparation Priority', priority30),
+    renderField('Milestone 1 (10-Day Marker)', f.stage4_milestone1),
+    renderField('Milestone 2 (20-Day Marker)', f.stage4_milestone2),
+    renderField('Milestone 3 (30-Day Marker)', f.stage4_milestone3),
     renderField('2. Single Action Within 7 Days', f.stage4_action7Days),
     renderField('When Action Will Be Taken', f.stage4_actionTiming),
     renderField('Evidence to Look For Afterward', f.stage4_evidence),
@@ -1634,7 +1647,7 @@ function buildMasterclassStaffBriefingHtml(data: {
     'stage2_changes', 'stage2_demand1', 'stage2_demand2', 'stage2_demand3', 'stage2_investment',
     'stage3_founderStrength', 'stage3_founderStandard', 'stage3_teamStrength', 'stage3_teamStandard',
     'stage3_orgStrength', 'stage3_orgInvestment', 'stage3_focusArea',
-    'stage4_priority90Days', 'stage4_milestone1', 'stage4_milestone2', 'stage4_milestone3',
+    'stage4_priority30Days', 'stage4_priority90Days', 'stage4_milestone1', 'stage4_milestone2', 'stage4_milestone3',
     'stage4_action7Days', 'stage4_actionTiming', 'stage4_evidence',
   ]);
 
@@ -2566,16 +2579,16 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
       id: 'stage4',
       title: 'Your Next Move',
       moduleTitle: 'Module 4: Exploration Blueprint & Execution',
-      subtitle: 'Transforming reflections into a high-leverage 90-day roadmap and one immediate action within 7 days.',
+      subtitle: 'Transforming reflections into a high-leverage 30-day roadmap and one immediate action within 24 hours.',
       videoId: 5,
       videoKey: 'stage_4',
       thumbnailFileName: 'STAGE-04.jpg',
       reflectionPauseSeconds: 45,
-      reflectionPrompt: 'Reflect on your top 90-day preparation priority and the single high-leverage action you will take within 7 days. Record your answers in Stage 4.',
+      reflectionPrompt: 'Reflect on your top 30-day preparation priority and the single high-leverage action you will take within 24 hours. Record your answers in Stage 4.',
       questions: [
         {
-          id: 'stage4_priority90Days',
-          label: '1. What is your main preparation priority for the next 90 days? *',
+          id: 'stage4_priority30Days',
+          label: '1. What is your main preparation priority for the next 30 days? *',
           type: 'textarea',
           required: true,
           maxLength: 1000,
@@ -2583,31 +2596,31 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
         },
         {
           id: 'stage4_milestone1',
-          label: 'Milestone 1: 30-Day progress marker',
+          label: 'Milestone 1: 10-Day progress marker',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 1: e.g. Executive alignment framework signed off by Day 30',
+          placeholder: 'Milestone 1: e.g. Executive alignment framework signed off by Day 10',
         },
         {
           id: 'stage4_milestone2',
-          label: 'Milestone 2: 60-Day progress marker',
+          label: 'Milestone 2: 20-Day progress marker',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 2: e.g. Operational handover completed by Day 60',
+          placeholder: 'Milestone 2: e.g. Operational handover completed by Day 20',
         },
         {
           id: 'stage4_milestone3',
-          label: 'Milestone 3: 90-Day progress marker',
+          label: 'Milestone 3: 30-Day progress marker',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 3: e.g. Full performance reset review with Lionel by Day 90',
+          placeholder: 'Milestone 3: e.g. Full performance reset review with Lionel by Day 30',
         },
         {
           id: 'stage4_action7Days',
-          label: '3. One action within 7 days *',
+          label: '3. One action within 24 hours *',
           type: 'text',
           required: true,
           maxLength: 1000,
@@ -2787,7 +2800,7 @@ export async function getMasterclassVideosList(expiresInSeconds: number = 315360
       stage: 4,
       stageName: 'Stage 4',
       title: 'Module 4: Exploration Blueprint & Execution',
-      subtitle: 'Turn reflections into 90-day milestones and a single high-leverage 7-day action',
+      subtitle: 'Turn reflections into 30-day milestones and a single high-leverage 7-day action',
       fileName: 'STAGE-04.mp4',
       candidates: ['STAGE-04.mp4', 'STAGE -04.mp4', 'STAGE_04.mp4', 'Stage 4.mp4'],
       fallbackName: 'STAGE-04.mp4',

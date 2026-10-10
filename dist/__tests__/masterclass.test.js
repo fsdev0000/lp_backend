@@ -183,16 +183,17 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(res.body.availableSlots.length).toBeGreaterThan(0);
             (0, globals_1.expect)(Array.isArray(res.body.timezones)).toBe(true);
         }, 10000);
-        (0, globals_1.it)('should return exact 3 canonical slots (1:30 PM, 2:30 PM, 3:30 PM) for a specific date', async () => {
+        (0, globals_1.it)('should return exact 4 canonical slots (1:30 PM, 3:00 PM, 4:30 PM, 6:00 PM) for a specific date', async () => {
             const res = await (0, supertest_1.default)(app)
                 .get('/api/v1/masterclass/available-slots')
                 .query({ date: '2026-11-09', timezone: 'GST (UTC+4)' });
             (0, globals_1.expect)(res.status).toBe(200);
             (0, globals_1.expect)(res.body.success).toBe(true);
-            (0, globals_1.expect)(res.body.slots).toHaveLength(3);
-            (0, globals_1.expect)(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:15 PM GST');
-            (0, globals_1.expect)(res.body.slots[1].dubaiLabel).toBe('2:30 PM – 3:15 PM GST');
-            (0, globals_1.expect)(res.body.slots[2].dubaiLabel).toBe('3:30 PM – 4:15 PM GST');
+            (0, globals_1.expect)(res.body.slots).toHaveLength(4);
+            (0, globals_1.expect)(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:30 PM GST');
+            (0, globals_1.expect)(res.body.slots[1].dubaiLabel).toBe('3:00 PM – 4:00 PM GST');
+            (0, globals_1.expect)(res.body.slots[2].dubaiLabel).toBe('4:30 PM – 5:30 PM GST');
+            (0, globals_1.expect)(res.body.slots[3].dubaiLabel).toBe('6:00 PM – 7:00 PM GST');
         });
         (0, globals_1.it)('should correctly format slots in participant local timezone (e.g. EST)', async () => {
             const res = await (0, supertest_1.default)(app)
@@ -200,10 +201,11 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
                 .query({ date: '2026-11-09', timezone: 'EST (UTC-5)' });
             (0, globals_1.expect)(res.status).toBe(200);
             (0, globals_1.expect)(res.body.success).toBe(true);
-            (0, globals_1.expect)(res.body.slots).toHaveLength(3);
+            (0, globals_1.expect)(res.body.slots).toHaveLength(4);
             (0, globals_1.expect)(res.body.slots[0].localRange).toContain('4:30 AM');
-            (0, globals_1.expect)(res.body.slots[1].localRange).toContain('5:30 AM');
-            (0, globals_1.expect)(res.body.slots[2].localRange).toContain('6:30 AM');
+            (0, globals_1.expect)(res.body.slots[1].localRange).toContain('6:00 AM');
+            (0, globals_1.expect)(res.body.slots[2].localRange).toContain('7:30 AM');
+            (0, globals_1.expect)(res.body.slots[3].localRange).toContain('9:00 AM');
         });
         (0, globals_1.it)('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
             const res = await (0, supertest_1.default)(app)
@@ -213,7 +215,7 @@ app.use('/api/v1/masterclass', masterclass_1.masterclassRouter);
             (0, globals_1.expect)(typeof res.body).toBe('object');
             (0, globals_1.expect)(res.body).toHaveProperty('2026-11-09');
             (0, globals_1.expect)(Array.isArray(res.body['2026-11-09'])).toBe(true);
-            (0, globals_1.expect)(res.body['2026-11-09']).toEqual(globals_1.expect.arrayContaining(['13:30', '14:30', '15:30']));
+            (0, globals_1.expect)(res.body['2026-11-09']).toEqual(globals_1.expect.arrayContaining(['13:30', '15:00', '16:30', '18:00']));
         });
         (0, globals_1.it)('should reject booking slot when participant info is missing', async () => {
             const res = await (0, supertest_1.default)(app)
