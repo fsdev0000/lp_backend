@@ -531,7 +531,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
 export async function verifyPayment(sessionId: string) {
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
-    expand: ['payment_intent'],
+    expand: ['payment_intent', 'invoice'],
   });
 
   if (!session) {
@@ -566,6 +566,17 @@ export async function verifyPayment(sessionId: string) {
         stripePaymentIntentId: paymentIntentId || enrollment.stripePaymentIntentId,
       },
     });
+
+    // Explicitly trigger Stripe to email the finalized invoice receipt to the customer
+    if (session.invoice) {
+      try {
+        const invoiceId = typeof session.invoice === 'string' ? session.invoice : session.invoice.id;
+        await stripe.invoices.sendInvoice(invoiceId);
+        console.log(`[Stripe Invoice] Successfully dispatched invoice ${invoiceId} to customer ${session.customer_email || enrollment.email}`);
+      } catch (invErr: any) {
+        console.warn('[Stripe Invoice] Notice dispatching invoice via Stripe API:', invErr.message);
+      }
+    }
 
     // Tag contact in GHL as paid customer
     try {
