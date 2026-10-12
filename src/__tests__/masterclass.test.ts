@@ -369,5 +369,137 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body.config.reflectionPauseDurationSeconds).toBe(45);
     });
   });
+
+  describe('Worksheet Review & PDF Download Endpoints', () => {
+    let testSubmissionRef = 'FNM-2026-UNITTEST';
+    let testSubmissionId = '';
+
+    beforeAll(async () => {
+      // Clean up previous test data
+      await prisma.masterclassWorkbookSubmission.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+      await prisma.masterclassEnrollment.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+
+      // Create test enrollment
+      const enrollment = await prisma.masterclassEnrollment.create({
+        data: {
+          email: 'lionel_test_user@enterprise.com',
+          fullName: 'Alexander Vance',
+          company: 'Vance Aerospace',
+          role: 'Chief Executive Officer',
+          phone: '+971501234567',
+          paymentStatus: 'paid',
+          accessGranted: true,
+          courseProgress: 100,
+          currentStage: 4,
+        },
+      });
+
+      // Create test submission
+      const submission = await prisma.masterclassWorkbookSubmission.create({
+        data: {
+          submissionRef: testSubmissionRef,
+          enrollmentId: enrollment.id,
+          email: 'lionel_test_user@enterprise.com',
+          fullName: 'Alexander Vance',
+          company: 'Vance Aerospace',
+          role: 'Chief Executive Officer',
+          phone: '+971501234567',
+          status: 'submitted',
+          currentStage: 4,
+          formData: JSON.stringify({
+            stage1_nextStage: 'Global defense fleet expansion',
+            stage1_possibility: '10x capability enhancement',
+            stage1_strength: 'Proprietary propulsion tech',
+            stage2_changes: 'High regulatory scrutiny',
+            stage2_demand1: 'Sovereign governance board',
+            stage2_investment: 'Capital allocation shift',
+            stage3_founderStrength: 'Direct architectural vision',
+            stage3_focusArea: 'Operational scale-up',
+            stage4_priority30Days: 'Establish regional command center',
+            stage4_action7Days: 'Sign prime supplier agreements',
+          }),
+          personalNotes: JSON.stringify({
+            founderFocus: 'Prioritize executive alignment',
+          }),
+          submittedAt: new Date(),
+        },
+      });
+      testSubmissionId = submission.id;
+    });
+
+    afterAll(async () => {
+      await prisma.masterclassWorkbookSubmission.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+      await prisma.masterclassEnrollment.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+    });
+
+    it('should return user worksheet responses and progress via GET /masterclass/internal-review/:worksheetId', async () => {
+      const res = await request(app)
+        .get(`/masterclass/internal-review/${testSubmissionRef}`)
+        .set('Accept', 'application/json');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.email).toBe('lionel_test_user@enterprise.com');
+      expect(res.body.user.fullName).toBe('Alexander Vance');
+      expect(res.body.user.company).toBe('Vance Aerospace');
+      expect(res.body.progress.courseProgress).toBe(100);
+      expect(res.body.progress.currentStage).toBe(4);
+      expect(res.body.progress.isCompleted).toBe(true);
+      expect(res.body.responses.stage1_nextStage).toBe('Global defense fleet expansion');
+      expect(res.body.responses.stage4_priority30Days).toBe('Establish regional command center');
+      expect(res.body.personalNotes.founderFocus).toBe('Prioritize executive alignment');
+      expect(res.body.pdfDownloadUrl).toContain(`/masterclass/internal-review/`);
+      expect(res.body.pdfDownloadUrl).toContain(`/pdf`);
+    }, 15000);
+
+    it('should also load user responses by UUID via GET /masterclass/internal-review/:worksheetId', async () => {
+      const res = await request(app)
+        .get(`/masterclass/internal-review/${testSubmissionId}`)
+        .set('Accept', 'application/json');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.worksheetId).toBe(testSubmissionId);
+      expect(res.body.user.email).toBe('lionel_test_user@enterprise.com');
+      expect(res.body.responses.stage1_nextStage).toBe('Global defense fleet expansion');
+    }, 15000);
+
+    it('should download worksheet PDF via GET /masterclass/worksheet/:worksheetId/pdf', async () => {
+      const res = await request(app).get(`/masterclass/worksheet/${testSubmissionRef}/pdf`);
+
+      expect(res.status).toBe(200);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.header['content-disposition']).toContain(`WorkSheet-FNM-2026-UNITTEST.pdf`);
+      expect(res.body).toBeInstanceOf(Buffer);
+      expect(res.body.length).toBeGreaterThan(1000);
+      // Valid PDF magic header
+      expect(res.body.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    }, 15000);
+
+    it('should download worksheet PDF via GET /masterclass/internal-review/:worksheetId/pdf', async () => {
+      const res = await request(app).get(`/masterclass/internal-review/${testSubmissionId}/pdf`);
+
+      expect(res.status).toBe(200);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.body).toBeInstanceOf(Buffer);
+      expect(res.body.length).toBeGreaterThan(1000);
+      expect(res.body.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    }, 15000);
+
+    it('should return 404 when worksheet is not found for PDF download', async () => {
+      const res = await request(app).get('/masterclass/worksheet/NON_EXISTENT_REF/pdf');
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('NOT_FOUND');
+    }, 15000);
+  });
 });
 

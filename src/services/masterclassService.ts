@@ -8,6 +8,7 @@ import { upsertContact, sendEmail, getFreeSlots, getMonthAvailability, getCalend
 import { escapeHtml, formatOperationalSubmissionDate, renderTemplate } from './email';
 import { getMasterclassBucketFiles, createMasterclassSignedUrl } from './supabaseStorageService';
 import { generateIcsContent, generateGoogleCalendarUrl, generateOutlookCalendarUrl, CalendarEventDetails } from './calendarInvite';
+import { generateMasterclassWorksheetPdf } from './masterclassPdfService';
 
 let prismaInstance: PrismaClient | null = null;
 function getPrisma(): any {
@@ -818,6 +819,7 @@ export async function submitWorkbook(payload: MasterclassWorkbookSubmissionPaylo
   // Send notifications
   try {
     await sendWorkbookSubmissionNotifications({
+      submissionId: submissionRecord.id,
       submissionRef,
       fullName: normalizedName,
       email: normalizedEmail,
@@ -1551,19 +1553,39 @@ function loadMasterclassTemplate(filename: string): string | null {
   return null;
 }
 
-export function getMasterclassReviewUrl(ref: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || '';
-  const customBackend = process.env.BACKEND_URL || process.env.API_BASE_URL;
+export function getMasterclassFrontendReviewUrl(worksheetId: string): string {
+  let frontendBaseUrl = (process.env.FRONTEND_URL || '').trim();
 
+  if (!frontendBaseUrl) {
+    if (process.env.APP_ENV === 'staging' || process.env.NODE_ENV === 'staging') {
+      frontendBaseUrl = 'https://staging.leadersperformance.ae';
+    } else if (process.env.NODE_ENV === 'production') {
+      frontendBaseUrl = 'https://leadersperformance.ae';
+    } else {
+      frontendBaseUrl = 'http://localhost:5173';
+    }
+  }
+
+  let cleanBase = frontendBaseUrl.replace(/\/+$/, '');
+  if (cleanBase.endsWith('/api')) {
+    cleanBase = cleanBase.slice(0, -4);
+  }
+
+  const cleanId = encodeURIComponent((worksheetId || '').trim());
+  return `${cleanBase}/masterclass/internal-review/${cleanId}`;
+}
+
+export function getMasterclassWorksheetPdfUrl(worksheetId: string): string {
+  const customBackend = process.env.BACKEND_URL || process.env.API_BASE_URL;
   let backendBaseUrl: string;
 
+  const frontendUrl = process.env.FRONTEND_URL || '';
   const isStaging =
     frontendUrl.includes('staging.leadersperformance.ae') ||
     (customBackend ? customBackend.includes('staging.leadersperformance.ae') : false) ||
     process.env.APP_ENV === 'staging';
 
   if (isStaging) {
-    // On staging, Traefik edge reverse proxy routes backend endpoints exclusively via the /api prefix
     if (customBackend && customBackend.includes('staging.leadersperformance.ae')) {
       const trimmed = customBackend.replace(/\/+$/, '');
       backendBaseUrl = trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
@@ -1579,12 +1601,19 @@ export function getMasterclassReviewUrl(ref: string): string {
   }
 
   const cleanBase = backendBaseUrl.replace(/\/+$/, '');
-  const cleanRef = encodeURIComponent((ref || '').trim());
-  return `${cleanBase}/masterclass/review/${cleanRef}`;
+  const cleanId = encodeURIComponent((worksheetId || '').trim());
+  return `${cleanBase}/masterclass/internal-review/${cleanId}/pdf`;
+}
+
+export function getMasterclassReviewUrl(ref: string): string {
+  // Requirement 2: In the email, use frontend URL format: frontend_base_url/masterclass/internal-review/{worksheetId}
+  // The link must open the frontend website, not the backend API URL.
+  return getMasterclassFrontendReviewUrl(ref);
 }
 
 function buildMasterclassStaffBriefingHtml(data: {
   submissionRef: string;
+  submissionId?: string;
   fullName: string;
   email: string;
   company: string;
@@ -1716,7 +1745,9 @@ function buildMasterclassStaffBriefingHtml(data: {
   ].filter(Boolean).join('');
 
   const replyUrl = `mailto:${escapeHtml(data.email)}?subject=Re:%20The%20Founder%E2%80%99s%20Next%20Move%20%E2%80%94%20${encodeURIComponent(data.submissionRef)}`;
-  const reviewUrl = getMasterclassReviewUrl(data.submissionRef);
+  const worksheetTargetId = data.submissionId || data.submissionRef;
+  const reviewUrl = getMasterclassReviewUrl(worksheetTargetId);
+  const pdfDownloadUrl = getMasterclassWorksheetPdfUrl(worksheetTargetId);
 
   const template = loadMasterclassTemplate('masterclass-staff-briefing.html');
   if (template) {
@@ -1730,6 +1761,7 @@ function buildMasterclassStaffBriefingHtml(data: {
       submission_ref: escapeHtml(data.submissionRef),
       review_url: reviewUrl,
       reply_url: replyUrl,
+      pdf_download_url: pdfDownloadUrl,
       stage_sections_html: stageSectionsHtml,
     });
   }
@@ -1804,6 +1836,10 @@ function buildMasterclassStaffBriefingHtml(data: {
                   <td style="padding: 15px 0; width: 170px; font-size: 12px; font-weight: 600; letter-spacing: 1.44px; text-transform: uppercase; color: #9f6511;">WORKSHEET REF</td>
                   <td style="padding: 15px 0; font-size: 15px; font-weight: 500; color: #1b2637;">${escapeHtml(data.submissionRef)}</td>
                 </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 15px 0; width: 170px; font-size: 12px; font-weight: 600; letter-spacing: 1.44px; text-transform: uppercase; color: #9f6511;">WORKSHEET PDF</td>
+                  <td style="padding: 15px 0; font-size: 15px; font-weight: 500; color: #1b2637;"><a href="${pdfDownloadUrl}" target="_blank" style="color: #9f6511; font-weight: 600; text-decoration: underline;">Download Executive PDF Dossier &darr;</a></td>
+                </tr>
               </table>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 32px; margin-bottom: 24px;">
                 <tr>
@@ -1813,6 +1849,11 @@ function buildMasterclassStaffBriefingHtml(data: {
                         <td style="padding-right: 12px;">
                           <a href="${reviewUrl}" target="_blank" style="display: inline-block; background-color: #d0a35a; border: 1px solid #d0a35a; color: #010d20; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 15px; font-weight: 500; line-height: 22px; padding: 14px 28px; text-align: center; border-radius: 2px;">
                             Review WorkSheet&nbsp;&nbsp;&rarr;
+                          </a>
+                        </td>
+                        <td style="padding-right: 12px;">
+                          <a href="${pdfDownloadUrl}" target="_blank" style="display: inline-block; background-color: #021329; border: 1px solid #d0a35a; color: #d0a35a; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 22px; padding: 13px 24px; text-align: center; border-radius: 2px;">
+                            Download PDF&nbsp;&nbsp;&darr;
                           </a>
                         </td>
                         <td>
@@ -1858,9 +1899,12 @@ function buildMasterclassBookingStaffAlertHtml(data: {
   slotTime: string;
   timezone: string;
   submissionRef: string;
+  submissionId?: string;
 }): string {
   const replyUrl = `mailto:${escapeHtml(data.email)}?subject=Re:%20Strategic%20Review%20Confirmation%20(${encodeURIComponent(data.bookingRef)})`;
-  const reviewUrl = getMasterclassReviewUrl(data.submissionRef || data.bookingRef);
+  const targetRef = data.submissionId || data.submissionRef || data.bookingRef;
+  const reviewUrl = getMasterclassReviewUrl(targetRef);
+  const pdfDownloadUrl = getMasterclassWorksheetPdfUrl(targetRef);
   const template = loadMasterclassTemplate('masterclass-booking-staff-alert.html');
 
   if (template) {
@@ -1879,6 +1923,7 @@ function buildMasterclassBookingStaffAlertHtml(data: {
       meeting_passcode: escapeHtml(LIONEL_MEETING_ROOM.passcode),
       review_url: reviewUrl,
       reply_url: replyUrl,
+      pdf_download_url: pdfDownloadUrl,
     });
   }
 
@@ -1949,6 +1994,10 @@ function buildMasterclassBookingStaffAlertHtml(data: {
                   <td style="padding: 15px 0; font-size: 15px; font-weight: 500; color: #1b2637;">${escapeHtml(data.submissionRef)}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 15px 0; width: 170px; font-size: 12px; font-weight: 600; letter-spacing: 1.44px; text-transform: uppercase; color: #9f6511;">WORKSHEET PDF</td>
+                  <td style="padding: 15px 0; font-size: 15px; font-weight: 500; color: #1b2637;"><a href="${pdfDownloadUrl}" target="_blank" style="color: #9f6511; font-weight: 600; text-decoration: underline;">Download Executive PDF Dossier &darr;</a></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
                   <td style="padding: 15px 0; width: 170px; font-size: 12px; font-weight: 600; letter-spacing: 1.44px; text-transform: uppercase; color: #9f6511;">BOOKING REF</td>
                   <td style="padding: 15px 0; font-size: 15px; font-weight: 500; color: #1b2637;">${escapeHtml(data.bookingRef)}</td>
                 </tr>
@@ -1971,6 +2020,11 @@ function buildMasterclassBookingStaffAlertHtml(data: {
                         <td style="padding-right: 12px;">
                           <a href="${reviewUrl}" target="_blank" style="display: inline-block; background-color: #d0a35a; border: 1px solid #d0a35a; color: #010d20; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 15px; font-weight: 500; line-height: 22px; padding: 14px 28px; text-align: center; border-radius: 2px;">
                             Review WorkSheet&nbsp;&nbsp;&rarr;
+                          </a>
+                        </td>
+                        <td style="padding-right: 12px;">
+                          <a href="${pdfDownloadUrl}" target="_blank" style="display: inline-block; background-color: #021329; border: 1px solid #d0a35a; color: #d0a35a; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 22px; padding: 13px 24px; text-align: center; border-radius: 2px;">
+                            Download PDF&nbsp;&nbsp;&darr;
                           </a>
                         </td>
                         <td>
@@ -2009,6 +2063,7 @@ function buildMasterclassBookingStaffAlertHtml(data: {
 
 export async function sendWorkbookSubmissionNotifications(data: {
   submissionRef: string;
+  submissionId?: string;
   fullName: string;
   email: string;
   company: string;
@@ -3217,6 +3272,68 @@ export async function getWorksheetReviewDossier(refOrQuery?: string): Promise<Wo
   };
 }
 
+export async function getMasterclassWorksheetPdfBuffer(
+  worksheetIdOrRef: string
+): Promise<{ buffer: Buffer; filename: string; submission: any; dossier: WorksheetReviewDossier } | null> {
+  const dossier = await getWorksheetReviewDossier(worksheetIdOrRef);
+  const { submission, booking, enrollment } = dossier;
+
+  if (!submission && !booking) {
+    return null;
+  }
+
+  const rawFormData = submission?.formData || {};
+  let parsedFormData: Record<string, any> = {};
+  if (typeof rawFormData === 'string') {
+    try {
+      parsedFormData = JSON.parse(rawFormData);
+    } catch {
+      parsedFormData = {};
+    }
+  } else if (rawFormData && typeof rawFormData === 'object') {
+    parsedFormData = rawFormData;
+  }
+
+  const rawNotes = submission?.personalNotes || {};
+  let parsedNotes: Record<string, any> = {};
+  if (typeof rawNotes === 'string') {
+    try {
+      parsedNotes = JSON.parse(rawNotes);
+    } catch {
+      parsedNotes = {};
+    }
+  } else if (rawNotes && typeof rawNotes === 'object') {
+    parsedNotes = rawNotes;
+  }
+
+  const buffer = generateMasterclassWorksheetPdf({
+    submissionRef: submission?.submissionRef || booking?.bookingRef || worksheetIdOrRef,
+    fullName: submission?.fullName || booking?.fullName || enrollment?.fullName || 'Masterclass Participant',
+    email: submission?.email || booking?.email || enrollment?.email || '',
+    company: submission?.company || booking?.company || enrollment?.company || 'Organization',
+    role: submission?.role || enrollment?.role || 'Executive',
+    phone: submission?.phone || enrollment?.phone || '',
+    submittedAt: submission?.submittedAt || submission?.createdAt || undefined,
+    status: submission?.status || 'submitted',
+    courseProgress: enrollment?.courseProgress || (submission?.status === 'submitted' ? 100 : 75),
+    currentStage: submission?.currentStage || enrollment?.currentStage || 4,
+    bookingRef: booking?.bookingRef,
+    slotTime: booking?.slotTime,
+    formData: parsedFormData,
+    personalNotes: parsedNotes,
+  });
+
+  const refClean = (submission?.submissionRef || booking?.bookingRef || worksheetIdOrRef).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `WorkSheet-${refClean}.pdf`;
+
+  return {
+    buffer,
+    filename,
+    submission,
+    dossier,
+  };
+}
+
 export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetReviewDossier): string {
   const { submission, booking, recentSubmissions, found } = dossier;
 
@@ -3986,6 +4103,10 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       </div>
 
       <div class="topbar-controls">
+        <a href="/masterclass/internal-review/${encodeURIComponent(submissionRef)}/pdf" class="btn btn-navy" download>
+          📄 Download PDF
+        </a>
+
         <button onclick="window.print()" class="btn btn-navy">
           🖨️ Print Dossier
         </button>

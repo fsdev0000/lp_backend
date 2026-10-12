@@ -18,6 +18,8 @@ import {
   getMasterclassVideosList,
   getWorksheetReviewDossier,
   renderWorksheetReviewHtml,
+  getMasterclassWorksheetPdfBuffer,
+  getMasterclassWorksheetPdfUrl,
 } from '../../services/masterclassService';
 import { createRateLimiter } from '../../middleware/rateLimiter';
 
@@ -1346,6 +1348,59 @@ masterclassRouter.get('/videos', async (req: Request, res: Response) => {
  *       200:
  *         description: Responsive HTML WorkSheet review dossier
  */
+const handleWorksheetPdfDownload = async (req: Request, res: Response) => {
+  try {
+    const extractString = (val: unknown): string => {
+      if (typeof val === 'string') return val.trim();
+      if (Array.isArray(val) && typeof val[0] === 'string') return val[0].trim();
+      return '';
+    };
+
+    const rawRef =
+      extractString(req.params.worksheetId) ||
+      extractString(req.params.submissionId) ||
+      extractString(req.params.ref) ||
+      extractString(req.query.worksheetId) ||
+      extractString(req.query.ref) ||
+      extractString(req.query.booking_ref) ||
+      extractString(req.query.worksheet_ref) ||
+      extractString(req.query.bookingRef) ||
+      extractString(req.query.submissionRef) ||
+      extractString(req.query.email) ||
+      extractString(req.query.id);
+
+    if (!rawRef) {
+      return res.status(400).json({
+        success: false,
+        error: 'BAD_REQUEST',
+        message: 'A valid worksheetId or submission reference is required to download the PDF.',
+      });
+    }
+
+    const pdfData = await getMasterclassWorksheetPdfBuffer(rawRef);
+    if (!pdfData) {
+      return res.status(404).json({
+        success: false,
+        error: 'NOT_FOUND',
+        message: `WorkSheet submission '${rawRef}' was not found.`,
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdfData.filename}"`);
+    res.setHeader('Content-Length', pdfData.buffer.length);
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    return res.end(pdfData.buffer);
+  } catch (err: any) {
+    console.error('[Masterclass] Error generating worksheet PDF download:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'PDF_GENERATION_ERROR',
+      message: err.message || 'Failed to generate worksheet PDF.',
+    });
+  }
+};
+
 const handleWorksheetReview = async (req: Request, res: Response) => {
   try {
     const extractString = (val: unknown): string => {
@@ -1355,20 +1410,125 @@ const handleWorksheetReview = async (req: Request, res: Response) => {
     };
 
     const rawRef =
+      extractString(req.params.worksheetId) ||
       extractString(req.params.ref) ||
+      extractString(req.params.submissionId) ||
+      extractString(req.query.worksheetId) ||
       extractString(req.query.ref) ||
       extractString(req.query.booking_ref) ||
       extractString(req.query.worksheet_ref) ||
       extractString(req.query.bookingRef) ||
       extractString(req.query.submissionRef) ||
+      extractString(req.query.email) ||
       extractString(req.query.id);
+
+    // If PDF format was explicitly requested via ?format=pdf
+    if (req.query.format === 'pdf') {
+      return handleWorksheetPdfDownload(req, res);
+    }
 
     const dossier = await getWorksheetReviewDossier(rawRef);
 
-    // If client requested JSON via Accept header or format=json
-    if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+    if (!dossier.found && !dossier.submission && !dossier.booking && !dossier.enrollment) {
+      if (req.query.format === 'html') {
+        return res.status(404).send(`
+          <div style="font-family:sans-serif;padding:40px;text-align:center;">
+            <h2>WorkSheet Not Found</h2>
+            <p>No worksheet responses or progress found for reference: ${rawRef || 'None'}</p>
+          </div>
+        `);
+      }
+      return res.status(404).json({
+        success: false,
+        error: 'NOT_FOUND',
+        message: `Worksheet responses and progress were not found for '${rawRef}'.`,
+      });
+    }
+
+    const { submission, booking, enrollment } = dossier;
+    const userEmail = submission?.email || enrollment?.email || booking?.email || '';
+    const userFullName = submission?.fullName || enrollment?.fullName || booking?.fullName || '';
+    const userCompany = submission?.company || enrollment?.company || booking?.company || '';
+    const userRole = submission?.role || enrollment?.role || '';
+    const userPhone = submission?.phone || enrollment?.phone || '';
+
+    const courseProgress =
+      enrollment?.courseProgress ??
+      (submission?.status === 'submitted'
+        ? 100
+        : Math.min(100, Math.round(((submission?.currentStage || 1) / 4) * 100)));
+    const currentStage = submission?.currentStage || enrollment?.currentStage || 1;
+
+    // Check if client explicitly requested HTML (e.g. ?format=html) or route was legacy /review without JSON request
+    const isExplicitHtml = req.query.format === 'html';
+    const isLegacyReviewPath = req.path.startsWith('/review');
+    const prefersJson =
+      req.path.includes('internal-review') ||
+      req.query.format === 'json' ||
+      req.headers.accept?.includes('application/json');
+
+    // Return structured JSON for frontend consumption and API clients
+    if (!isExplicitHtml && (prefersJson || !isLegacyReviewPath)) {
+      const pdfDownloadUrl = getMasterclassWorksheetPdfUrl(
+        submission?.id || submission?.submissionRef || rawRef
+      );
+
       return res.status(200).json({
         success: true,
+        worksheetId: submission?.id || dossier.searchRef,
+        submissionRef: submission?.submissionRef || dossier.searchRef,
+        user: {
+          email: userEmail,
+          fullName: userFullName,
+          company: userCompany,
+          role: userRole,
+          phone: userPhone,
+        },
+        progress: {
+          courseProgress,
+          currentStage,
+          totalStages: 4,
+          status: submission?.status || 'submitted',
+          isCompleted: submission?.status === 'submitted' || courseProgress >= 100,
+          lastSavedAt: submission?.lastSavedAt ? new Date(submission.lastSavedAt).toISOString() : null,
+          submittedAt: submission?.submittedAt ? new Date(submission.submittedAt).toISOString() : null,
+        },
+        worksheet: {
+          id: submission?.id,
+          submissionRef: submission?.submissionRef,
+          status: submission?.status || 'submitted',
+          currentStage: submission?.currentStage || 1,
+          formData: submission?.formData || {},
+          responses: submission?.formData || {},
+          personalNotes: submission?.personalNotes || {},
+          submittedAt: submission?.submittedAt ? new Date(submission.submittedAt).toISOString() : null,
+          lastSavedAt: submission?.lastSavedAt ? new Date(submission.lastSavedAt).toISOString() : null,
+        },
+        responses: submission?.formData || {},
+        personalNotes: submission?.personalNotes || {},
+        enrollment: enrollment
+          ? {
+              id: enrollment.id,
+              email: enrollment.email,
+              accessGranted: enrollment.accessGranted,
+              paymentStatus: enrollment.paymentStatus,
+              courseProgress: enrollment.courseProgress,
+              currentStage: enrollment.currentStage,
+              paidAt: enrollment.paidAt ? new Date(enrollment.paidAt).toISOString() : null,
+            }
+          : null,
+        booking: booking
+          ? {
+              id: booking.id,
+              bookingRef: booking.bookingRef,
+              slotTime: booking.slotTime,
+              scheduledAt: booking.scheduledAt ? new Date(booking.scheduledAt).toISOString() : null,
+              timezone: booking.timezone,
+              status: booking.status,
+              meetingLink: booking.meetingLink,
+            }
+          : null,
+        pdfDownloadUrl,
         dossier,
       });
     }
@@ -1378,6 +1538,13 @@ const handleWorksheetReview = async (req: Request, res: Response) => {
     return res.status(200).send(html);
   } catch (err: any) {
     console.error('[Masterclass] Error rendering review dossier:', err);
+    if (req.headers.accept?.includes('application/json') || req.path.includes('internal-review')) {
+      return res.status(500).json({
+        success: false,
+        error: 'SERVER_ERROR',
+        message: err.message || 'Failed to load review dossier.',
+      });
+    }
     return res.status(500).send(`
       <div style="font-family:sans-serif;padding:40px;text-align:center;">
         <h2>Error Loading Review Dossier</h2>
@@ -1388,7 +1555,177 @@ const handleWorksheetReview = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * @openapi
+ * /masterclass/internal-review/{worksheetId}:
+ *   get:
+ *     summary: Masterclass Internal Review Data and User Progress
+ *     description: Returns the user's previously saved Masterclass worksheet responses, workbook data, and course progress associated with their email. Consumed by frontend page `/masterclass/internal-review/{worksheetId}` when Lionel reviews the participant.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: path
+ *         name: worksheetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: WorkSheet reference (e.g. FNM-2026-9281), UUID id, booking reference (e.g. MBK-2026-7667), or user email
+ *         example: FNM-2026-9281
+ *       - in: query
+ *         name: email
+ *         schema:
+ *           type: string
+ *         description: Optional user email to query or verify progress
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, html, pdf]
+ *         description: Response format override (defaults to json for internal-review)
+ *     responses:
+ *       200:
+ *         description: Full user worksheet responses, progress, and enrollment details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 worksheetId:
+ *                   type: string
+ *                   example: "f83a6b57-6014-419b-a08b-63a233b4b54e"
+ *                 submissionRef:
+ *                   type: string
+ *                   example: "FNM-2026-9281"
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     email:
+ *                       type: string
+ *                       example: "founder@enterprise.com"
+ *                     fullName:
+ *                       type: string
+ *                       example: "Alexander Vance"
+ *                     company:
+ *                       type: string
+ *                       example: "Vance Aerospace"
+ *                     role:
+ *                       type: string
+ *                       example: "Chief Executive Officer"
+ *                     phone:
+ *                       type: string
+ *                       example: "+971501234567"
+ *                 progress:
+ *                   type: object
+ *                   properties:
+ *                     courseProgress:
+ *                       type: integer
+ *                       example: 100
+ *                     currentStage:
+ *                       type: integer
+ *                       example: 4
+ *                     totalStages:
+ *                       type: integer
+ *                       example: 4
+ *                     status:
+ *                       type: string
+ *                       example: "submitted"
+ *                     isCompleted:
+ *                       type: boolean
+ *                       example: true
+ *                     lastSavedAt:
+ *                       type: string
+ *                       format: date-time
+ *                     submittedAt:
+ *                       type: string
+ *                       format: date-time
+ *                 responses:
+ *                   type: object
+ *                   description: User's previously saved answers across all 4 stages
+ *                   example:
+ *                     stage1_nextStage: "Global fleet expansion"
+ *                     stage1_possibility: "10x capability enhancement"
+ *                     stage1_strength: "Proprietary propulsion tech"
+ *                     stage2_changes: "High regulatory scrutiny"
+ *                     stage3_founderStrength: "Direct architectural vision"
+ *                     stage4_priority30Days: "Establish regional command center"
+ *                 personalNotes:
+ *                   type: object
+ *                   description: Personal reflection notes recorded by the participant
+ *                 enrollment:
+ *                   type: object
+ *                   nullable: true
+ *                 booking:
+ *                   type: object
+ *                   nullable: true
+ *                 pdfDownloadUrl:
+ *                   type: string
+ *                   example: "https://api.leadersperformance.ae/masterclass/internal-review/FNM-2026-9281/pdf"
+ *       404:
+ *         description: Worksheet or participant progress not found
+ *
+ * /masterclass/internal-review/{worksheetId}/pdf:
+ *   get:
+ *     summary: Download Worksheet PDF Dossier (Internal Review Route)
+ *     description: Generates and downloads the executive PDF dossier of the user's completed or in-progress Masterclass worksheet.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: path
+ *         name: worksheetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: WorkSheet reference, UUID, or email
+ *         example: FNM-2026-9281
+ *     responses:
+ *       200:
+ *         description: Executive PDF file attachment
+ *         content:
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: WorkSheet not found
+ *
+ * /masterclass/worksheet/{worksheetId}/pdf:
+ *   get:
+ *     summary: Download Worksheet PDF Dossier (Email Download Link Route)
+ *     description: Direct download link endpoint sent in email notifications to Lionel.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: path
+ *         name: worksheetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: WorkSheet reference, UUID, or email
+ *         example: FNM-2026-9281
+ *     responses:
+ *       200:
+ *         description: Executive PDF file attachment
+ *         content:
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: WorkSheet not found
+ */
+masterclassRouter.get('/internal-review', handleWorksheetReview);
+masterclassRouter.get('/internal-review/:worksheetId', handleWorksheetReview);
+masterclassRouter.get('/internal-review/:worksheetId/pdf', handleWorksheetPdfDownload);
+
+masterclassRouter.get('/worksheet/:worksheetId/pdf', handleWorksheetPdfDownload);
+masterclassRouter.get('/submission/:submissionId/pdf', handleWorksheetPdfDownload);
+
 masterclassRouter.get('/review', handleWorksheetReview);
 masterclassRouter.get('/review/:ref', handleWorksheetReview);
+masterclassRouter.get('/review/:ref/pdf', handleWorksheetPdfDownload);
+
 
 
