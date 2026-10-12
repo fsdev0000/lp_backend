@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSecret } from '../../services/secrets';
 import { contactRateLimiter } from '../../middleware/rateLimiter';
+import { syncLeadAttribution, TechnicalAttribution } from '../../services/attributionService';
 
 export const contactRouter = Router();
 
@@ -13,6 +14,8 @@ export interface ContactPayload {
   role?: string;
   preferred_contact_method?: string;
   message?: string;
+  howDidYouHear?: string;
+  attribution?: TechnicalAttribution;
 }
 
 interface GHLConfig {
@@ -79,6 +82,8 @@ function normalizePayload(body: any): ContactPayload {
     role: (body.role || '').trim(),
     preferred_contact_method: preferredMethod,
     message: (body.message || body.preparingFor || '').trim(),
+    howDidYouHear: (body.howDidYouHear || body.how_did_you_hear || '').trim() || undefined,
+    attribution: body.attribution || undefined,
   };
 }
 
@@ -156,6 +161,31 @@ async function upsertGHLContact(payload: ContactPayload, config: GHLConfig): Pro
   if (payload.message) {
     customFields.push({ key: 'message', field_value: payload.message });
   }
+  if (payload.howDidYouHear) {
+    customFields.push({ key: 'how_did_you_hear', field_value: payload.howDidYouHear });
+    customFields.push({ name: 'Lead Source — User', value: payload.howDidYouHear } as any);
+  }
+  if (payload.attribution) {
+    const attr = payload.attribution;
+    const ft = attr.first_touch || {};
+    const lt = attr.latest_touch || {};
+
+    if (attr.utm_source) customFields.push({ name: 'UTM Source', value: attr.utm_source } as any);
+    if (attr.utm_medium) customFields.push({ name: 'UTM Medium', value: attr.utm_medium } as any);
+    if (attr.utm_campaign) customFields.push({ name: 'UTM Campaign', value: attr.utm_campaign } as any);
+    if (attr.utm_content) customFields.push({ name: 'UTM Content', value: attr.utm_content } as any);
+    if (attr.referrer) customFields.push({ name: 'Referrer', value: attr.referrer } as any);
+
+    const ftSource = ft.utm_source || ft.referrer || attr.utm_source || '';
+    const ltSource = lt.utm_source || lt.referrer || attr.utm_source || '';
+    const ftLanding = ft.landing_page || attr.landing_page || '';
+    const ltLanding = lt.landing_page || attr.landing_page || '';
+
+    if (ftSource) customFields.push({ name: 'Lead Source — First Touch', value: ftSource } as any);
+    if (ltSource) customFields.push({ name: 'Lead Source — Latest Touch', value: ltSource } as any);
+    if (ftLanding) customFields.push({ name: 'First Landing Page', value: ftLanding } as any);
+    if (ltLanding) customFields.push({ name: 'Latest Landing Page', value: ltLanding } as any);
+  }
 
   const body: Record<string, unknown> = {
     locationId,
@@ -231,6 +261,14 @@ async function sendInternalNotificationEmail(payload: ContactPayload, config: GH
             ${payload.preferred_contact_method || 'Email'}
           </td>
         </tr>
+        ${payload.howDidYouHear ? `
+        <tr style="background: #F9F7F2;">
+          <td style="font-weight: bold; color: #8B7355; border-bottom: 1px solid #E8E2D5;">How Found Us:</td>
+          <td style="border-bottom: 1px solid #E8E2D5; font-weight: bold; color: #1a1a1a;">
+            ${payload.howDidYouHear}
+          </td>
+        </tr>
+        ` : ''}
       </table>
 
       <div style="margin-top: 24px; padding: 18px; background: #F9F7F2; border-left: 4px solid #C49A45; border-radius: 2px;">
@@ -407,6 +445,25 @@ async function handleContact(req: Request, res: Response): Promise<void> {
     } catch (notifErr) {
       console.warn('[Contact Us] Internal notification email error (contact was saved):', notifErr);
     }
+
+    // 3. Persist and link attribution record in PostgreSQL
+    syncLeadAttribution(
+      {
+        email: payload.email,
+        leadName: `${payload.first_name} ${payload.last_name}`,
+        leadForm: 'contact',
+        howDidYouHear: payload.howDidYouHear,
+        attribution: payload.attribution,
+        phone: payload.phone,
+        ghlContactId: contactId || undefined,
+        tags: [
+          'Contact Us Form',
+          'Website Lead',
+          `Preferred: ${(payload.preferred_contact_method || 'email').toUpperCase()}`,
+        ],
+      },
+      req
+    ).catch((attrErr) => console.warn('[Contact Us] Attribution tracking warning:', attrErr));
 
     // Return success response
     res.status(200).json({ success: true, contactId });

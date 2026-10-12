@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { createRateLimiter } from '../../middleware/rateLimiter';
 import { upsertContact } from '../../services/ghl';
+import { syncLeadAttribution } from '../../services/attributionService';
 import {
   evaluateInvestmentRouting,
   generateUnmaskedReferenceNumber,
@@ -59,6 +60,7 @@ const Step1Schema = z
     roleTitle: z.string().trim().optional(),
     cityAndCountry: z.string().trim().optional(),
     location: z.string().trim().optional(),
+    howDidYouHear: z.string().trim().optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.role && !data.roleTitle) {
@@ -743,9 +745,26 @@ async function handleApplicationSubmission(req: Request, res: Response) {
             phone: payload.step1.phone,
             source: 'UNMASKED PRIVATE Application',
             tags,
+            howDidYouHear: (payload.step1 as any).howDidYouHear,
+            attribution: payload.tracking,
           }),
         { retries: 3, delayMs: 500, context: 'GHL Contact Upsert' }
       );
+
+      // Persist and link attribution record in PostgreSQL
+      syncLeadAttribution(
+        {
+          email: payload.step1.email,
+          leadName: payload.step1.fullName,
+          leadForm: 'unmasked_private',
+          howDidYouHear: (payload.step1 as any).howDidYouHear,
+          attribution: payload.tracking,
+          phone: payload.step1.phone,
+          ghlContactId: contactId,
+          tags,
+        },
+        req
+      ).catch((attrErr) => console.warn('[Unmasked Private] Attribution sync notice:', attrErr));
 
       // Trigger immediate briefing email to Lionel & staff (strictly disabled during tests)
       if (

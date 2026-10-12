@@ -118,6 +118,7 @@ import { articlesRoutes } from './api/routes/articles.routes';
 import { unmaskedPrivateRouter } from './api/routes/unmaskedPrivate';
 import { newsletterRouter } from './api/routes/newsletter';
 import { masterclassRouter } from './api/routes/masterclass';
+import { attributionRouter } from './api/routes/attribution';
 
 app.use(cors(corsOptions));
 app.use(
@@ -133,6 +134,9 @@ app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);
 app.use('/api', contactRouter);
 app.use('/api/v1', contactRouter);
+app.use('/attribution', attributionRouter);
+app.use('/api/attribution', attributionRouter);
+app.use('/api/v1/attribution', attributionRouter);
 app.use('/api/newsletter', newsletterRouter);
 app.use('/api/v1/newsletter', newsletterRouter);
 app.use('/newsletter', newsletterRouter);

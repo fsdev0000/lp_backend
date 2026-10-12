@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
 import { sendAdminBriefing } from '../../services/email';
+import { syncLeadAttribution } from '../../services/attributionService';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
 import OpenAI from 'openai';
@@ -454,8 +455,25 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
           email: founder.email,
           firstName: founder.founder || founder.name,
           phone: founder.phone,
-          tags: ['Founder Pressure Scan']
+          tags: ['Founder Pressure Scan'],
+          howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear,
+          attribution: req.body.attribution,
         });
+
+        // Persist lead attribution to PostgreSQL
+        syncLeadAttribution(
+          {
+            email: founder.email,
+            leadName: founder.founder || founder.name,
+            leadForm: 'founder_pressure_scan',
+            howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear,
+            attribution: req.body.attribution,
+            phone: founder.phone,
+            ghlContactId: contactId,
+            tags: ['Founder Pressure Scan'],
+          },
+          req
+        ).catch((attrErr) => console.warn('[Pressure Scan] Attribution tracking notice:', attrErr));
 
         if (contactId) {
           await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);

@@ -281,7 +281,35 @@ model MasterclassBooking {
   @@index([email])
   @@map("masterclass_bookings")
 }
+model AttributionVisit {
+  id            String    @id @default(uuid())
+  anonymousId   String?   @map("anonymous_id")
+  module        String?   // e.g. 'masterclass', 'unmasked-private', 'diagnostics', 'roundtable', 'contact', 'home'
+  landingPage   String    @map("landing_page")
+  referrer      String?
+  utmSource     String?   @map("utm_source")
+  utmMedium     String?   @map("utm_medium")
+  utmCampaign   String?   @map("utm_campaign")
+  utmTerm       String?   @map("utm_term")
+  utmContent    String?   @map("utm_content")
+  ipAddress     String?   @map("ip_address")
+  country       String?
+  city          String?
+  region        String?
+  timezone      String?
+  userAgent     String?   @map("user_agent")
+  device        String?
+  email         String?   // Populated when visitor converts on any lead form
+  leadName      String?   @map("lead_name")
+  leadForm      String?   @map("lead_form") // e.g. 'contact', 'unmasked_private', 'scan', 'masterclass'
+  howDidYouHear String?   @map("how_did_you_hear")
+  ghlContactId  String?   @map("ghl_contact_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-
-
-
+  @@index([anonymousId])
+  @@index([email])
+  @@index([utmSource])
+  @@index([createdAt])
+  @@map("attribution_visits")
+}
