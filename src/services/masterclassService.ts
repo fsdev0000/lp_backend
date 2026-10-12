@@ -1248,6 +1248,30 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
     if (enr) enrollmentId = enr.id;
   }
 
+  // Check if participant already has an active confirmed booking for this submission
+  if (submissionId) {
+    const existingUserBooking = await prisma.masterclassBooking.findFirst({
+      where: {
+        submissionId,
+        status: 'confirmed',
+      },
+    });
+    if (existingUserBooking) {
+      return {
+        success: true,
+        alreadyBooked: true,
+        bookingId: existingUserBooking.id,
+        bookingRef: existingUserBooking.bookingRef,
+        slotTime: existingUserBooking.slotTime,
+        meetingLink: existingUserBooking.meetingLink || LIONEL_MEETING_ROOM.url,
+        meetingId: LIONEL_MEETING_ROOM.meetingId,
+        passcode: LIONEL_MEETING_ROOM.passcode,
+        timezone: existingUserBooking.timezone || tz,
+        message: 'Your 1-on-1 strategic review is already confirmed and booked.',
+      };
+    }
+  }
+
   // Parse date and canonical slot
   const rawSlot = payload.selectedSlot || '';
   const dateMatch = rawSlot.match(/\d{4}-\d{2}-\d{2}/) || (payload.scheduledAt ? payload.scheduledAt.match(/\d{4}-\d{2}-\d{2}/) : null);
