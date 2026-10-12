@@ -880,23 +880,22 @@ export async function getSubmission(submissionRefOrId: string) {
 // ==========================================
 // CANONICAL MASTERCLASS STRATEGIC REVIEW SLOTS
 // ==========================================
-// 1. Availability: 1:30 PM to 7:00 PM Dubai time (Asia/Dubai).
-// 2. Session duration: 60 minutes per booking.
-// 3. Rest time: 30-minute break between consecutive sessions.
+// 1. Availability: 1:30 PM to 4:30 PM Dubai time (Asia/Dubai).
+// 2. Session duration: 45 minutes per booking.
+// 3. Rest time: 15-minute break between consecutive sessions.
 // 4. Expected slots (Dubai Time / Asia/Dubai / GST / UTC+4):
-//    - Slot 1: 1:30 PM – 2:30 PM (13:30 – 14:30)
-//    - Slot 2: 3:00 PM – 4:00 PM (15:00 – 16:00)
-//    - Slot 3: 4:30 PM – 5:30 PM (16:30 – 17:30)
-//    - Slot 4: 6:00 PM – 7:00 PM (18:00 – 19:00)
+//    - Slot 1: 1:30 PM – 2:15 PM (13:30 – 14:15) [15-min break until 2:30 PM]
+//    - Slot 2: 2:30 PM – 3:15 PM (14:30 – 15:15) [15-min break until 3:30 PM]
+//    - Slot 3: 3:30 PM – 4:15 PM (15:30 – 16:15) [15-min break until 4:30 PM]
 
 export interface CanonicalMasterclassSlot {
   slotIndex: number;
-  time24: string;           // "13:30", "15:00", "16:30", "18:00"
-  startDubai: string;       // "13:30", "15:00", "16:30", "18:00"
-  endDubai: string;         // "14:30", "16:00", "17:30", "19:00"
-  labelDubai: string;       // "1:30 PM – 2:30 PM"
-  durationMinutes: number;  // 60
-  bufferMinutes: number;    // 30
+  time24: string;           // "13:30", "14:30", "15:30"
+  startDubai: string;       // "13:30", "14:30", "15:30"
+  endDubai: string;         // "14:15", "15:15", "16:15"
+  labelDubai: string;       // "1:30 PM – 2:15 PM", "2:30 PM – 3:15 PM", "3:30 PM – 4:15 PM"
+  durationMinutes: number;  // 45
+  bufferMinutes: number;    // 15
 }
 
 export const CANONICAL_MASTERCLASS_SLOTS: CanonicalMasterclassSlot[] = [
@@ -904,37 +903,28 @@ export const CANONICAL_MASTERCLASS_SLOTS: CanonicalMasterclassSlot[] = [
     slotIndex: 1,
     time24: '13:30',
     startDubai: '13:30',
-    endDubai: '14:30',
-    labelDubai: '1:30 PM – 2:30 PM',
-    durationMinutes: 60,
-    bufferMinutes: 30,
+    endDubai: '14:15',
+    labelDubai: '1:30 PM – 2:15 PM',
+    durationMinutes: 45,
+    bufferMinutes: 15,
   },
   {
     slotIndex: 2,
-    time24: '15:00',
-    startDubai: '15:00',
-    endDubai: '16:00',
-    labelDubai: '3:00 PM – 4:00 PM',
-    durationMinutes: 60,
-    bufferMinutes: 30,
+    time24: '14:30',
+    startDubai: '14:30',
+    endDubai: '15:15',
+    labelDubai: '2:30 PM – 3:15 PM',
+    durationMinutes: 45,
+    bufferMinutes: 15,
   },
   {
     slotIndex: 3,
-    time24: '16:30',
-    startDubai: '16:30',
-    endDubai: '17:30',
-    labelDubai: '4:30 PM – 5:30 PM',
-    durationMinutes: 60,
-    bufferMinutes: 30,
-  },
-  {
-    slotIndex: 4,
-    time24: '18:00',
-    startDubai: '18:00',
-    endDubai: '19:00',
-    labelDubai: '6:00 PM – 7:00 PM',
-    durationMinutes: 60,
-    bufferMinutes: 30,
+    time24: '15:30',
+    startDubai: '15:30',
+    endDubai: '16:15',
+    labelDubai: '3:30 PM – 4:15 PM',
+    durationMinutes: 45,
+    bufferMinutes: 15,
   },
 ];
 
@@ -1264,16 +1254,15 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
     dateStr = nextDay.toISOString().split('T')[0];
   }
 
-  // Match slot to canonical definitions (13:30, 15:00, 16:30, 18:00)
+  // Match slot to canonical definitions (13:30, 14:30, 15:30)
   const matchedSlot = CANONICAL_MASTERCLASS_SLOTS.find(
     (s) =>
       rawSlot.includes(s.time24) ||
       rawSlot.includes(s.startDubai) ||
       rawSlot.includes(s.labelDubai) ||
       (s.slotIndex === 1 && (rawSlot.includes('1:30') || rawSlot.includes('01:30') || rawSlot.includes('13:30'))) ||
-      (s.slotIndex === 2 && (rawSlot.includes('3:00') || rawSlot.includes('03:00') || rawSlot.includes('15:00'))) ||
-      (s.slotIndex === 3 && (rawSlot.includes('4:30') || rawSlot.includes('04:30') || rawSlot.includes('16:30'))) ||
-      (s.slotIndex === 4 && (rawSlot.includes('6:00') || rawSlot.includes('06:00') || rawSlot.includes('18:00')))
+      (s.slotIndex === 2 && (rawSlot.includes('2:30') || rawSlot.includes('02:30') || rawSlot.includes('14:30'))) ||
+      (s.slotIndex === 3 && (rawSlot.includes('3:30') || rawSlot.includes('03:30') || rawSlot.includes('15:30')))
   ) || CANONICAL_MASTERCLASS_SLOTS[0];
 
   const { startDate, endDate } = getSlotDatesUtc(dateStr, matchedSlot);
@@ -1431,9 +1420,8 @@ export async function rescheduleReviewSlot(payload: MasterclassReschedulePayload
       payload.newSlotTime.includes(s.startDubai) ||
       payload.newSlotTime.includes(s.labelDubai) ||
       (s.slotIndex === 1 && (payload.newSlotTime.includes('1:30') || payload.newSlotTime.includes('01:30') || payload.newSlotTime.includes('13:30'))) ||
-      (s.slotIndex === 2 && (payload.newSlotTime.includes('3:00') || payload.newSlotTime.includes('03:00') || payload.newSlotTime.includes('15:00'))) ||
-      (s.slotIndex === 3 && (payload.newSlotTime.includes('4:30') || payload.newSlotTime.includes('04:30') || payload.newSlotTime.includes('16:30'))) ||
-      (s.slotIndex === 4 && (payload.newSlotTime.includes('6:00') || payload.newSlotTime.includes('06:00') || payload.newSlotTime.includes('18:00')))
+      (s.slotIndex === 2 && (payload.newSlotTime.includes('2:30') || payload.newSlotTime.includes('02:30') || payload.newSlotTime.includes('14:30'))) ||
+      (s.slotIndex === 3 && (payload.newSlotTime.includes('3:30') || payload.newSlotTime.includes('03:30') || payload.newSlotTime.includes('15:30')))
   ) || CANONICAL_MASTERCLASS_SLOTS[0];
 
   const tz = payload.timezone || booking.timezone;
