@@ -1114,6 +1114,23 @@ export async function getMasterclassMonthAvailability(
         if (ghlDaySlots.length === 0) {
           continue;
         }
+
+        // Ensure canonical slot is actually available in GHL (Lionel not booked)
+        const isSlotFreeInGhl = ghlDaySlots.some((ghlSlot) => {
+          const [ghlH, ghlM] = ghlSlot.split(':').map(Number);
+          const [canH, canM] = canonical.time24.split(':').map(Number);
+          const ghlMins = (ghlH || 0) * 60 + (ghlM || 0);
+          const canMins = (canH || 0) * 60 + (canM || 0);
+          return (
+            ghlSlot.startsWith(canonical.time24) ||
+            ghlSlot.startsWith(canonical.startDubai) ||
+            Math.abs(ghlMins - canMins) < 15
+          );
+        });
+
+        if (!isSlotFreeInGhl) {
+          continue;
+        }
       }
 
       availableSlotsForDay.push(canonical.time24);
@@ -1278,6 +1295,35 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
 
   const { startDate, endDate } = getSlotDatesUtc(dateStr, matchedSlot);
   const formattedSlot = formatSlotForParticipant(dateStr, matchedSlot, tz);
+
+  // ── Existing Participant Booking Check ──
+  // If participant has already booked their 1-on-1 strategic review, return existing confirmed booking
+  const existingUserBooking = await prisma.masterclassBooking.findFirst({
+    where: {
+      status: 'confirmed',
+      OR: [
+        { email: { equals: normalizedEmail, mode: 'insensitive' } },
+        ...(submissionId ? [{ submissionId }] : []),
+        ...(enrollmentId ? [{ enrollmentId }] : []),
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (existingUserBooking) {
+    return {
+      success: true,
+      alreadyBooked: true,
+      bookingRef: existingUserBooking.bookingRef,
+      bookingId: existingUserBooking.id,
+      selectedSlot: existingUserBooking.slotTime,
+      slotTime: existingUserBooking.slotTime,
+      scheduledAt: existingUserBooking.scheduledAt,
+      timezone: existingUserBooking.timezone,
+      meetingLink: existingUserBooking.meetingLink || LIONEL_MEETING_ROOM.url,
+      message: `You have already confirmed your 1-on-1 strategic review session for ${existingUserBooking.slotTime}.`,
+    };
+  }
 
   // ── Conflict Prevention ──
   // Check if this slot on this date is already booked by another confirmed participant
@@ -2073,7 +2119,7 @@ export async function sendWorkbookSubmissionNotifications(data: {
 }) {
   const subject = `The Founder’s Next Move — WorkSheet Received (${data.submissionRef})`;
   const frontendUrl = process.env.FRONTEND_URL || 'https://leadersperformance.ae';
-  const bookingUrl = `${frontendUrl}/masterclass?step=booking&ref=${encodeURIComponent(data.submissionRef)}`;
+  const bookingUrl = `${frontendUrl}/masterclass?step=booking&ref=${encodeURIComponent(data.submissionRef)}&email=${encodeURIComponent(data.email)}`;
 
   const template = loadMasterclassTemplate('masterclass-worksheet-confirmation.html');
   let html = '';
@@ -2962,7 +3008,22 @@ export async function getMasterclassVideosList(expiresInSeconds: number = 315360
  * Returns dynamic configuration, questions for all 4 stages, and private video & thumbnail URLs.
  * Recognizes user if email is supplied.
  */
-export async function getMasterclassAppConfig(email?: string) {
+export async function getMasterclassAppConfig(email?: string, ref?: string) {
+  // If email not provided directly, resolve through submissionRef
+  if ((!email || !email.trim()) && ref && ref.trim()) {
+    try {
+      const sub = await prisma.masterclassWorkbookSubmission.findUnique({
+        where: { submissionRef: ref.trim() },
+        select: { email: true },
+      });
+      if (sub && sub.email) {
+        email = sub.email;
+      }
+    } catch (err: any) {
+      console.warn('[Masterclass Config] Ref resolution notice:', err.message);
+    }
+  }
+
   // 1. Fetch dynamic questions from DB
   const questionsConfig = await getMasterclassQuestionsConfig();
 
@@ -3043,6 +3104,21 @@ export async function getMasterclassAppConfig(email?: string) {
         }
       }
 
+      let latestBooking = enrollment.bookings[0] || null;
+      if (!latestBooking) {
+        latestBooking = await prisma.masterclassBooking.findFirst({
+          where: {
+            status: 'confirmed',
+            OR: [
+              { email: { equals: normalizedEmail, mode: 'insensitive' } },
+              { enrollmentId: enrollment.id },
+              ...(latestSubmission ? [{ submissionId: latestSubmission.id }] : []),
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
       return {
         success: true,
         userExists: true,
@@ -3063,12 +3139,89 @@ export async function getMasterclassAppConfig(email?: string) {
           paidAt: enrollment.paidAt,
         },
         draft: draftData,
-        booking: enrollment.bookings[0]
+        hasBooked: !!latestBooking,
+        isBookingDone: !!latestBooking,
+        booking: latestBooking
           ? {
-            bookingRef: enrollment.bookings[0].bookingRef,
-            slotTime: enrollment.bookings[0].slotTime,
-            timezone: enrollment.bookings[0].timezone,
-            status: enrollment.bookings[0].status,
+            id: latestBooking.id,
+            bookingRef: latestBooking.bookingRef,
+            slotTime: latestBooking.slotTime,
+            scheduledAt: latestBooking.scheduledAt,
+            timezone: latestBooking.timezone,
+            status: latestBooking.status,
+            meetingLink: latestBooking.meetingLink,
+          }
+          : null,
+        videos,
+        thumbnails,
+        welcomeVideo,
+        closingVideo,
+        ...questionsConfig,
+        stages: enrichedStages,
+      };
+    }
+
+    // Check if participant has submission records even without active enrollment
+    const submissionOnly = await prisma.masterclassWorkbookSubmission.findFirst({
+      where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (submissionOnly) {
+      let draftData = null;
+      try {
+        draftData = {
+          submissionRef: submissionOnly.submissionRef,
+          status: submissionOnly.status,
+          currentStage: submissionOnly.currentStage,
+          lastSavedAt: submissionOnly.lastSavedAt,
+          formData: JSON.parse(submissionOnly.formData),
+          personalNotes: submissionOnly.personalNotes ? JSON.parse(submissionOnly.personalNotes) : {},
+        };
+      } catch {
+        draftData = {
+          submissionRef: submissionOnly.submissionRef,
+          status: submissionOnly.status,
+          currentStage: submissionOnly.currentStage,
+          lastSavedAt: submissionOnly.lastSavedAt,
+        };
+      }
+
+      const existingBooking = await prisma.masterclassBooking.findFirst({
+        where: {
+          status: 'confirmed',
+          OR: [
+            { email: { equals: normalizedEmail, mode: 'insensitive' } },
+            { submissionId: submissionOnly.id },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return {
+        success: true,
+        userExists: true,
+        isEnrolled: false,
+        hasPaid: false,
+        accessGranted: true,
+        user: {
+          fullName: submissionOnly.fullName,
+          email: submissionOnly.email,
+          company: submissionOnly.company,
+          role: submissionOnly.role || 'Founder',
+        },
+        draft: draftData,
+        hasBooked: !!existingBooking,
+        isBookingDone: !!existingBooking,
+        booking: existingBooking
+          ? {
+            id: existingBooking.id,
+            bookingRef: existingBooking.bookingRef,
+            slotTime: existingBooking.slotTime,
+            scheduledAt: existingBooking.scheduledAt,
+            timezone: existingBooking.timezone,
+            status: existingBooking.status,
+            meetingLink: existingBooking.meetingLink,
           }
           : null,
         videos,

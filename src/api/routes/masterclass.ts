@@ -1207,7 +1207,8 @@ masterclassRouter.post('/webhook', async (req: Request, res: Response) => {
 masterclassRouter.get('/config', async (req: Request, res: Response) => {
   try {
     const email = (req.query.email as string) || '';
-    const config = await getMasterclassAppConfig(email);
+    const ref = (req.query.ref as string) || (req.query.submissionRef as string) || '';
+    const config = await getMasterclassAppConfig(email, ref);
     res.status(200).json(config);
   } catch (err: any) {
     console.error('[Masterclass] Error fetching app config:', err);
@@ -1222,7 +1223,8 @@ masterclassRouter.get('/config', async (req: Request, res: Response) => {
 masterclassRouter.post('/config', async (req: Request, res: Response) => {
   try {
     const email = (req.body?.email as string) || (req.query?.email as string) || '';
-    const config = await getMasterclassAppConfig(email);
+    const ref = (req.body?.ref as string) || (req.body?.submissionRef as string) || (req.query?.ref as string) || (req.query?.submissionRef as string) || '';
+    const config = await getMasterclassAppConfig(email, ref);
     res.status(200).json(config);
   } catch (err: any) {
     console.error('[Masterclass] Error in POST config:', err);
