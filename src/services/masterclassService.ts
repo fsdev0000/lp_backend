@@ -1092,13 +1092,19 @@ export async function getMasterclassMonthAvailability(
     const availableSlotsForDay: string[] = [];
 
     for (const canonical of CANONICAL_MASTERCLASS_SLOTS) {
+      const { startDate } = getSlotDatesUtc(dateStr, canonical);
+
+      // Filter out slots that have already passed in time
+      if (startDate.getTime() <= Date.now()) {
+        continue;
+      }
+
       // Check database booking collision
       const hasDbConflict = existingBookings.some((b) => {
         if (b.slotTime && b.slotTime.includes(dateStr) && (b.slotTime.includes(canonical.time24) || b.slotTime.includes(canonical.labelDubai))) {
           return true;
         }
         if (b.scheduledAt) {
-          const { startDate } = getSlotDatesUtc(dateStr, canonical);
           return Math.abs(new Date(b.scheduledAt).getTime() - startDate.getTime()) < 30 * 60 * 1000;
         }
         return false;
@@ -1161,10 +1167,14 @@ export async function getAvailableSlots(date?: string, timezone?: string) {
 
     const slots = CANONICAL_MASTERCLASS_SLOTS.map((slot) => {
       const formatted = formatSlotForParticipant(date, slot, tz);
-      const isAvailable = availableTime24s.includes(slot.time24);
+      const { startDate } = getSlotDatesUtc(date, slot);
+      const isPast = startDate.getTime() <= Date.now();
+      const isAvailable = !isPast && availableTime24s.includes(slot.time24);
       return {
         ...formatted,
         available: isAvailable,
+        isPast,
+        status: isPast ? 'passed' : (isAvailable ? 'available' : 'unavailable'),
       };
     });
 
@@ -1179,7 +1189,7 @@ export async function getAvailableSlots(date?: string, timezone?: string) {
       resolvedTimezone: iana,
       format: 'Private 1-on-1 Strategic Review Session • 45 Minutes',
       slots,
-      availableSlots: activeSlotStrings.length > 0 ? activeSlotStrings : slots.map((s) => s.displayLabel),
+      availableSlots: activeSlotStrings,
       timezones: [
         { key: 'GST (UTC+4)', label: 'GST (Gulf Standard Time)' },
         { key: 'EST (UTC-5)', label: 'EST (Eastern Time)' },
@@ -1212,10 +1222,12 @@ export async function getAvailableSlots(date?: string, timezone?: string) {
   for (const d of dates.slice(0, 10)) {
     const times = merged[d] || [];
     for (const canonical of CANONICAL_MASTERCLASS_SLOTS) {
-      if (times.includes(canonical.time24)) {
+      const { startDate } = getSlotDatesUtc(d, canonical);
+      const isPast = startDate.getTime() <= Date.now();
+      if (!isPast && times.includes(canonical.time24)) {
         const formatted = formatSlotForParticipant(d, canonical, tz);
         allFormattedSlots.push(formatted.displayLabel);
-        detailedSlots.push({ ...formatted, available: true });
+        detailedSlots.push({ ...formatted, available: true, isPast: false, status: 'available' });
       }
     }
   }
@@ -1319,6 +1331,15 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
 
   const { startDate, endDate } = getSlotDatesUtc(dateStr, matchedSlot);
   const formattedSlot = formatSlotForParticipant(dateStr, matchedSlot, tz);
+
+  // ── Past Slot Validation ──
+  // Reject booking attempt if the slot time has already passed
+  if (startDate.getTime() <= Date.now()) {
+    const error: any = new Error('This time slot has already passed. Please select an upcoming slot.');
+    error.code = 'SLOT_PASSED';
+    error.statusCode = 400;
+    throw error;
+  }
 
   // ── Existing Participant Booking Check ──
   // If participant has already booked their 1-on-1 strategic review, return existing confirmed booking

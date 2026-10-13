@@ -918,7 +918,7 @@ masterclassRouter.get('/submission/:submissionId', async (req: Request, res: Res
  * /masterclass/available-slots:
  *   get:
  *     summary: Available 1-on-1 Review Slots
- *     description: Returns available time slots for the 45-minute private 1-on-1 strategic review with Lionel Eersteling.
+ *     description: Returns available time slots for the 45-minute private 1-on-1 strategic review with Lionel Eersteling. Time-aware filtering automatically excludes passed slots on the current day (e.g. late afternoon/evening requests) and existing calendar bookings.
  *     tags:
  *       - Masterclass
  *     parameters:
@@ -931,10 +931,10 @@ masterclassRouter.get('/submission/:submissionId', async (req: Request, res: Res
  *         name: date
  *         schema:
  *           type: string
- *           example: "2026-10-24"
+ *           example: "2026-11-09"
  *     responses:
  *       200:
- *         description: Available calendar slots
+ *         description: Available calendar slots with active status and isPast flags
  */
 masterclassRouter.get('/available-slots', async (req: Request, res: Response) => {
   try {

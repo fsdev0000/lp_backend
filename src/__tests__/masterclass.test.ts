@@ -244,6 +244,44 @@ describe('Masterclass API & Recognition Endpoints', () => {
       expect(res.body['2026-11-09']).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
     });
 
+    it('should accurately identify passed time slots and mark them unavailable with isPast: true', async () => {
+      // Query a past date
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-01-05', timezone: 'GST (UTC+4)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      // All slots in past date must be marked as passed and unavailable
+      expect(res.body.slots[0].isPast).toBe(true);
+      expect(res.body.slots[0].available).toBe(false);
+      expect(res.body.slots[0].status).toBe('passed');
+      expect(res.body.slots[1].isPast).toBe(true);
+      expect(res.body.slots[1].available).toBe(false);
+      expect(res.body.slots[2].isPast).toBe(true);
+      expect(res.body.slots[2].available).toBe(false);
+      // availableSlots array must be empty, not fall back to invalid slots
+      expect(res.body.availableSlots).toEqual([]);
+    });
+
+    it('should reject booking a slot whose scheduled time has already passed', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'past_tester@example.com',
+          fullName: 'Past Tester',
+          company: 'Past Corp',
+          selectedSlot: '2026-01-05 at 1:30 PM – 2:15 PM',
+          timezone: 'GST (UTC+4)',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('SLOT_PASSED');
+      expect(res.body.message).toContain('already passed');
+    });
+
     it('should reject booking slot when participant info is missing', async () => {
       const res = await request(app)
         .post('/api/v1/masterclass/book-slot')
