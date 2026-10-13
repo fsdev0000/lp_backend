@@ -231,3 +231,20 @@ export async function validateNewsletterEmailStrict(emailStr: string | undefined
 
   return basic;
 }
+
+/**
+ * Lightweight RFC-compliant syntax check for customer emails.
+ */
+export function isValidEmail(email: string | undefined | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim());
+}
+
+/**
+ * Trims and lowercases an email address.
+ */
+export function sanitizeEmail(email: string | undefined | null): string {
+  if (!email || typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+}
+

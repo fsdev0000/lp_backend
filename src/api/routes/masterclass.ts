@@ -20,7 +20,9 @@ import {
   renderWorksheetReviewHtml,
   getMasterclassWorksheetPdfBuffer,
   getMasterclassWorksheetPdfUrl,
+  sendMasterclassInvoiceByEmail,
 } from '../../services/masterclassService';
+import { handleStripeWebhook } from '../controllers/stripeWebhookController';
 import { createRateLimiter } from '../../middleware/rateLimiter';
 
 export const masterclassRouter = Router();
@@ -592,6 +594,52 @@ masterclassRouter.get('/payment-status', async (req: Request, res: Response) => 
 
 /**
  * @openapi
+ * /masterclass/send-invoice-email:
+ *   post:
+ *     summary: Trigger Masterclass Payment & Tax Invoice Email
+ *     description: Manually dispatches or re-sends the official Stripe tax invoice confirmation email to a user in sandbox or production.
+ *     tags:
+ *       - Masterclass
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               sessionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Invoice email dispatched successfully
+ */
+masterclassRouter.post('/send-invoice-email', async (req: Request, res: Response) => {
+  try {
+    const target = req.body.email || req.body.sessionId;
+    if (!target) {
+      return res.status(400).json({
+        success: false,
+        error: 'VALIDATION_ERROR',
+        message: 'Must provide either email or sessionId.',
+      });
+    }
+
+    const result = await sendMasterclassInvoiceByEmail(target);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error('[Masterclass] Error triggering invoice email:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'INVOICE_EMAIL_FAILED',
+      message: err.message || 'Failed to dispatch invoice email.',
+    });
+  }
+});
+
+/**
+ * @openapi
  * /masterclass/modules:
  *   get:
  *     summary: Get Masterclass Curriculum & Video Modules
@@ -1095,39 +1143,7 @@ masterclassRouter.post('/reschedule', masterclassLimiter, async (req: Request, r
  *       400:
  *         description: Webhook signature verification failed
  */
-masterclassRouter.post('/webhook', async (req: Request, res: Response) => {
-  const sig = req.headers['stripe-signature'] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret || !sig) {
-    // If webhook secret isn't configured, acknowledge receipt
-    res.status(200).json({ received: true });
-    return;
-  }
-
-  let event: Stripe.Event;
-  try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
-    const rawBody = (req as any).rawBody || req.body;
-    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-  } catch (err: any) {
-    console.error('[Stripe Webhook] Verification failed:', err.message);
-    res.status(400).send(`Webhook Error: ${err.message}`);
-    return;
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session;
-    try {
-      await verifyPayment(session.id);
-      console.log(`[Stripe Webhook] Verified and unlocked Masterclass session: ${session.id}`);
-    } catch (err: any) {
-      console.error('[Stripe Webhook] Error fulfilling session:', err.message);
-    }
-  }
-
-  res.status(200).json({ received: true });
-});
+masterclassRouter.post('/webhook', handleStripeWebhook);
 
 /**
  * @openapi

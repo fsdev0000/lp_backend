@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
 import path from 'path';
 import fs from 'fs';
+import { handleStripeWebhook } from '../controllers/stripeWebhookController';
 
 export const checkoutRouter = Router();
 
@@ -299,38 +300,13 @@ checkoutRouter.get('/download', async (req: Request, res: Response): Promise<voi
 
 /**
  * POST /api/stripe/webhook
- * Stateless webhook handler verifying Stripe signature.
- * Does NOT persist any database records.
+ * Universal Stripe Webhook for Production & Staging:
+ * - Production: https://api.leadersperformance.ae/api/v1/stripe/webhook
+ * - Staging: https://staging.leadersperformance.ae/api/v1/stripe/webhook
+ * Verifies signatures using rawBody, strictly validates environment livemode,
+ * guarantees idempotency, records diagnostics, and dispatches invoice emails.
  */
-checkoutRouter.post('/stripe/webhook', async (req: Request, res: Response): Promise<void> => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret || !sig) {
-    res.status(400).json({ error: 'Missing webhook secret or stripe-signature header' });
-    return;
-  }
-
-  let event: Stripe.Event;
-
-  try {
-    const rawBody = (req as any).rawBody || req.body;
-    const stripe = getStripeInstance();
-    event = stripe.webhooks.constructEvent(rawBody, sig as string, webhookSecret);
-  } catch (err: any) {
-    console.error(`[Stripe Webhook] Verification failed:`, err.message);
-    res.status(400).send(`Webhook Error: ${err.message}`);
-    return;
-  }
-
-  // Handle specific event types statelessly
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object as Stripe.Checkout.Session;
-    console.log(`[Stripe Webhook] Checkout completed for session ${session.id}. Payment status: ${session.payment_status}`);
-  }
-
-  res.status(200).json({ received: true });
-});
+checkoutRouter.post('/stripe/webhook', handleStripeWebhook);
 
 /**
  * TODO: TEMPORARY ENDPOINT - MUST BE REMOVED AFTER RETRIEVING THE PRICE IDS.

@@ -567,15 +567,50 @@ export async function verifyPayment(sessionId: string) {
       },
     });
 
-    // Explicitly trigger Stripe to email the finalized invoice receipt to the customer
+    // Extract official Stripe Tax Invoice details
+    let invoiceNumber: string | null = null;
+    let hostedInvoiceUrl: string | null = null;
+    let invoicePdf: string | null = null;
+
     if (session.invoice) {
       try {
+        let invoiceObj: Stripe.Invoice | null = null;
+        if (typeof session.invoice === 'string') {
+          invoiceObj = await stripe.invoices.retrieve(session.invoice);
+        } else {
+          invoiceObj = session.invoice as Stripe.Invoice;
+        }
+
+        if (invoiceObj) {
+          invoiceNumber = invoiceObj.number || invoiceObj.id || null;
+          hostedInvoiceUrl = invoiceObj.hosted_invoice_url ?? null;
+          invoicePdf = invoiceObj.invoice_pdf ?? null;
+        }
+
         const invoiceId = typeof session.invoice === 'string' ? session.invoice : session.invoice.id;
-        await stripe.invoices.sendInvoice(invoiceId);
-        console.log(`[Stripe Invoice] Successfully dispatched invoice ${invoiceId} to customer ${session.customer_email || enrollment.email}`);
+        await stripe.invoices.sendInvoice(invoiceId).catch((err: any) => {
+          console.log('[Stripe Invoice API notice]:', err.message);
+        });
       } catch (invErr: any) {
-        console.warn('[Stripe Invoice] Notice dispatching invoice via Stripe API:', invErr.message);
+        console.warn('[Stripe Invoice] Notice inspecting invoice via Stripe API:', invErr.message);
       }
+    }
+
+    // Always dispatch our executive Payment Receipt & Tax Invoice Email directly to customer
+    // This guarantees reliable delivery in Sandbox/Test Mode as well as Live Production!
+    try {
+      await sendMasterclassPaymentInvoiceEmail({
+        enrollment,
+        invoiceNumber,
+        hostedInvoiceUrl,
+        invoicePdf,
+        amountPaid: enrollment.amount || 50000,
+        currency: enrollment.currency || 'usd',
+        paidAt: enrollment.paidAt,
+        stripeSessionId: sessionId,
+      });
+    } catch (emailErr: any) {
+      console.warn('[Masterclass Invoice] Notice dispatching invoice email to customer:', emailErr.message);
     }
 
     // Tag contact in GHL as paid customer
@@ -2308,6 +2343,213 @@ export async function sendWorkbookSubmissionNotifications(data: {
   } catch (staffGlobalErr: any) {
     console.warn('[Masterclass] Error dispatching staff worksheet briefing:', staffGlobalErr?.message || staffGlobalErr);
   }
+}
+
+export interface MasterclassPaymentInvoiceEmailData {
+  enrollment: {
+    id: string;
+    email: string;
+    fullName: string;
+    company?: string | null;
+    amount?: number | null;
+    currency?: string | null;
+    paidAt?: Date | string | null;
+    metadata?: string | null;
+  };
+  invoiceNumber?: string | null;
+  hostedInvoiceUrl?: string | null;
+  invoicePdf?: string | null;
+  amountPaid?: number | null;
+  currency?: string | null;
+  paidAt?: Date | string | null;
+  stripeSessionId?: string | null;
+}
+
+export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoiceEmailData): string {
+  const templatePath = path.join(__dirname, '../../templates/masterclass-invoice-confirmation.html');
+  let rawTemplate = '';
+  try {
+    rawTemplate = fs.readFileSync(templatePath, 'utf8');
+  } catch (err: any) {
+    console.warn('[Masterclass Invoice] Could not read masterclass-invoice-confirmation.html template:', err.message);
+    rawTemplate = '';
+  }
+
+  const frontendUrl = process.env.FRONTEND_URL || 'https://leadersperformance.ae';
+  const masterclassUrl = `${frontendUrl}/masterclass`;
+  const invoiceNumber = data.invoiceNumber || 'INV-MASTERCLASS-CONFIRMED';
+  const fullName = escapeHtml(data.enrollment.fullName || 'Executive Participant');
+  const company = escapeHtml(data.enrollment.company || 'Organization');
+  const email = escapeHtml(data.enrollment.email);
+
+  let paidAtFormatted = '';
+  try {
+    const d = data.paidAt ? new Date(data.paidAt) : new Date();
+    paidAtFormatted =
+      d.toLocaleString('en-US', {
+        timeZone: 'Asia/Dubai',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }) + ' GST (Dubai)';
+  } catch {
+    paidAtFormatted = new Date().toUTCString();
+  }
+
+  let invoiceLinksHtml = '';
+  if (data.hostedInvoiceUrl) {
+    invoiceLinksHtml += `<td style="padding: 0 10px;"><a href="${escapeHtml(
+      data.hostedInvoiceUrl
+    )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 600; text-decoration: underline;">View Stripe Tax Invoice &rarr;</a></td>`;
+  }
+  if (data.invoicePdf) {
+    invoiceLinksHtml += `<td style="padding: 0 10px;"><a href="${escapeHtml(
+      data.invoicePdf
+    )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 600; text-decoration: underline;">Download Invoice PDF &darr;</a></td>`;
+  }
+
+  if (rawTemplate) {
+    return rawTemplate
+      .replace(/{{invoice_number}}/g, escapeHtml(invoiceNumber))
+      .replace(/{{full_name}}/g, fullName)
+      .replace(/{{company}}/g, company)
+      .replace(/{{email}}/g, email)
+      .replace(/{{paid_at}}/g, escapeHtml(paidAtFormatted))
+      .replace(/{{masterclass_url}}/g, escapeHtml(masterclassUrl))
+      .replace(/{{invoice_links_html}}/g, invoiceLinksHtml);
+  }
+
+  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $500.00</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
+}
+
+export async function sendMasterclassPaymentInvoiceEmail(
+  data: MasterclassPaymentInvoiceEmailData
+): Promise<boolean> {
+  const invoiceNumber = data.invoiceNumber || 'INV-MASTERCLASS';
+  const subject = `The Founder’s Next Move — Payment Receipt & Tax Invoice (${invoiceNumber})`;
+  const html = buildMasterclassInvoiceEmailHtml(data);
+
+  let delivered = false;
+
+  // 1. Participant Confirmation Dispatch
+  try {
+    const contactId = await upsertContact({
+      email: data.enrollment.email,
+      firstName: data.enrollment.fullName.split(' ')[0],
+      lastName: data.enrollment.fullName.split(' ').slice(1).join(' ') || undefined,
+      tags: ['Masterclass Paid', 'The Founders Next Move Customer', 'Invoice Sent'],
+    });
+
+    if (contactId) {
+      await sendEmail(contactId, subject, html);
+      console.log(
+        `[Masterclass Invoice] Successfully delivered invoice email to customer ${data.enrollment.email} (Invoice: ${invoiceNumber})`
+      );
+      delivered = true;
+    }
+  } catch (err: any) {
+    console.warn('[Masterclass Invoice] Warning dispatching invoice email to participant:', err.message);
+  }
+
+  // 2. Company Staff Alert Dispatch (info@leadersperformance.ae)
+  try {
+    const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${
+      data.enrollment.company || 'Individual'
+    }) — USD $500.00 — Invoice ${invoiceNumber}`;
+    for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
+      try {
+        const staffContactId = await upsertContact({
+          email: recipient.email,
+          firstName: recipient.firstName,
+          lastName: recipient.lastName,
+          tags: ['lp-staff', 'internal-notification', 'masterclass-admin', 'payment-alert'],
+        });
+        if (staffContactId) {
+          await sendEmail(staffContactId, staffSubject, html);
+          console.log(`[Masterclass Invoice] Staff payment & invoice alert delivered to: ${recipient.email}`);
+        }
+      } catch (staffErr: any) {
+        console.warn(`[Masterclass Invoice] Staff alert notice for ${recipient.email}:`, staffErr?.message || staffErr);
+      }
+    }
+  } catch (staffGlobalErr: any) {
+    console.warn('[Masterclass Invoice] Error dispatching staff invoice alert:', staffGlobalErr?.message || staffGlobalErr);
+  }
+
+  return delivered;
+}
+
+export async function sendMasterclassInvoiceByEmail(
+  emailOrSessionId: string,
+  options?: { force?: boolean }
+): Promise<{ success: boolean; message: string; invoiceNumber?: string; email?: string }> {
+  const query = emailOrSessionId.trim();
+  const enrollment = await prisma.masterclassEnrollment.findFirst({
+    where: {
+      OR: [
+        { email: { equals: query.toLowerCase(), mode: 'insensitive' } },
+        { stripeSessionId: query },
+        { stripePaymentIntentId: query },
+        { id: query },
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!enrollment) {
+    throw new Error(`No Masterclass enrollment found matching '${query}'`);
+  }
+
+  let invoiceNumber: string | null = null;
+  let hostedInvoiceUrl: string | null = null;
+  let invoicePdf: string | null = null;
+
+  if (enrollment.stripeSessionId) {
+    try {
+      const stripe = getStripe();
+      const session = await stripe.checkout.sessions.retrieve(enrollment.stripeSessionId, {
+        expand: ['invoice'],
+      });
+      if (session.invoice) {
+        let invObj: Stripe.Invoice | null = null;
+        if (typeof session.invoice === 'string') {
+          invObj = await stripe.invoices.retrieve(session.invoice);
+        } else {
+          invObj = session.invoice as Stripe.Invoice;
+        }
+        if (invObj) {
+          invoiceNumber = invObj.number || invObj.id || null;
+          hostedInvoiceUrl = invObj.hosted_invoice_url ?? null;
+          invoicePdf = invObj.invoice_pdf ?? null;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Invoice Dispatch] Stripe retrieve error:', err.message);
+    }
+  }
+
+  const delivered = await sendMasterclassPaymentInvoiceEmail({
+    enrollment,
+    invoiceNumber,
+    hostedInvoiceUrl,
+    invoicePdf,
+    amountPaid: enrollment.amount || 50000,
+    currency: enrollment.currency || 'usd',
+    paidAt: enrollment.paidAt,
+    stripeSessionId: enrollment.stripeSessionId,
+  });
+
+  return {
+    success: delivered,
+    message: delivered
+      ? `Invoice email delivered successfully to ${enrollment.email}.`
+      : `Failed to deliver invoice email to ${enrollment.email}.`,
+    invoiceNumber: invoiceNumber || 'INV-MASTERCLASS',
+    email: enrollment.email,
+  };
 }
 
 export async function sendBookingConfirmationEmail(data: {
