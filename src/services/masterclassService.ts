@@ -3500,7 +3500,31 @@ export async function getMasterclassWorksheetPdfBuffer(
       parsedNotes = {};
     }
   } else if (rawNotes && typeof rawNotes === 'object') {
-    parsedNotes = rawNotes;
+    parsedNotes = { ...rawNotes };
+  }
+
+  // Also check if notes were embedded inside parsedFormData
+  if (parsedFormData && typeof parsedFormData === 'object') {
+    if (parsedFormData.personalNotes && typeof parsedFormData.personalNotes === 'object') {
+      parsedNotes = { ...parsedFormData.personalNotes, ...parsedNotes };
+    }
+    for (const k of [
+      'stage1_notes',
+      'stage2_notes',
+      'stage3_notes',
+      'stage4_notes',
+      'stage1Notes',
+      'stage2Notes',
+      'stage3Notes',
+      'stage4Notes',
+      'founderFocus',
+      'strategicReflections',
+      'notes',
+    ]) {
+      if (parsedFormData[k] && !parsedNotes[k]) {
+        parsedNotes[k] = parsedFormData[k];
+      }
+    }
   }
 
   const buffer = generateMasterclassWorksheetPdf({
@@ -3603,14 +3627,73 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
     }
   }
 
-  let notesHtml = '';
+  const notesSource: Record<string, any> = {};
   if (notes && typeof notes === 'object') {
-    for (const [k, v] of Object.entries(notes)) {
-      if (v !== null && v !== undefined && String(v).trim()) {
-        const cleanLabel = k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').trim();
-        notesHtml += renderDossierField('📝', `Note: ${cleanLabel}`, v);
+    Object.assign(notesSource, notes);
+  }
+  if (f && typeof f === 'object') {
+    if (f.personalNotes && typeof f.personalNotes === 'object') {
+      Object.assign(notesSource, f.personalNotes);
+    }
+    for (const key of [
+      'stage1_notes', 'stage2_notes', 'stage3_notes', 'stage4_notes',
+      'stage1Notes', 'stage2Notes', 'stage3Notes', 'stage4Notes',
+    ]) {
+      if (f[key] && !notesSource[key]) {
+        notesSource[key] = f[key];
       }
     }
+  }
+
+  const s1Note = notesSource.stage1_notes ?? notesSource.stage1Notes ?? notesSource.stage_1_notes ?? notesSource['stage1 notes'];
+  const s2Note = notesSource.stage2_notes ?? notesSource.stage2Notes ?? notesSource.stage_2_notes ?? notesSource['stage2 notes'];
+  const s3Note = notesSource.stage3_notes ?? notesSource.stage3Notes ?? notesSource.stage_3_notes ?? notesSource['stage3 notes'];
+  const s4Note = notesSource.stage4_notes ?? notesSource.stage4Notes ?? notesSource.stage_4_notes ?? notesSource['stage4 notes'];
+
+  const standardNoteKeys = new Set([
+    'stage1_notes', 'stage1Notes', 'stage_1_notes', 'stage1 notes',
+    'stage2_notes', 'stage2Notes', 'stage_2_notes', 'stage2 notes',
+    'stage3_notes', 'stage3Notes', 'stage_3_notes', 'stage3 notes',
+    'stage4_notes', 'stage4Notes', 'stage_4_notes', 'stage4 notes',
+  ]);
+
+  const customNotesList = Object.entries(notesSource).filter(
+    ([k, v]) => !standardNoteKeys.has(k) && v !== null && v !== undefined && String(v).trim().length > 0
+  );
+
+  const hasAnyStageNotes = Boolean(
+    (s1Note && String(s1Note).trim()) ||
+    (s2Note && String(s2Note).trim()) ||
+    (s3Note && String(s3Note).trim()) ||
+    (s4Note && String(s4Note).trim())
+  );
+  const hasAnyNotesRecorded = hasAnyStageNotes || customNotesList.length > 0;
+
+  let notesHtml = '';
+  if (hasAnyStageNotes) {
+    notesHtml += renderDossierField('1.', 'Stage 1 Personal Reflection: Define the Next Stage', s1Note);
+    notesHtml += renderDossierField('2.', 'Stage 2 Personal Reflection: Success Changes the Game', s2Note);
+    notesHtml += renderDossierField('3.', 'Stage 3 Personal Reflection: Prepare for Performance', s3Note);
+    notesHtml += renderDossierField('4.', 'Stage 4 Personal Reflection: Your Next Move', s4Note);
+  }
+  for (let i = 0; i < customNotesList.length; i++) {
+    const [k, v] = customNotesList[i];
+    const cleanLabel = k.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+    const num = hasAnyStageNotes ? `${5 + i}.` : `${1 + i}.`;
+    notesHtml += renderDossierField(num, `Executive Reflection: ${cleanLabel}`, v);
+  }
+  if (!hasAnyNotesRecorded) {
+    notesHtml = `
+      <div class="qa-item qa-empty">
+        <div class="qa-header">
+          <span class="qa-num">📝</span>
+          <span class="qa-title">Participant Personal Notes Status</span>
+        </div>
+        <div class="qa-body">
+          <span class="qa-placeholder">No personal reflection notes recorded by participant for this review session.</span>
+        </div>
+      </div>
+    `;
   }
 
   // Directory of recent submissions options

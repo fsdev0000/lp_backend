@@ -610,16 +610,134 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
   renderQaItem('4', 'Evidence to Tell Whether Action Has Helped', f.stage4_evidence);
 
   // ==========================================
-  // PERSONAL NOTES & STRATEGIC REFLECTIONS
+  // PARTICIPANT REFLECTIONS & PERSONAL NOTES
   // ==========================================
-  const notesEntries = Object.entries(notes).filter(
-    ([_, v]) => v !== null && v !== undefined && String(v).trim().length > 0
+  renderSectionHeader('Participant Reflections & Personal Notes');
+
+  // Helper to render dedicated note items with gold accent styling
+  const renderNoteItem = (numLabel: string, noteTitle: string, noteContent: any) => {
+    const rawVal = noteContent !== undefined && noteContent !== null ? String(noteContent).trim() : '';
+    const hasNote = rawVal.length > 0;
+    const displayAnswer = hasNote ? rawVal : `[No personal reflection notes recorded for this stage]`;
+
+    const answerLines = wrapLines(displayAnswer, width - 24, 9.5, false);
+    const itemHeight = 18 + answerLines.length * 13 + 12;
+
+    doc.ensureSpace(Math.min(itemHeight, 150), drawRunningHeader);
+
+    // Note header label
+    doc.addText(`${numLabel}. ${noteTitle}`, 40, doc.currentY, {
+      font: 'F2',
+      size: 9.5,
+      color: GOLD,
+    });
+    doc.currentY += 14;
+
+    // Note box background with gold left accent border
+    const boxHeight = answerLines.length * 13 + 10;
+    doc.addRect(40, doc.currentY - 2, width, boxHeight, {
+      fillColor: hasNote ? BG_LIGHT : [0.97, 0.97, 0.97],
+      strokeColor: BORDER,
+      lineWidth: 0.5,
+    });
+    doc.addLine(40, doc.currentY - 2, 40, doc.currentY - 2 + boxHeight, hasNote ? GOLD : BORDER, 2.5);
+
+    // Note body text
+    doc.currentY = doc.addWrappedText(displayAnswer, 50, doc.currentY + 9, width - 24, 13, {
+      font: hasNote ? 'F1' : 'F3',
+      size: 9.5,
+      color: hasNote ? TEXT_DARK : TEXT_MUTED,
+      onPageBreak: drawRunningHeader,
+    });
+
+    doc.currentY += 14;
+  };
+
+  // Consolidate personal notes from both data.personalNotes and data.formData
+  const notesSource: Record<string, any> = {};
+  if (notes && typeof notes === 'object') {
+    Object.assign(notesSource, notes);
+  }
+  if (f && typeof f === 'object') {
+    if (f.personalNotes && typeof f.personalNotes === 'object') {
+      Object.assign(notesSource, f.personalNotes);
+    }
+    for (const key of [
+      'stage1_notes', 'stage2_notes', 'stage3_notes', 'stage4_notes',
+      'stage1Notes', 'stage2Notes', 'stage3Notes', 'stage4Notes',
+    ]) {
+      if (f[key] && !notesSource[key]) {
+        notesSource[key] = f[key];
+      }
+    }
+  }
+
+  const stage1Note = notesSource.stage1_notes ?? notesSource.stage1Notes ?? notesSource.stage_1_notes ?? notesSource['stage1 notes'];
+  const stage2Note = notesSource.stage2_notes ?? notesSource.stage2Notes ?? notesSource.stage_2_notes ?? notesSource['stage2 notes'];
+  const stage3Note = notesSource.stage3_notes ?? notesSource.stage3Notes ?? notesSource.stage_3_notes ?? notesSource['stage3 notes'];
+  const stage4Note = notesSource.stage4_notes ?? notesSource.stage4Notes ?? notesSource.stage_4_notes ?? notesSource['stage4 notes'];
+
+  const standardNoteKeys = new Set([
+    'stage1_notes', 'stage1Notes', 'stage_1_notes', 'stage1 notes',
+    'stage2_notes', 'stage2Notes', 'stage_2_notes', 'stage2 notes',
+    'stage3_notes', 'stage3Notes', 'stage_3_notes', 'stage3 notes',
+    'stage4_notes', 'stage4Notes', 'stage_4_notes', 'stage4 notes',
+  ]);
+
+  const customNotes = Object.entries(notesSource).filter(
+    ([k, v]) => !standardNoteKeys.has(k) && v !== null && v !== undefined && String(v).trim().length > 0
   );
-  if (notesEntries.length > 0) {
-    renderSectionHeader('Participant Reflections & Personal Notes');
-    for (const [key, val] of notesEntries) {
-      const label = key.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').trim();
-      renderQaItem('Note', label, val);
+
+  const hasStage1 = Boolean(stage1Note && String(stage1Note).trim());
+  const hasStage2 = Boolean(stage2Note && String(stage2Note).trim());
+  const hasStage3 = Boolean(stage3Note && String(stage3Note).trim());
+  const hasStage4 = Boolean(stage4Note && String(stage4Note).trim());
+  const hasAnyStageNotes = hasStage1 || hasStage2 || hasStage3 || hasStage4;
+  const hasAnyNotes = hasAnyStageNotes || customNotes.length > 0;
+
+  if (!hasAnyNotes) {
+    doc.ensureSpace(55, drawRunningHeader);
+    doc.addRect(40, doc.currentY, width, 42, {
+      fillColor: BG_LIGHT,
+      strokeColor: BORDER,
+      lineWidth: 0.5,
+    });
+    doc.addLine(40, doc.currentY, 40, doc.currentY + 42, GOLD, 3);
+    doc.addText('STATUS: No personal reflection notes recorded by participant.', 52, doc.currentY + 16, {
+      font: 'F2',
+      size: 9,
+      color: TEXT_DARK,
+    });
+    doc.addText(
+      'Worksheet responses across Stages 1-4 are documented above for executive strategic review.',
+      52,
+      doc.currentY + 30,
+      {
+        font: 'F3',
+        size: 8.5,
+        color: TEXT_MUTED,
+      }
+    );
+    doc.currentY += 56;
+  } else {
+    // If participant entered any stage notes, render all 4 stage note blocks with notes or clear placeholders
+    if (hasAnyStageNotes) {
+      renderNoteItem('Note 1', 'Stage 1 Personal Reflection: Define the Next Stage', stage1Note);
+      renderNoteItem('Note 2', 'Stage 2 Personal Reflection: Success Changes the Game', stage2Note);
+      renderNoteItem('Note 3', 'Stage 3 Personal Reflection: Prepare for Performance', stage3Note);
+      renderNoteItem('Note 4', 'Stage 4 Personal Reflection: Your Next Move', stage4Note);
+    }
+
+    // Render any additional or custom executive reflection notes
+    for (let i = 0; i < customNotes.length; i++) {
+      const [k, v] = customNotes[i];
+      const cleanLabel = k
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/[_-]/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+      const noteNum = hasAnyStageNotes ? `Note ${5 + i}` : `Note ${1 + i}`;
+      renderNoteItem(noteNum, `Executive Reflection: ${cleanLabel}`, v);
     }
   }
 
