@@ -1772,13 +1772,13 @@ function buildMasterclassStaffBriefingHtml(data: {
 
   const priority30 = f.stage4_priority30Days || f.stage4_priority90Days || '';
   const stage4Rows = [
-    renderField('1. 30-Day Main Preparation Priority', priority30),
-    renderField('Milestone 1 (10-Day Marker)', f.stage4_milestone1),
-    renderField('Milestone 2 (20-Day Marker)', f.stage4_milestone2),
-    renderField('Milestone 3 (30-Day Marker)', f.stage4_milestone3),
-    renderField('2. Single Action Within 7 Days', f.stage4_action7Days),
+    renderField('1. One 30-Day Preparation Priority', priority30),
+    renderField('Milestone 1', f.stage4_milestone1),
+    renderField('Milestone 2', f.stage4_milestone2),
+    renderField('Milestone 3', f.stage4_milestone3),
+    renderField('2. One Action Within Next 24 Hours', f.stage4_action7Days),
     renderField('When Action Will Be Taken', f.stage4_actionTiming),
-    renderField('Evidence to Look For Afterward', f.stage4_evidence),
+    renderField('Evidence to Tell Whether Action Has Helped', f.stage4_evidence),
   ].filter(Boolean).join('');
 
   const standardKeys = new Set([
@@ -2576,13 +2576,13 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
       stageNumber: 1,
       id: 'stage1',
       title: 'Define the Next Stage',
-      moduleTitle: 'Module 1: Operating System & Shift',
-      subtitle: 'Clarity on the business stage you are building for and what makes it distinct from where you stand today.',
+      moduleTitle: 'Module 1: Define the Next Stage',
+      subtitle: 'Analyse and describe what the next phase means for the founder and the business.',
       videoId: 2,
       videoKey: 'stage_1',
       thumbnailFileName: 'STAGE-01.jpg',
-      reflectionPauseSeconds: 45,
-      reflectionPrompt: 'Reflect on the next stage you are preparing your business for and what you want that stage to make possible. Record your answers in Stage 1.',
+      reflectionPauseSeconds: 0,
+      reflectionPrompt: 'Analyse and describe what the next phase means for the founder and the business. Record your answers in Stage 1.',
       questions: [
         {
           id: 'stage1_nextStage',
@@ -2617,13 +2617,13 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
       stageNumber: 2,
       id: 'stage2',
       title: 'Success Changes the Game',
-      moduleTitle: 'Module 2: Evaluation & Resonance',
-      subtitle: 'Recognizing how scale changes the demands on leadership, time allocation, and organizational standards.',
+      moduleTitle: 'Module 2: Success Changes the Game',
+      subtitle: 'Analyse what changes and what new demands arise; assess a possible investment.',
       videoId: 3,
       videoKey: 'stage_2',
       thumbnailFileName: 'STAGE-02.jpg',
-      reflectionPauseSeconds: 45,
-      reflectionPrompt: 'Reflect on how operational pace, scale, and demands will change as you grow. Record your answers in Stage 2.',
+      reflectionPauseSeconds: 0,
+      reflectionPrompt: 'Analyse what changes and what new demands arise; assess a possible investment. Record your answers in Stage 2.',
       questions: [
         {
           id: 'stage2_changes',
@@ -2673,13 +2673,13 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
       stageNumber: 3,
       id: 'stage3',
       title: 'Prepare for Performance',
-      moduleTitle: 'Module 3: Capabilities & Standards',
-      subtitle: 'Aligning personal founder capabilities, leadership team ownership, and organizational standards.',
+      moduleTitle: 'Module 3: Prepare for Performance',
+      subtitle: 'Assess strengths and development areas at founder, leadership-team and organisational level.',
       videoId: 4,
       videoKey: 'stage_3',
       thumbnailFileName: 'STAGE-03.jpg',
-      reflectionPauseSeconds: 45,
-      reflectionPrompt: 'Reflect on the performance capabilities and standards required across Founder, Leadership Team, and Organisation. Record your answers in Stage 3.',
+      reflectionPauseSeconds: 0,
+      reflectionPrompt: 'Assess strengths and development areas at founder, leadership-team and organisational level. Record your answers in Stage 3.',
       questions: [
         {
           id: 'stage3_founderStrength',
@@ -2743,65 +2743,65 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
       stageNumber: 4,
       id: 'stage4',
       title: 'Your Next Move',
-      moduleTitle: 'Module 4: Exploration Blueprint & Execution',
-      subtitle: 'Transforming reflections into a high-leverage 30-day roadmap and one immediate action within 24 hours.',
+      moduleTitle: 'Module 4: Your Next Move',
+      subtitle: 'Make a practical plan, choose priorities and identify the first action.',
       videoId: 5,
       videoKey: 'stage_4',
       thumbnailFileName: 'STAGE-04.jpg',
-      reflectionPauseSeconds: 45,
-      reflectionPrompt: 'Reflect on your top 30-day preparation priority and the single high-leverage action you will take within 24 hours. Record your answers in Stage 4.',
+      reflectionPauseSeconds: 0,
+      reflectionPrompt: 'Make a practical plan, choose priorities and identify the first action. Record your answers in Stage 4.',
       questions: [
         {
           id: 'stage4_priority30Days',
-          label: '1. What is your main preparation priority for the next 30 days? *',
+          label: '1. One 30-day preparation priority *',
           type: 'textarea',
           required: true,
           maxLength: 1000,
-          placeholder: 'e.g. Structure clear quarterly KPIs and delegate core revenue operations.',
+          placeholder: 'e.g. Establish quarterly KPIs and delegate core revenue operations.',
         },
         {
           id: 'stage4_milestone1',
-          label: 'Milestone 1: 10-Day progress marker',
+          label: 'Milestone 1 related to that priority *',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 1: e.g. Executive alignment framework signed off by Day 10',
+          placeholder: 'Milestone 1: e.g. Leadership alignment framework finalized',
         },
         {
           id: 'stage4_milestone2',
-          label: 'Milestone 2: 20-Day progress marker',
+          label: 'Milestone 2 related to that priority *',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 2: e.g. Operational handover completed by Day 20',
+          placeholder: 'Milestone 2: e.g. Operational handover completed',
         },
         {
           id: 'stage4_milestone3',
-          label: 'Milestone 3: 30-Day progress marker',
+          label: 'Milestone 3 related to that priority *',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'Milestone 3: e.g. Full performance reset review with Lionel by Day 30',
+          placeholder: 'Milestone 3: e.g. Performance reset review with Lionel conducted',
         },
         {
           id: 'stage4_action7Days',
-          label: '3. One action within 24 hours *',
+          label: '3. One action you will take within the next 24 hours *',
           type: 'text',
           required: true,
           maxLength: 1000,
-          placeholder: 'e.g. Audit top 3 time bottlenecks',
+          placeholder: 'e.g. Audit top 3 operational bottlenecks',
         },
         {
           id: 'stage4_actionTiming',
-          label: '4. When will you take it? *',
+          label: '4. When will you take that action? *',
           type: 'text',
           required: false,
           maxLength: 1000,
-          placeholder: 'e.g. Next Monday morning 9 AM',
+          placeholder: 'e.g. Tomorrow 9:00 AM',
         },
         {
           id: 'stage4_evidence',
-          label: '5. What evidence will you look for afterward? *',
+          label: '5. What evidence will you look for to tell whether the action has helped? *',
           type: 'text',
           required: true,
           maxLength: 1000,
@@ -4524,13 +4524,13 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
         <h2 class="stage-title">Your Next Move</h2>
       </header>
       <div class="stage-content">
-        ${renderDossierField('1.', 'Main Preparation Priority for the Next 90 Days', f.stage4_priority90Days)}
-        ${renderDossierField('•', '30-Day Milestone Marker', f.stage4_milestone1)}
-        ${renderDossierField('•', '60-Day Milestone Marker', f.stage4_milestone2)}
-        ${renderDossierField('•', '90-Day Milestone Marker', f.stage4_milestone3)}
-        ${renderDossierField('2.', 'Single Decisive Action to Take Within 7 Days', f.stage4_action7Days)}
-        ${renderDossierField('•', 'When and How This Action Will Be Taken', f.stage4_actionTiming)}
-        ${renderDossierField('•', 'Evidence to Look For Afterward That Proves Traction', f.stage4_evidence)}
+        ${renderDossierField('1.', 'One 30-Day Preparation Priority', f.stage4_priority30Days || f.stage4_priority90Days)}
+        ${renderDossierField('•', 'Milestone 1', f.stage4_milestone1)}
+        ${renderDossierField('•', 'Milestone 2', f.stage4_milestone2)}
+        ${renderDossierField('•', 'Milestone 3', f.stage4_milestone3)}
+        ${renderDossierField('2.', 'One Action to Take Within Next 24 Hours', f.stage4_action7Days)}
+        ${renderDossierField('•', 'When Action Will Be Taken', f.stage4_actionTiming)}
+        ${renderDossierField('•', 'Evidence to Tell Whether Action Has Helped', f.stage4_evidence)}
       </div>
     </article>
 

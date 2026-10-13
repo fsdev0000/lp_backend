@@ -430,7 +430,7 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
 
   // Right Column
   doc.addText('WORKSHEET REF:', col2X, row1Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.submissionRef || 'FNM-VERIFIED', col2X + 80, row1Y, { font: 'F2', size: 9.5, color: TEXT_DARK });
+  doc.addText(data.submissionRef || 'FNM-VERIFIED', col2X + 96, row1Y, { font: 'F2', size: 9.5, color: TEXT_DARK });
 
   const formattedDate = data.submittedAt
     ? typeof data.submittedAt === 'string'
@@ -438,15 +438,15 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
       : data.submittedAt.toISOString().slice(0, 10)
     : 'Recorded in Session';
   doc.addText('SUBMISSION DATE:', col2X, row2Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(formattedDate, col2X + 80, row2Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
+  doc.addText(formattedDate, col2X + 96, row2Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
 
   doc.addText('STATUS / STAGE:', col2X, row3Y, { font: 'F2', size: 8, color: GOLD });
-  const statusStageStr = `${(data.status || 'Submitted').toUpperCase()} (Stage ${data.currentStage || 4} of 4 · ${data.courseProgress || 100}% Complete)`;
-  doc.addText(statusStageStr, col2X + 80, row3Y, { font: 'F2', size: 9, color: GOLD });
+  const statusStageStr = `${(data.status || 'Submitted').toUpperCase()} (Stage ${data.currentStage || 4} of 4 - ${data.courseProgress || 100}% Complete)`;
+  doc.addText(statusStageStr, col2X + 96, row3Y, { font: 'F2', size: 8.5, color: GOLD });
 
   doc.addText('STRATEGIC REVIEW:', col2X, row4Y, { font: 'F2', size: 8, color: GOLD });
-  const reviewBookingStr = data.bookingRef ? `Confirmed (${data.bookingRef}${data.slotTime ? ` · ${data.slotTime}` : ''})` : 'Pending calendar slot booking';
-  doc.addText(reviewBookingStr, col2X + 80, row4Y, { font: 'F1', size: 9, color: TEXT_DARK });
+  const reviewBookingStr = data.bookingRef ? `Confirmed (${data.bookingRef}${data.slotTime ? ` - ${data.slotTime}` : ''})` : 'Pending calendar slot booking';
+  doc.addText(reviewBookingStr, col2X + 96, row4Y, { font: 'F1', size: 8.5, color: TEXT_DARK });
 
   doc.currentY += metaHeight + 18;
 
@@ -454,12 +454,19 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
   const f = data.formData || {};
   const notes = data.personalNotes || {};
 
+  let isFirstSection = true;
   const renderSectionHeader = (stageTitle: string) => {
-    doc.ensureSpace(45, drawRunningHeader);
+    doc.ensureSpace(55, drawRunningHeader);
+    if (!isFirstSection) {
+      doc.currentY += 14;
+    }
+    isFirstSection = false;
+
     doc.addRect(40, doc.currentY, width, 24, { fillColor: BG_LIGHT, strokeColor: BORDER, lineWidth: 0.75 });
     doc.addLine(40, doc.currentY, 40, doc.currentY + 24, GOLD, 3.5);
     doc.addText(stageTitle.toUpperCase(), 50, doc.currentY + 16, { font: 'F2', size: 9.5, color: GOLD });
-    doc.currentY += 32;
+    // Provide generous breathing room (24 height + 18 margin) so the first question title line is not too close to the bar
+    doc.currentY += 42;
   };
 
   const renderQaItem = (numLabel: string, questionTitle: string, answer: any) => {
@@ -536,13 +543,13 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
   // ==========================================
   renderSectionHeader('Stage 4: Your Next Move');
   const p30 = f.stage4_priority30Days || f.stage4_priority90Days;
-  renderQaItem('1', 'Main 30-Day Preparation Priority', p30);
-  renderQaItem('1A', 'Milestone 1 (10-Day Marker)', f.stage4_milestone1);
-  renderQaItem('1B', 'Milestone 2 (20-Day Marker)', f.stage4_milestone2);
-  renderQaItem('1C', 'Milestone 3 (30-Day Marker)', f.stage4_milestone3);
-  renderQaItem('2', 'Immediate Single Action (Within Next 7 Days)', f.stage4_action7Days);
-  renderQaItem('3', 'When Action Will Be Executed', f.stage4_actionTiming);
-  renderQaItem('4', 'Concrete Evidence to Confirm Execution', f.stage4_evidence);
+  renderQaItem('1', 'One 30-Day Preparation Priority', p30);
+  renderQaItem('1A', 'Milestone 1', f.stage4_milestone1);
+  renderQaItem('1B', 'Milestone 2', f.stage4_milestone2);
+  renderQaItem('1C', 'Milestone 3', f.stage4_milestone3);
+  renderQaItem('2', 'One Action Within Next 24 Hours', f.stage4_action7Days);
+  renderQaItem('3', 'When Action Will Be Taken', f.stage4_actionTiming);
+  renderQaItem('4', 'Evidence to Tell Whether Action Has Helped', f.stage4_evidence);
 
   // ==========================================
   // PERSONAL NOTES & STRATEGIC REFLECTIONS
