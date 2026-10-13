@@ -50,6 +50,48 @@ function escapePdfText(text: string): string {
     .replace(/\)/g, '\\)');
 }
 
+function getTextWidth(text: string, fontSize: number, isBold: boolean = false): number {
+  if (!text) return 0;
+  let w = 0;
+  for (let i = 0; i < text.length; i++) {
+    w += getCharWidth(text[i], isBold) * fontSize;
+  }
+  return w;
+}
+
+function renderFitText(
+  doc: SimplePdfDocument,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  defaultSize: number = 9.5,
+  font: 'F1' | 'F2' | 'F3' = 'F1',
+  color: [number, number, number] = [0.106, 0.149, 0.216]
+): void {
+  if (!text) return;
+  const isBold = font === 'F2';
+  let size = defaultSize;
+  let w = getTextWidth(text, size, isBold);
+
+  // If text exceeds maxWidth, scale down gracefully to a minimum readable size
+  while (w > maxWidth && size > 7.0) {
+    size -= 0.5;
+    w = getTextWidth(text, size, isBold);
+  }
+
+  // If still too wide, truncate with ellipsis so it never overflows
+  let displayText = text;
+  if (w > maxWidth) {
+    while (displayText.length > 3 && getTextWidth(displayText + '...', size, isBold) > maxWidth) {
+      displayText = displayText.slice(0, -1);
+    }
+    displayText += '...';
+  }
+
+  doc.addText(displayText, x, y, { font, size, color });
+}
+
 function wrapLines(text: string, maxWidthPt: number, fontSizePt: number, isBold: boolean = false): string[] {
   if (!text) return [];
   const paragraphs = text.split(/\r?\n/);
@@ -404,33 +446,43 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
   doc.addLine(40, doc.currentY + 72, 40 + width, doc.currentY + 72, ACCENT_GOLD, 2);
   doc.currentY += 86;
 
-  // Metadata Card
-  const metaHeight = 90;
+  // Metadata Card (Responsive, auto-fitted grid with dedicated lines for review status)
+  const metaHeight = 98;
   doc.addRect(40, doc.currentY, width, metaHeight, { fillColor: BG_LIGHT, strokeColor: BORDER, lineWidth: 1 });
 
-  const col1X = 54;
-  const col2X = 300;
+  // Subtle vertical dividing line between Left & Right metadata columns
+  doc.addLine(280, doc.currentY + 12, 280, doc.currentY + metaHeight - 12, BORDER, 0.75);
+
+  const col1X = 52;
+  const col1ValX = 135;
+  const col1ValMaxW = 138;
+
+  const col2X = 294;
+  const col2ValX = 390;
+  const col2ValMaxW = 156;
+
   const row1Y = doc.currentY + 18;
   const row2Y = doc.currentY + 36;
   const row3Y = doc.currentY + 54;
   const row4Y = doc.currentY + 72;
+  const row4bY = doc.currentY + 84;
 
   // Left Column
   doc.addText('PARTICIPANT:', col1X, row1Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.fullName || 'Executive Participant', col1X + 75, row1Y, { font: 'F2', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, data.fullName || 'Executive Participant', col1ValX, row1Y, col1ValMaxW, 9.5, 'F2', TEXT_DARK);
 
   doc.addText('COMPANY:', col1X, row2Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.company || 'Not provided', col1X + 75, row2Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, data.company || 'Not provided', col1ValX, row2Y, col1ValMaxW, 9.5, 'F1', TEXT_DARK);
 
   doc.addText('EXECUTIVE ROLE:', col1X, row3Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.role || 'Founder / Executive', col1X + 75, row3Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, data.role || 'Founder / Executive', col1ValX, row3Y, col1ValMaxW, 9.5, 'F1', TEXT_DARK);
 
   doc.addText('CONTACT EMAIL:', col1X, row4Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.email || 'Not provided', col1X + 75, row4Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, data.email || 'Not provided', col1ValX, row4Y, col1ValMaxW, 9.5, 'F1', TEXT_DARK);
 
   // Right Column
   doc.addText('WORKSHEET REF:', col2X, row1Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(data.submissionRef || 'FNM-VERIFIED', col2X + 96, row1Y, { font: 'F2', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, data.submissionRef || 'FNM-VERIFIED', col2ValX, row1Y, col2ValMaxW, 9.5, 'F2', TEXT_DARK);
 
   const formattedDate = data.submittedAt
     ? typeof data.submittedAt === 'string'
@@ -438,15 +490,21 @@ export function generateMasterclassWorksheetPdf(data: WorksheetPdfData): Buffer 
       : data.submittedAt.toISOString().slice(0, 10)
     : 'Recorded in Session';
   doc.addText('SUBMISSION DATE:', col2X, row2Y, { font: 'F2', size: 8, color: GOLD });
-  doc.addText(formattedDate, col2X + 96, row2Y, { font: 'F1', size: 9.5, color: TEXT_DARK });
+  renderFitText(doc, formattedDate, col2ValX, row2Y, col2ValMaxW, 9.5, 'F1', TEXT_DARK);
 
   doc.addText('STATUS / STAGE:', col2X, row3Y, { font: 'F2', size: 8, color: GOLD });
-  const statusStageStr = `${(data.status || 'Submitted').toUpperCase()} (Stage ${data.currentStage || 4} of 4 - ${data.courseProgress || 100}% Complete)`;
-  doc.addText(statusStageStr, col2X + 96, row3Y, { font: 'F2', size: 8.5, color: GOLD });
+  const statusStageStr = `${(data.status || 'Submitted').toUpperCase()} (Stage ${data.currentStage || 4}/4 · ${data.courseProgress || 100}%)`;
+  renderFitText(doc, statusStageStr, col2ValX, row3Y, col2ValMaxW, 8.5, 'F2', GOLD);
 
   doc.addText('STRATEGIC REVIEW:', col2X, row4Y, { font: 'F2', size: 8, color: GOLD });
-  const reviewBookingStr = data.bookingRef ? `Confirmed (${data.bookingRef}${data.slotTime ? ` - ${data.slotTime}` : ''})` : 'Pending calendar slot booking';
-  doc.addText(reviewBookingStr, col2X + 96, row4Y, { font: 'F1', size: 8.5, color: TEXT_DARK });
+  if (data.bookingRef) {
+    renderFitText(doc, `Confirmed (${data.bookingRef})`, col2ValX, row4Y, col2ValMaxW, 8.5, 'F2', TEXT_DARK);
+    if (data.slotTime) {
+      renderFitText(doc, data.slotTime, col2ValX, row4bY, col2ValMaxW, 8, 'F1', TEXT_MUTED);
+    }
+  } else {
+    renderFitText(doc, 'Pending calendar slot booking', col2ValX, row4Y, col2ValMaxW, 8.5, 'F3', TEXT_MUTED);
+  }
 
   doc.currentY += metaHeight + 18;
 
