@@ -120,6 +120,20 @@ import { newsletterRouter } from './api/routes/newsletter';
 import { masterclassRouter } from './api/routes/masterclass';
 import { attributionRouter } from './api/routes/attribution';
 
+// Prevent all search engine crawling / indexing on backend & staging requests
+app.use((req, res, next) => {
+  const host = (req.get('host') || '').toLowerCase();
+  if (host.includes('staging') || host.includes('test') || host.includes('hstgr.cloud')) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  }
+  next();
+});
+
+// Explicit robots.txt for backend APIs
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+});
+
 app.use(cors(corsOptions));
 app.use(
   express.json({
