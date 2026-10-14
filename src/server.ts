@@ -205,6 +205,9 @@ const pingHandler = (_req: express.Request, res: express.Response) => {
 app.get('/ping', pingHandler);
 app.get('/api/ping', pingHandler);
 
+import { syncDefaultReferralsToDb } from './services/masterclassReferralService';
+
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
 });

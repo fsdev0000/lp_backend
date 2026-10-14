@@ -6,6 +6,7 @@ import {
 } from './masterclassService';
 import { isValidEmail, sanitizeEmail } from './emailValidation';
 import { upsertContact } from './ghl';
+import { incrementReferralUsage } from './masterclassReferralService';
 
 const prisma = new PrismaClient();
 
@@ -321,6 +322,11 @@ async function handleCheckoutSessionSuccess(
         stripeSessionId: sessionId,
       },
     });
+
+    // Increment referral usage count if referral code was used
+    if (session.metadata?.referralCode) {
+      await incrementReferralUsage(session.metadata.referralCode);
+    }
 
     // 5. Retrieve Stripe Tax Invoice details
     let invoiceNumber: string | null = parsedMetadata.invoiceNumber || null;

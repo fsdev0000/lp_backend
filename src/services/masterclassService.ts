@@ -9,6 +9,7 @@ import { escapeHtml, formatOperationalSubmissionDate, renderTemplate } from './e
 import { getMasterclassBucketFiles, createMasterclassSignedUrl } from './supabaseStorageService';
 import { generateIcsContent, generateGoogleCalendarUrl, generateOutlookCalendarUrl, CalendarEventDetails } from './calendarInvite';
 import { generateMasterclassWorksheetPdf } from './masterclassPdfService';
+import { validateReferralInvite, ReferralValidationResult } from './masterclassReferralService';
 
 let prismaInstance: PrismaClient | null = null;
 function getPrisma(): any {
@@ -158,6 +159,7 @@ export interface MasterclassUserPayload {
   privacyConsent?: boolean;
   source?: string;
   returnUrl?: string;
+  inviteCode?: string;
 }
 
 export interface MasterclassDraftPayload {
@@ -391,8 +393,31 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
     };
   }
 
+  // Check referral validation if inviteCode supplied
+  const inviteCode = payload.inviteCode;
+  const referral: ReferralValidationResult | null = inviteCode ? await validateReferralInvite(inviteCode) : null;
+  const isReferralValid = Boolean(referral && referral.valid);
+  const finalAmount = isReferralValid ? (referral?.finalAmountCents || 50000) : 75000;
+  const referralId = isReferralValid && referral?.referralId ? referral.referralId : undefined;
+
   // Upsert or create enrollment
   if (enrollment) {
+    let existingMeta: Record<string, any> = {};
+    try {
+      existingMeta = enrollment.metadata ? JSON.parse(enrollment.metadata) : {};
+    } catch {
+      existingMeta = {};
+    }
+    if (isReferralValid) {
+      existingMeta.referral = {
+        code: referral!.code,
+        referrerName: referral!.referrerName,
+        discountPercent: referral!.discountPercent,
+        originalPriceUsd: 750,
+        finalPriceUsd: 500,
+      };
+    }
+
     enrollment = await prisma.masterclassEnrollment.update({
       where: { id: enrollment.id },
       data: {
@@ -402,7 +427,10 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         phone: payload.phone || enrollment.phone,
         marketingConsent: payload.marketingConsent ?? enrollment.marketingConsent,
         privacyConsent: payload.privacyConsent ?? enrollment.privacyConsent,
-        source: payload.source || enrollment.source,
+        source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : enrollment.source),
+        amount: finalAmount,
+        referralCodeId: referralId,
+        metadata: JSON.stringify(existingMeta),
         sessionToken,
       },
     });
@@ -416,11 +444,23 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         phone: payload.phone,
         marketingConsent: payload.marketingConsent ?? false,
         privacyConsent: payload.privacyConsent ?? true,
-        source: payload.source || 'website',
-        amount: 75000, // US $750 in cents
+        source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : 'website'),
+        amount: finalAmount,
         currency: 'usd',
         paymentStatus: 'pending',
         accessGranted: false,
+        referralCodeId: referralId,
+        metadata: isReferralValid
+          ? JSON.stringify({
+              referral: {
+                code: referral!.code,
+                referrerName: referral!.referrerName,
+                discountPercent: referral!.discountPercent,
+                originalPriceUsd: 750,
+                finalPriceUsd: 500,
+              },
+            })
+          : undefined,
         sessionToken,
       },
     });
@@ -433,22 +473,37 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
   const cancelUrl = `${frontendUrl}${returnPath.startsWith('/') ? returnPath : `/${returnPath}`}?cancelled=true`;
 
   const priceId = process.env.STRIPE_MASTERCLASS_PRICE_ID;
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = priceId
-    ? [{ price: priceId, quantity: 1 }]
-    : [
-      {
-        price_data: {
-          currency: 'usd',
-          unit_amount: 75000, // US $750.00
-          product_data: {
-            name: "The Founder’s Next Move — Executive Masterclass",
-            description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
-            images: ['https://leadersperformance.ae/og-image.jpg'],
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = isReferralValid
+    ? [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: 50000, // US $500.00 (33.33% off 750)
+            product_data: {
+              name: "The Founder’s Next Move — Executive Masterclass",
+              description: `Special Referral Privilege via ${referral!.referrerName} (33.33% off — US $750 down to US $500)`,
+              images: ['https://leadersperformance.ae/og-image.jpg'],
+            },
           },
+          quantity: 1,
         },
-        quantity: 1,
-      },
-    ];
+      ]
+    : priceId
+      ? [{ price: priceId, quantity: 1 }]
+      : [
+          {
+            price_data: {
+              currency: 'usd',
+              unit_amount: 75000, // US $750.00
+              product_data: {
+                name: "The Founder’s Next Move — Executive Masterclass",
+                description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
+                images: ['https://leadersperformance.ae/og-image.jpg'],
+              },
+            },
+            quantity: 1,
+          },
+        ];
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
@@ -458,16 +513,22 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
     invoice_creation: {
       enabled: true,
       invoice_data: {
-        description: 'The Founder’s Next Move — Executive Masterclass',
+        description: isReferralValid
+          ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referral!.referrerName})`
+          : 'The Founder’s Next Move — Executive Masterclass',
         metadata: {
           enrollmentId: enrollment.id,
           product: 'The Founder’s Next Move',
+          referralCode: isReferralValid ? referral!.code : undefined,
+          referrerName: isReferralValid ? referral!.referrerName : undefined,
         },
       },
     },
     payment_intent_data: {
       receipt_email: normalizedEmail,
-      description: 'The Founder’s Next Move — Executive Masterclass',
+      description: isReferralValid
+        ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referral!.referrerName})`
+        : 'The Founder’s Next Move — Executive Masterclass',
     },
     success_url: successUrl,
     cancel_url: cancelUrl,
@@ -476,8 +537,13 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       email: normalizedEmail,
       fullName: normalizedName,
       company: normalizedCompany,
-      source: payload.source || 'website',
+      source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : 'website'),
       product: 'The Founder’s Next Move',
+      referralCode: isReferralValid ? referral!.code : undefined,
+      referrerName: isReferralValid ? referral!.referrerName : undefined,
+      discountPercent: isReferralValid ? referral!.discountPercent : undefined,
+      originalPriceUsd: 750,
+      finalPriceUsd: isReferralValid ? 500 : 750,
     },
   });
 
@@ -2411,6 +2477,9 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
     )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 600; text-decoration: underline;">Download Invoice PDF &darr;</a></td>`;
   }
 
+  const amountPaidCents = data.enrollment.amount || 75000;
+  const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
+
   if (rawTemplate) {
     return rawTemplate
       .replace(/{{invoice_number}}/g, escapeHtml(invoiceNumber))
@@ -2418,11 +2487,12 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
       .replace(/{{company}}/g, company)
       .replace(/{{email}}/g, email)
       .replace(/{{paid_at}}/g, escapeHtml(paidAtFormatted))
+      .replace(/{{amount_paid_formatted}}/g, amountPaidFormatted)
       .replace(/{{masterclass_url}}/g, escapeHtml(masterclassUrl))
       .replace(/{{invoice_links_html}}/g, invoiceLinksHtml);
   }
 
-  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $750.00</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
+  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $${amountPaidFormatted}</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
 }
 
 export async function sendMasterclassPaymentInvoiceEmail(

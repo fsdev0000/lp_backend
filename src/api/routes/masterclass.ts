@@ -22,6 +22,7 @@ import {
   getMasterclassWorksheetPdfUrl,
   sendMasterclassInvoiceByEmail,
 } from '../../services/masterclassService';
+import { validateReferralInvite } from '../../services/masterclassReferralService';
 import { handleStripeWebhook } from '../controllers/stripeWebhookController';
 import { createRateLimiter } from '../../middleware/rateLimiter';
 
@@ -101,6 +102,7 @@ const CreateSessionSchema = z.object({
   privacyConsent: z.boolean().optional().default(true),
   source: z.string().trim().optional(),
   returnUrl: z.string().trim().optional(),
+  inviteCode: z.string().trim().optional(),
 });
 
 const SaveDraftSchema = z.object({
@@ -493,6 +495,102 @@ masterclassRouter.post('/create-session', masterclassLimiter, async (req: Reques
       success: false,
       error: 'STRIPE_SESSION_ERROR',
       message: err.message || 'Failed to create enrollment checkout session.',
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /masterclass/validate-invite:
+ *   get:
+ *     summary: Validate Masterclass Referral / Promo Invite Code
+ *     description: Checks referral code against registered referrers (Danielle, Divalos), start/end dates, and returns discount breakdown.
+ *     tags:
+ *       - Masterclass
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Referral code (e.g. 0XQZ6IN, DIVALOS)
+ *     responses:
+ *       200:
+ *         description: Referral validation outcome
+ *   post:
+ *     summary: Validate Masterclass Referral / Promo Invite Code (POST)
+ *     description: Body-based referral validation alternative.
+ *     tags:
+ *       - Masterclass
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Referral validation outcome
+ */
+masterclassRouter.get('/validate-invite', async (req: Request, res: Response) => {
+  try {
+    const rawCode = (req.query.code || req.query.invite || req.query.inviteCode) as string | undefined;
+    if (!rawCode || !rawCode.trim()) {
+      res.status(400).json({
+        success: false,
+        valid: false,
+        error: 'MISSING_CODE',
+        message: 'A referral or invite code is required.',
+      });
+      return;
+    }
+
+    const result = await validateReferralInvite(rawCode);
+    res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error('[Masterclass] Error validating referral code:', err);
+    res.status(500).json({
+      success: false,
+      valid: false,
+      error: 'SERVER_ERROR',
+      message: err.message || 'Failed to validate referral code.',
+    });
+  }
+});
+
+masterclassRouter.post('/validate-invite', async (req: Request, res: Response) => {
+  try {
+    const rawCode = (req.body?.code || req.body?.invite || req.body?.inviteCode) as string | undefined;
+    if (!rawCode || !rawCode.trim()) {
+      res.status(400).json({
+        success: false,
+        valid: false,
+        error: 'MISSING_CODE',
+        message: 'A referral or invite code is required in request body.',
+      });
+      return;
+    }
+
+    const result = await validateReferralInvite(rawCode);
+    res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error('[Masterclass] Error validating referral code (POST):', err);
+    res.status(500).json({
+      success: false,
+      valid: false,
+      error: 'SERVER_ERROR',
+      message: err.message || 'Failed to validate referral code.',
     });
   }
 });

@@ -209,7 +209,7 @@ model MasterclassEnrollment {
   phone                 String?
   marketingConsent      Boolean   @default(false) @map("marketing_consent")
   privacyConsent        Boolean   @default(true) @map("privacy_consent")
-  amount                Int       @default(50000)
+  amount                Int       @default(75000)
   currency              String    @default("usd")
   paymentStatus         String    @default("pending") @map("payment_status")
   stripeSessionId       String?   @unique @map("stripe_session_id")
@@ -220,6 +220,8 @@ model MasterclassEnrollment {
   currentStage          Int       @default(1) @map("current_stage")
   source                String?
   metadata              String?
+  referralCodeId        String?   @map("referral_code_id")
+  referralCode          MasterclassReferralCode? @relation(fields: [referralCodeId], references: [id])
   paidAt                DateTime? @map("paid_at")
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
@@ -228,7 +230,30 @@ model MasterclassEnrollment {
   bookings              MasterclassBooking[]
 
   @@index([email])
+  @@index([referralCodeId])
   @@map("masterclass_enrollments")
+}
+
+model MasterclassReferralCode {
+  id              String      @id @default(uuid())
+  code            String      @unique // e.g. "0XQZ6IN", "DIVALOS"
+  referrerName    String      @map("referrer_name") // "Danielle", "Divalos"
+  referrerEmail   String?     @map("referrer_email")
+  discountPercent Float       @default(33.33) @map("discount_percent") // 33.33%
+  stripeCouponId  String?     @map("stripe_coupon_id")
+  startDate       DateTime    @default(now()) @map("start_date")
+  endDate         DateTime    @map("end_date")
+  isActive        Boolean     @default(true) @map("is_active")
+  maxUses         Int?        @map("max_uses")
+  usedCount       Int         @default(0) @map("used_count")
+  notes           String?
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  enrollments     MasterclassEnrollment[]
+
+  @@index([code])
+  @@map("masterclass_referral_codes")
 }
 
 model MasterclassWorkbookSubmission {
