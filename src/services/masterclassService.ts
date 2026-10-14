@@ -399,6 +399,10 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
   const isReferralValid = Boolean(referral && referral.valid);
   const finalAmount = isReferralValid ? (referral?.finalAmountCents || 50000) : 75000;
   const referralId = isReferralValid && referral?.referralId ? referral.referralId : undefined;
+  const referrerName = (isReferralValid && referral?.referrerName) ? referral.referrerName : '';
+  const referralCode = (isReferralValid && referral?.code) ? referral.code : '';
+  const referralDiscountPercent = (isReferralValid && referral?.discountPercent != null) ? referral.discountPercent : 33.33;
+  const referralSource = referrerName ? `referral:${referrerName.toLowerCase()}` : '';
 
   // Upsert or create enrollment
   if (enrollment) {
@@ -410,9 +414,9 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
     }
     if (isReferralValid) {
       existingMeta.referral = {
-        code: referral!.code,
-        referrerName: referral!.referrerName,
-        discountPercent: referral!.discountPercent,
+        code: referralCode,
+        referrerName: referrerName,
+        discountPercent: referralDiscountPercent,
         originalPriceUsd: 750,
         finalPriceUsd: 500,
       };
@@ -427,7 +431,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         phone: payload.phone || enrollment.phone,
         marketingConsent: payload.marketingConsent ?? enrollment.marketingConsent,
         privacyConsent: payload.privacyConsent ?? enrollment.privacyConsent,
-        source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : enrollment.source),
+        source: payload.source || (referralSource || enrollment.source),
         amount: finalAmount,
         referralCodeId: referralId,
         metadata: JSON.stringify(existingMeta),
@@ -444,7 +448,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         phone: payload.phone,
         marketingConsent: payload.marketingConsent ?? false,
         privacyConsent: payload.privacyConsent ?? true,
-        source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : 'website'),
+        source: payload.source || (referralSource || 'website'),
         amount: finalAmount,
         currency: 'usd',
         paymentStatus: 'pending',
@@ -453,9 +457,9 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         metadata: isReferralValid
           ? JSON.stringify({
               referral: {
-                code: referral!.code,
-                referrerName: referral!.referrerName,
-                discountPercent: referral!.discountPercent,
+                code: referralCode,
+                referrerName: referrerName,
+                discountPercent: referralDiscountPercent,
                 originalPriceUsd: 750,
                 finalPriceUsd: 500,
               },
@@ -481,7 +485,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
             unit_amount: 50000, // US $500.00 (33.33% off 750)
             product_data: {
               name: "The Founder’s Next Move — Executive Masterclass",
-              description: `Special Referral Privilege via ${referral!.referrerName} (33.33% off — US $750 down to US $500)`,
+              description: `Special Referral Privilege via ${referrerName || 'Executive Invitation'} (33.33% off — US $750 down to US $500)`,
               images: ['https://leadersperformance.ae/og-image.jpg'],
             },
           },
@@ -514,20 +518,20 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       enabled: true,
       invoice_data: {
         description: isReferralValid
-          ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referral!.referrerName})`
+          ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referrerName || 'Privilege'})`
           : 'The Founder’s Next Move — Executive Masterclass',
         metadata: {
           enrollmentId: enrollment.id,
           product: 'The Founder’s Next Move',
-          referralCode: isReferralValid ? referral!.code : undefined,
-          referrerName: isReferralValid ? referral!.referrerName : undefined,
+          ...(isReferralValid && referralCode ? { referralCode } : {}),
+          ...(isReferralValid && referrerName ? { referrerName } : {}),
         },
       },
     },
     payment_intent_data: {
       receipt_email: normalizedEmail,
       description: isReferralValid
-        ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referral!.referrerName})`
+        ? `The Founder’s Next Move — Executive Masterclass (Referral: ${referrerName || 'Privilege'})`
         : 'The Founder’s Next Move — Executive Masterclass',
     },
     success_url: successUrl,
@@ -537,11 +541,11 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       email: normalizedEmail,
       fullName: normalizedName,
       company: normalizedCompany,
-      source: payload.source || (isReferralValid ? `referral:${referral!.referrerName.toLowerCase()}` : 'website'),
+      source: payload.source || (referralSource || 'website'),
       product: 'The Founder’s Next Move',
-      referralCode: isReferralValid ? referral!.code : undefined,
-      referrerName: isReferralValid ? referral!.referrerName : undefined,
-      discountPercent: isReferralValid ? referral!.discountPercent : undefined,
+      ...(isReferralValid && referralCode ? { referralCode } : {}),
+      ...(isReferralValid && referrerName ? { referrerName } : {}),
+      ...(isReferralValid ? { discountPercent: referralDiscountPercent } : {}),
       originalPriceUsd: 750,
       finalPriceUsd: isReferralValid ? 500 : 750,
     },
