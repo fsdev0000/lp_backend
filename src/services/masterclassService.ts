@@ -417,7 +417,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         marketingConsent: payload.marketingConsent ?? false,
         privacyConsent: payload.privacyConsent ?? true,
         source: payload.source || 'website',
-        amount: 50000, // US $500 in cents
+        amount: 75000, // US $750 in cents
         currency: 'usd',
         paymentStatus: 'pending',
         accessGranted: false,
@@ -439,7 +439,7 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
       {
         price_data: {
           currency: 'usd',
-          unit_amount: 50000, // US $500.00
+          unit_amount: 75000, // US $750.00
           product_data: {
             name: "The Founder’s Next Move — Executive Masterclass",
             description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
@@ -604,7 +604,7 @@ export async function verifyPayment(sessionId: string) {
         invoiceNumber,
         hostedInvoiceUrl,
         invoicePdf,
-        amountPaid: enrollment.amount || 50000,
+        amountPaid: enrollment.amount || 75000,
         currency: enrollment.currency || 'usd',
         paidAt: enrollment.paidAt,
         stripeSessionId: sessionId,
@@ -2422,7 +2422,7 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
       .replace(/{{invoice_links_html}}/g, invoiceLinksHtml);
   }
 
-  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $500.00</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
+  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $750.00</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
 }
 
 export async function sendMasterclassPaymentInvoiceEmail(
@@ -2458,7 +2458,7 @@ export async function sendMasterclassPaymentInvoiceEmail(
   try {
     const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${
       data.enrollment.company || 'Individual'
-    }) — USD $500.00 — Invoice ${invoiceNumber}`;
+    }) — USD $750.00 — Invoice ${invoiceNumber}`;
     for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
       try {
         const staffContactId = await upsertContact({
@@ -2536,7 +2536,7 @@ export async function sendMasterclassInvoiceByEmail(
     invoiceNumber,
     hostedInvoiceUrl,
     invoicePdf,
-    amountPaid: enrollment.amount || 50000,
+    amountPaid: enrollment.amount || 75000,
     currency: enrollment.currency || 'usd',
     paidAt: enrollment.paidAt,
     stripeSessionId: enrollment.stripeSessionId,
@@ -2807,7 +2807,7 @@ export const DEFAULT_MASTERCLASS_CONFIG = {
   title: "The Founder’s Next Move — Executive Masterclass",
   subtitle: "4 Video Briefing Modules, Digital Interactive WorkSheet & 1-on-1 Strategic Review with Lionel Eersteling",
   host: "Lionel Eersteling",
-  investment: "US $500",
+  investment: "US $750",
   reflectionPauseDurationSeconds: 45,
   totalStages: 4,
   totalVideos: 6,

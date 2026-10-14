@@ -401,7 +401,7 @@ masterclassRouter.get('/auth/me', async (req: Request, res: Response) => {
  * /masterclass/create-session:
  *   post:
  *     summary: Create Masterclass Registration & Stripe Checkout Session
- *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for US $500 Masterclass enrollment. If user already paid, unlocks direct access immediately.
+ *     description: Recognizes user in system, creates or updates enrollment record with validation, and returns a Stripe Checkout Session URL for US $750 Masterclass enrollment. If user already paid, unlocks direct access immediately.
  *     tags:
  *       - Masterclass
  *     requestBody:
@@ -655,7 +655,7 @@ masterclassRouter.get('/modules', (_req: Request, res: Response) => {
     success: true,
     title: 'The Founder’s Next Move — Executive Masterclass',
     host: 'Lionel Eersteling',
-    investment: 'US $500',
+    investment: 'US $750',
     totalModules: 4,
     reflectionPauseDurationSeconds: 45,
     modules: [

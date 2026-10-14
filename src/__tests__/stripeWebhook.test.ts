@@ -61,7 +61,7 @@ describe('Stripe Webhook Multi-Environment & Invoice Delivery', () => {
         email: testEnrollmentEmail,
         fullName: 'Asif Test Founder',
         company: 'Leaders Performance Staging',
-        amount: 50000,
+        amount: 75000,
         currency: 'usd',
         paymentStatus: 'pending',
         stripeSessionId: testSessionId,
