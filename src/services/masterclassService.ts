@@ -640,36 +640,99 @@ export async function verifyPayment(sessionId: string) {
       },
     });
 
-    // Extract official Stripe Tax Invoice details
+    // Extract official Stripe Tax Invoice details with retry & customer fallback
     let invoiceNumber: string | null = null;
     let hostedInvoiceUrl: string | null = null;
     let invoicePdf: string | null = null;
+    let invoiceObj: Stripe.Invoice | null = null;
 
+    // 1. Check if session.invoice is already populated
     if (session.invoice) {
       try {
-        let invoiceObj: Stripe.Invoice | null = null;
         if (typeof session.invoice === 'string') {
           invoiceObj = await stripe.invoices.retrieve(session.invoice);
         } else {
           invoiceObj = session.invoice as Stripe.Invoice;
         }
-
-        if (invoiceObj) {
-          invoiceNumber = invoiceObj.number || invoiceObj.id || null;
-          hostedInvoiceUrl = invoiceObj.hosted_invoice_url ?? null;
-          invoicePdf = invoiceObj.invoice_pdf ?? null;
-        }
-
-        const invoiceId = typeof session.invoice === 'string' ? session.invoice : session.invoice.id;
-        await stripe.invoices.sendInvoice(invoiceId).catch((err: any) => {
-          console.log('[Stripe Invoice API notice]:', err.message);
-        });
       } catch (invErr: any) {
-        console.warn('[Stripe Invoice] Notice inspecting invoice via Stripe API:', invErr.message);
+        console.warn('[Stripe Invoice] Notice inspecting session.invoice via Stripe API:', invErr.message);
       }
     }
 
-    // Always dispatch our executive Payment Receipt & Tax Invoice Email directly to customer
+    // 2. When redirected immediately from checkout, Stripe may need 1-2 seconds to finalize the invoice
+    if (!invoiceObj) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        try {
+          const freshSession = await stripe.checkout.sessions.retrieve(sessionId, {
+            expand: ['invoice'],
+          });
+          if (freshSession.invoice) {
+            if (typeof freshSession.invoice === 'string') {
+              invoiceObj = await stripe.invoices.retrieve(freshSession.invoice);
+            } else {
+              invoiceObj = freshSession.invoice as Stripe.Invoice;
+            }
+            if (invoiceObj) break;
+          }
+        } catch {}
+
+        // Fallback: Check customer's latest invoice
+        if (!invoiceObj && session.customer) {
+          try {
+            const custId = typeof session.customer === 'string' ? session.customer : session.customer.id;
+            const invList = await stripe.invoices.list({ customer: custId, limit: 1 });
+            if (invList.data.length > 0) {
+              invoiceObj = invList.data[0];
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    if (invoiceObj) {
+      invoiceNumber = invoiceObj.number || invoiceObj.id || null;
+      hostedInvoiceUrl = invoiceObj.hosted_invoice_url ?? null;
+      invoicePdf = invoiceObj.invoice_pdf ?? null;
+      const invoiceId = invoiceObj.id;
+      await stripe.invoices.sendInvoice(invoiceId).catch((err: any) => {
+        console.log('[Stripe Invoice API notice]:', err.message);
+      });
+    }
+
+    // 3. Fallback to Stripe charge receipt URL if invoice url is missing
+    if (!hostedInvoiceUrl && session.payment_intent) {
+      try {
+        const piId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent.id;
+        const pi = await stripe.paymentIntents.retrieve(piId, { expand: ['latest_charge'] });
+        const charge = pi.latest_charge as Stripe.Charge;
+        if (charge?.receipt_url) {
+          hostedInvoiceUrl = charge.receipt_url;
+        }
+      } catch (piErr: any) {
+        console.warn('[Stripe Invoice] Notice fetching payment intent receipt:', piErr.message);
+      }
+    }
+
+    // Persist invoice metadata to enrollment so it is cached
+    try {
+      let currentMeta: Record<string, any> = {};
+      try {
+        currentMeta = enrollment.metadata ? JSON.parse(enrollment.metadata) : {};
+      } catch {
+        currentMeta = {};
+      }
+      currentMeta.invoiceNumber = invoiceNumber;
+      currentMeta.hostedInvoiceUrl = hostedInvoiceUrl;
+      currentMeta.invoicePdf = invoicePdf;
+      await prisma.masterclassEnrollment.update({
+        where: { id: enrollment.id },
+        data: { metadata: JSON.stringify(currentMeta) },
+      });
+    } catch {}
+
+    // Always dispatch our executive Payment Receipt & Tax Invoice Email directly to customer & staff
     // This guarantees reliable delivery in Sandbox/Test Mode as well as Live Production!
     try {
       await sendMasterclassPaymentInvoiceEmail({
@@ -2502,12 +2565,199 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
   return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $${amountPaidFormatted}</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
 }
 
+export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentInvoiceEmailData): string {
+  const invoiceNumber = data.invoiceNumber || 'INV-MASTERCLASS';
+  const fullName = escapeHtml(data.enrollment.fullName || 'Executive Participant');
+  const company = escapeHtml(data.enrollment.company || 'Not provided');
+  const email = escapeHtml(data.enrollment.email);
+  const amountPaidCents = data.amountPaid ?? data.enrollment.amount ?? 75000;
+  const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
+
+  let paidAtFormatted = '';
+  try {
+    const d = data.paidAt ? new Date(data.paidAt) : new Date();
+    paidAtFormatted =
+      d.toLocaleString('en-US', {
+        timeZone: 'Asia/Dubai',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }) + ' GST (Dubai)';
+  } catch {
+    paidAtFormatted = new Date().toUTCString();
+  }
+
+  let referralInfo = 'Direct / Standard Executive Tier (US $750)';
+  try {
+    const meta = data.enrollment.metadata ? JSON.parse(data.enrollment.metadata) : {};
+    if (meta.referral?.referrerName) {
+      referralInfo = `${escapeHtml(meta.referral.referrerName)} (Code: ${escapeHtml(meta.referral.code || '')} — ${meta.referral.discountPercent || 33.33}% Privilege)`;
+    }
+  } catch {}
+
+  const replyUrl = `mailto:${encodeURIComponent(data.enrollment.email)}?subject=${encodeURIComponent(
+    `Welcome to The Founder’s Next Move — Leaders Performance`
+  )}`;
+
+  let actionButtonsHtml = '';
+  if (data.hostedInvoiceUrl) {
+    actionButtonsHtml += `
+      <td style="padding-right: 12px; padding-bottom: 10px;">
+        <a href="${escapeHtml(data.hostedInvoiceUrl)}" target="_blank" style="display: inline-block; background-color: #d0a35a; border: 1px solid #d0a35a; color: #010d20; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 22px; text-align: center; border-radius: 2px;">
+          View Stripe Tax Invoice&nbsp;&nbsp;&rarr;
+        </a>
+      </td>
+    `;
+  }
+  if (data.invoicePdf) {
+    actionButtonsHtml += `
+      <td style="padding-right: 12px; padding-bottom: 10px;">
+        <a href="${escapeHtml(data.invoicePdf)}" target="_blank" style="display: inline-block; background-color: #021329; border: 1px solid #d0a35a; color: #d0a35a; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px; padding: 11px 20px; text-align: center; border-radius: 2px;">
+          Download PDF Invoice&nbsp;&nbsp;&darr;
+        </a>
+      </td>
+    `;
+  }
+  actionButtonsHtml += `
+    <td style="padding-bottom: 10px;">
+      <a href="${replyUrl}" target="_blank" style="display: inline-block; background-color: transparent; border: 1px solid #9f6511; color: #1b2637; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px; padding: 11px 20px; text-align: center; border-radius: 2px;">
+        Email ${fullName}
+      </a>
+    </td>
+  `;
+
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <title>[Staff Alert] Masterclass Enrollment Confirmed: ${fullName}</title>
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;500&display=swap');
+    body { margin: 0; padding: 0; background-color: #f2ede3; font-family: 'Inter', Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f2ede3; font-family: 'Inter', Arial, sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f2ede3; width: 100%; margin: 0; padding: 32px 0;">
+    <tr>
+      <td align="center" style="padding: 0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; width: 100%; background-color: #fbf8f2; border: 1px solid #ebe4db; border-collapse: separate; margin: 0 auto; text-align: left;">
+          <tr>
+            <td style="background-color: #021329; border-bottom: 1px solid #d0a35a; padding: 30px 40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="left" style="vertical-align: middle;">
+                    <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
+                      <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                    </a>
+                  </td>
+                  <td align="right" style="vertical-align: middle; font-family: 'Inter', Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #d0a35a;">
+                    EXECUTIVE ADVISORY · STAFF ALERT
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family: 'Inter', Arial, sans-serif; font-size: 12px; font-weight: 600; line-height: 17px; letter-spacing: 1.44px; text-transform: uppercase; color: #9f6511; padding-bottom: 10px;">
+                    NEW ENROLLMENT · PAYMENT VERIFIED
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family: 'Playfair Display', Georgia, serif; font-size: 28px; font-weight: 400; line-height: 34px; color: #010d20; padding-bottom: 12px;">
+                    Participant Enrolled &amp; Access Granted
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family: 'Inter', Arial, sans-serif; font-size: 15px; font-weight: 400; line-height: 24px; color: #4a5568; padding-bottom: 28px;">
+                    <strong>${fullName}</strong> has completed payment of <strong>USD $${amountPaidFormatted}</strong> for <em>The Founder’s Next Move — Executive Masterclass</em>. Curriculum video briefings and interactive workbook access are now unlocked.
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Transaction Meta Table -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top: 1px solid #ebe4db; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">PARTICIPANT</td>
+                  <td style="padding: 13px 0; font-size: 15px; font-weight: 600; color: #010d20;">${fullName}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">ORGANIZATION</td>
+                  <td style="padding: 13px 0; font-size: 14.5px; font-weight: 500; color: #010d20;">${company}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">EMAIL</td>
+                  <td style="padding: 13px 0; font-size: 14.5px; font-weight: 500; color: #010d20;"><a href="mailto:${email}" style="color: #9f6511; text-decoration: underline;">${email}</a></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">AMOUNT PAID</td>
+                  <td style="padding: 13px 0; font-size: 16px; font-weight: 700; color: #059669;">USD $${amountPaidFormatted}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">INVOICE NUMBER</td>
+                  <td style="padding: 13px 0; font-size: 14.5px; font-weight: 700; color: #010d20;">${escapeHtml(invoiceNumber)}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">PAYMENT DATE</td>
+                  <td style="padding: 13px 0; font-size: 14px; font-weight: 500; color: #4a5568;">${escapeHtml(paidAtFormatted)}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">PRICING TIER</td>
+                  <td style="padding: 13px 0; font-size: 14px; font-weight: 500; color: #010d20;">${referralInfo}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ebe4db;">
+                  <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">NEXT MILESTONE</td>
+                  <td style="padding: 13px 0; font-size: 14px; font-weight: 500; color: #4a5568;">Candidate completes 4-stage digital workbook &amp; will schedule 1-on-1 strategic review with Lionel on Zoom.</td>
+                </tr>
+              </table>
+
+              <!-- Staff Actions -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 28px;">
+                <tr>
+                  <td>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        ${actionButtonsHtml}
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #010d20; border-top: 1px solid rgba(248,244,237,0.14); padding: 22px 40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family: 'Inter', Arial, sans-serif; font-size: 12px; font-weight: 600; color: #fbf8f2; text-align: left;">
+                    Leaders Performance Management Consultancies
+                  </td>
+                  <td style="font-family: 'Inter', Arial, sans-serif; font-size: 12px; font-weight: 400; color: #d0a35a; text-align: right;">
+                    Internal Notification
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 export async function sendMasterclassPaymentInvoiceEmail(
   data: MasterclassPaymentInvoiceEmailData
 ): Promise<boolean> {
   const invoiceNumber = data.invoiceNumber || 'INV-MASTERCLASS';
-  const subject = `The Founder’s Next Move — Payment Receipt & Tax Invoice (${invoiceNumber})`;
-  const html = buildMasterclassInvoiceEmailHtml(data);
+  const customerSubject = `The Founder’s Next Move — Payment Receipt & Tax Invoice (${invoiceNumber})`;
+  const customerHtml = buildMasterclassInvoiceEmailHtml(data);
 
   let delivered = false;
 
@@ -2521,7 +2771,7 @@ export async function sendMasterclassPaymentInvoiceEmail(
     });
 
     if (contactId) {
-      await sendEmail(contactId, subject, html);
+      await sendEmail(contactId, customerSubject, customerHtml);
       console.log(
         `[Masterclass Invoice] Successfully delivered invoice email to customer ${data.enrollment.email} (Invoice: ${invoiceNumber})`
       );
@@ -2537,6 +2787,8 @@ export async function sendMasterclassPaymentInvoiceEmail(
     const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${
       data.enrollment.company || 'Individual'
     }) — USD $${amountPaidFormatted} — Invoice ${invoiceNumber}`;
+    const staffHtml = buildMasterclassStaffPaymentAlertHtml(data);
+
     for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
       try {
         const staffContactId = await upsertContact({
@@ -2546,7 +2798,7 @@ export async function sendMasterclassPaymentInvoiceEmail(
           tags: ['lp-staff', 'internal-notification', 'masterclass-admin', 'payment-alert'],
         });
         if (staffContactId) {
-          await sendEmail(staffContactId, staffSubject, html);
+          await sendEmail(staffContactId, staffSubject, staffHtml);
           console.log(`[Masterclass Invoice] Staff payment & invoice alert delivered to: ${recipient.email}`);
         }
       } catch (staffErr: any) {
