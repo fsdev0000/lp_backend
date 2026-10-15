@@ -476,38 +476,38 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
   const successUrl = `${frontendUrl}${returnPath.startsWith('/') ? returnPath : `/${returnPath}`}?session_id={CHECKOUT_SESSION_ID}&success=true`;
   const cancelUrl = `${frontendUrl}${returnPath.startsWith('/') ? returnPath : `/${returnPath}`}?cancelled=true`;
 
-  const priceId = process.env.STRIPE_MASTERCLASS_PRICE_ID;
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = isReferralValid
+  const masterclassProductId = process.env.STRIPE_MASTERCLASS_PRODUCT_ID;
+  const masterclassImageUrl =
+    process.env.STRIPE_MASTERCLASS_IMAGE_URL ||
+    'https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/the-founders-next-move.png';
+
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = masterclassProductId
     ? [
         {
           price_data: {
             currency: 'usd',
-            unit_amount: 50000, // US $500.00 (33.33% off 750)
-            product_data: {
-              name: "The Founder’s Next Move — Executive Masterclass",
-              description: `Special Referral Privilege via ${referrerName || 'Executive Invitation'} (33.33% off — US $750 down to US $500)`,
-              images: ['https://leadersperformance.ae/og-image.jpg'],
-            },
+            unit_amount: isReferralValid ? 50000 : 75000,
+            product: masterclassProductId,
           },
           quantity: 1,
         },
       ]
-    : priceId
-      ? [{ price: priceId, quantity: 1 }]
-      : [
-          {
-            price_data: {
-              currency: 'usd',
-              unit_amount: 75000, // US $750.00
-              product_data: {
-                name: "The Founder’s Next Move — Executive Masterclass",
-                description: '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
-                images: ['https://leadersperformance.ae/og-image.jpg'],
-              },
+    : [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: isReferralValid ? 50000 : 75000,
+            product_data: {
+              name: "The Founder’s Next Move — Executive Masterclass",
+              description: isReferralValid
+                ? `Special Referral Privilege via ${referrerName || 'Executive Invitation'} (33.33% off — US $750 down to US $500)`
+                : '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
+              images: [masterclassImageUrl],
             },
-            quantity: 1,
           },
-        ];
+          quantity: 1,
+        },
+      ];
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
