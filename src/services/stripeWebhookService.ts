@@ -312,6 +312,8 @@ async function handleCheckoutSessionSuccess(
         ? session.payment_intent
         : session.payment_intent?.id;
 
+    const actualAmountPaid = session.amount_total ?? enrollment.amount ?? 75000;
+
     await prisma.masterclassEnrollment.update({
       where: { id: enrollment.id },
       data: {
@@ -320,6 +322,7 @@ async function handleCheckoutSessionSuccess(
         paidAt: enrollment.paidAt || new Date(),
         stripePaymentIntentId: paymentIntentId || enrollment.stripePaymentIntentId,
         stripeSessionId: sessionId,
+        amount: actualAmountPaid,
       },
     });
 
@@ -369,7 +372,7 @@ async function handleCheckoutSessionSuccess(
         invoiceNumber,
         hostedInvoiceUrl,
         invoicePdf,
-        amountPaid: enrollment.amount || 75000,
+        amountPaid: actualAmountPaid,
         currency: enrollment.currency || 'usd',
         paidAt: enrollment.paidAt || new Date(),
         stripeSessionId: sessionId,

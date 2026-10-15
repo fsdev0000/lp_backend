@@ -627,12 +627,15 @@ export async function verifyPayment(sessionId: string) {
         ? session.payment_intent
         : session.payment_intent?.id;
 
+    const sessionAmountPaid = session.amount_total ?? enrollment.amount ?? 75000;
+
     enrollment = await prisma.masterclassEnrollment.update({
       where: { id: enrollment.id },
       data: {
         paymentStatus: 'paid',
         accessGranted: true,
         paidAt: enrollment.paidAt || new Date(),
+        amount: sessionAmountPaid,
         stripePaymentIntentId: paymentIntentId || enrollment.stripePaymentIntentId,
       },
     });
@@ -674,7 +677,7 @@ export async function verifyPayment(sessionId: string) {
         invoiceNumber,
         hostedInvoiceUrl,
         invoicePdf,
-        amountPaid: enrollment.amount || 75000,
+        amountPaid: sessionAmountPaid,
         currency: enrollment.currency || 'usd',
         paidAt: enrollment.paidAt,
         stripeSessionId: sessionId,
@@ -2481,7 +2484,7 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
     )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 600; text-decoration: underline;">Download Invoice PDF &darr;</a></td>`;
   }
 
-  const amountPaidCents = data.enrollment.amount || 75000;
+  const amountPaidCents = data.amountPaid ?? data.enrollment.amount ?? 75000;
   const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
 
   if (rawTemplate) {
@@ -2530,9 +2533,10 @@ export async function sendMasterclassPaymentInvoiceEmail(
 
   // 2. Company Staff Alert Dispatch (info@leadersperformance.ae)
   try {
+    const amountPaidFormatted = (((data.amountPaid ?? data.enrollment.amount) || 75000) / 100).toFixed(2);
     const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${
       data.enrollment.company || 'Individual'
-    }) — USD $750.00 — Invoice ${invoiceNumber}`;
+    }) — USD $${amountPaidFormatted} — Invoice ${invoiceNumber}`;
     for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
       try {
         const staffContactId = await upsertContact({
