@@ -244,6 +244,73 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
 });
 
 /**
+ * GET /api/v1/payments/checkout/:sessionId
+ * Returns verified payment status and entitlement for the checkout success page.
+ * Supports both Audiobooks and PDF books.
+ */
+checkoutRouter.get('/payments/checkout/:sessionId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid sessionId parameter' });
+      return;
+    }
+
+    const stripe = getStripeInstance();
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['line_items'],
+    });
+
+    if (!session) {
+      res.status(404).json({ error: 'Checkout session not found' });
+      return;
+    }
+
+    const isPaid = session.payment_status === 'paid';
+    const isAudiobook =
+      session.metadata?.productType === 'audiobook' ||
+      session.metadata?.bookId === 'reset-by-discipline';
+
+    if (isAudiobook) {
+      const { checkPurchaseAccess } = require('../../services/audiobookService');
+      const accessInfo = await checkPurchaseAccess('reset-by-discipline', { sessionId });
+
+      res.status(200).json({
+        status: isPaid ? 'paid' : session.payment_status || 'pending',
+        paid: isPaid,
+        sessionId: session.id,
+        productType: 'audiobook',
+        bookId: 'reset-by-discipline',
+        hasAccess: accessInfo.hasAccess,
+        accessToken: accessInfo.accessToken || null,
+        customerEmail: session.customer_details?.email || session.customer_email || accessInfo.customerEmail || null,
+        amount: session.amount_total,
+        currency: session.currency,
+        returnPath: session.metadata?.returnPath || null,
+      });
+      return;
+    }
+
+    // Default: Book or standard checkout
+    const version = getSessionVersion(session);
+    res.status(200).json({
+      status: isPaid ? 'paid' : session.payment_status || 'pending',
+      paid: isPaid,
+      sessionId: session.id,
+      version,
+      customerEmail: session.customer_details?.email || session.customer_email || null,
+      amount: session.amount_total,
+      currency: session.currency,
+      returnPath: session.metadata?.returnPath || null,
+    });
+  } catch (error: any) {
+    console.error('[Stripe Payments] Error checking checkout status:', error?.message || error);
+    res.status(500).json({ error: 'Unable to verify payment status' });
+  }
+});
+
+/**
  * GET /api/download?session_id=...
  * Serves the private PDF book (English or Dutch) only after verifying payment directly with Stripe.
  */
