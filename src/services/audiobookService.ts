@@ -6,6 +6,7 @@ import Stripe from 'stripe';
 import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 import { getStripeClient, isProductionEnvironment, recordEventProcessed, isEventProcessed } from './stripeWebhookService';
+import { upsertContact, sendEmail } from './ghl';
 
 const prisma = new PrismaClient();
 
@@ -339,6 +340,17 @@ export async function createAudiobookCheckoutSession(
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
+    invoice_creation: {
+      enabled: true,
+      invoice_data: {
+        description: 'Reset by Discipline — English Audiobook',
+        metadata: {
+          bookId: normalized,
+          product: 'Reset by Discipline (English Audiobook)',
+          author: 'Lionel Eersteling',
+        },
+      },
+    },
     line_items: [
       {
         price: priceId,
@@ -604,6 +616,7 @@ export async function handleAudiobookWebhookSession(
 
   if (eventType === 'checkout.session.completed' || eventType === 'checkout.session.async_payment_succeeded') {
     const isPaid = session.payment_status === 'paid';
+    let accessToken = purchase?.accessToken;
 
     if (purchase) {
       await prisma.audiobookPurchase.update({
@@ -618,7 +631,9 @@ export async function handleAudiobookWebhookSession(
           amount: amount ?? purchase.amount,
         },
       });
+      accessToken = purchase.accessToken;
     } else {
+      accessToken = generateAccessToken();
       await prisma.audiobookPurchase.create({
         data: {
           bookId: session.metadata?.bookId || DEFAULT_BOOK_ID,
@@ -627,13 +642,61 @@ export async function handleAudiobookWebhookSession(
           stripePaymentIntentId: paymentIntentId,
           paymentStatus: isPaid ? 'paid' : session.payment_status || 'pending',
           accessGranted: isPaid,
-          accessToken: generateAccessToken(),
+          accessToken,
           customerEmail,
           customerName,
           amount,
           currency: session.currency || 'usd',
           paidAt: isPaid ? new Date() : null,
         },
+      });
+    }
+
+    // Dispatch confirmation email to customer (with Stripe invoice) and staff alert to info@leadersperformance.ae
+    const recipientEmail = customerEmail || purchase?.customerEmail;
+    if (isPaid && recipientEmail) {
+      let invoiceNumber: string | null = null;
+      let hostedInvoiceUrl: string | null = null;
+      let invoicePdf: string | null = null;
+
+      try {
+        const stripe = getStripeClient();
+        if (session.invoice) {
+          const invObj =
+            typeof session.invoice === 'string'
+              ? await stripe.invoices.retrieve(session.invoice)
+              : session.invoice;
+          if (invObj) {
+            invoiceNumber = invObj.number || invObj.id || null;
+            hostedInvoiceUrl = invObj.hosted_invoice_url ?? null;
+            invoicePdf = invObj.invoice_pdf ?? null;
+          }
+        }
+        if (!hostedInvoiceUrl && paymentIntentId) {
+          const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+            expand: ['latest_charge'],
+          });
+          const charge = pi.latest_charge as Stripe.Charge | undefined;
+          if (charge?.receipt_url) {
+            hostedInvoiceUrl = charge.receipt_url;
+          }
+        }
+      } catch (invErr: any) {
+        console.warn('[Audiobook Webhook] Notice retrieving invoice details:', invErr.message);
+      }
+
+      await sendAudiobookPurchaseEmails({
+        customerEmail: recipientEmail,
+        customerName: customerName || purchase?.customerName || null,
+        amountPaidCents: amount ?? purchase?.amount ?? 999,
+        currency: session.currency || 'usd',
+        paidAt: new Date(),
+        stripeSessionId: sessionId,
+        stripePaymentIntentId: paymentIntentId,
+        accessToken: accessToken || '',
+        invoiceNumber: invoiceNumber || `INV-AB-${sessionId.slice(-8).toUpperCase()}`,
+        hostedInvoiceUrl,
+        invoicePdf,
       });
     }
 
@@ -682,4 +745,262 @@ export async function handleAudiobookWebhookSession(
   }
 
   return false;
+}
+
+/**
+  * Interface for audiobook purchase confirmation and invoice email data.
+  */
+export interface AudiobookInvoiceEmailData {
+  customerEmail: string;
+  customerName?: string | null;
+  amountPaidCents?: number | null;
+  currency?: string | null;
+  paidAt?: Date | string | null;
+  stripeSessionId: string;
+  stripePaymentIntentId?: string | null;
+  accessToken: string;
+  invoiceNumber?: string | null;
+  hostedInvoiceUrl?: string | null;
+  invoicePdf?: string | null;
+}
+
+function escapeHtml(str: string): string {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function loadAudiobookTemplate(filename: string): string {
+  const possiblePaths = [
+    path.join(__dirname, '../../templates', filename),
+    path.join(__dirname, '../../../templates', filename),
+    path.join(process.cwd(), 'templates', filename),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return fs.readFileSync(p, 'utf8');
+    }
+  }
+  return '';
+}
+
+function formatDubaiDate(date?: Date | string | null): string {
+  try {
+    const d = date ? new Date(date) : new Date();
+    return (
+      d.toLocaleString('en-US', {
+        timeZone: 'Asia/Dubai',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }) + ' GST (Dubai)'
+    );
+  } catch {
+    return new Date().toUTCString();
+  }
+}
+
+/**
+ * Resolves direct PDF invoice download URL from Stripe invoice data.
+ */
+function resolveInvoiceDownloadUrl(
+  invoicePdf?: string | null,
+  hostedInvoiceUrl?: string | null,
+  sessionId?: string
+): string {
+  if (invoicePdf && invoicePdf.startsWith('http')) {
+    return invoicePdf;
+  }
+  if (hostedInvoiceUrl && hostedInvoiceUrl.startsWith('http')) {
+    if (hostedInvoiceUrl.includes('/pdf')) {
+      return hostedInvoiceUrl;
+    }
+    if (hostedInvoiceUrl.includes('invoice.stripe.com')) {
+      return `${hostedInvoiceUrl.replace(/\/$/, '')}/pdf`;
+    }
+    return hostedInvoiceUrl;
+  }
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  return `${frontendUrl}/payment-success?session_id=${encodeURIComponent(
+    sessionId || ''
+  )}&book=reset-by-discipline&product=audiobook`;
+}
+
+/**
+  * Builds the customer email HTML from audiobook-invoice-confirmation.html template.
+  */
+export function buildAudiobookInvoiceEmailHtml(data: AudiobookInvoiceEmailData): string {
+  const rawTemplate = loadAudiobookTemplate('audiobook-invoice-confirmation.html');
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const tokenParam = data.accessToken ? `&token=${encodeURIComponent(data.accessToken)}` : '';
+  const sessionParam = data.stripeSessionId ? `&session_id=${encodeURIComponent(data.stripeSessionId)}` : '';
+  const audiobookUrl = `${frontendUrl}/knowledge?book-name=reset-by-discipline&product=audiobook&format=audiobook${tokenParam}${sessionParam}#reset-by-discipline`;
+  const directDownloadUrl = `${frontendUrl}/api/v1/books/reset-by-discipline/audio?token=${encodeURIComponent(
+    data.accessToken
+  )}&download=true`;
+  const invoiceNumber = data.invoiceNumber || `INV-AB-${data.stripeSessionId.slice(-8).toUpperCase()}`;
+  const fullName = escapeHtml(data.customerName || 'Audiobook Reader');
+  const email = escapeHtml(data.customerEmail);
+  const paidAtFormatted = formatDubaiDate(data.paidAt);
+  const amountPaidCents = data.amountPaidCents ?? 999;
+  const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
+  const invoiceDownloadUrl = resolveInvoiceDownloadUrl(
+    data.invoicePdf,
+    data.hostedInvoiceUrl,
+    data.stripeSessionId
+  );
+
+  let invoiceLinksHtml = '';
+  invoiceLinksHtml += `<td style="padding: 0 10px;"><a href="${escapeHtml(
+    invoiceDownloadUrl
+  )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 700; text-decoration: underline;">Download Tax Invoice (PDF) &darr;</a></td>`;
+
+  if (data.hostedInvoiceUrl && data.hostedInvoiceUrl !== invoiceDownloadUrl) {
+    invoiceLinksHtml += `<td style="padding: 0 10px;"><a href="${escapeHtml(
+      data.hostedInvoiceUrl
+    )}" target="_blank" style="color: #9f6511; font-family: 'Inter', Arial, sans-serif; font-size: 13.5px; font-weight: 600; text-decoration: underline;">View Online Invoice &rarr;</a></td>`;
+  }
+
+  if (rawTemplate) {
+    return rawTemplate
+      .replace(/{{invoice_number}}/g, escapeHtml(invoiceNumber))
+      .replace(/{{full_name}}/g, fullName)
+      .replace(/{{email}}/g, email)
+      .replace(/{{paid_at}}/g, escapeHtml(paidAtFormatted))
+      .replace(/{{amount_paid_formatted}}/g, amountPaidFormatted)
+      .replace(/{{audiobook_url}}/g, escapeHtml(audiobookUrl))
+      .replace(/{{direct_download_url}}/g, escapeHtml(directDownloadUrl))
+      .replace(/{{invoice_download_url}}/g, escapeHtml(invoiceDownloadUrl))
+      .replace(/{{invoice_links_html}}/g, invoiceLinksHtml);
+  }
+
+  return `<!DOCTYPE html><html><body><h1>Reset by Discipline Audiobook - Invoice</h1><p>Invoice: ${escapeHtml(
+    invoiceNumber
+  )}</p><p>Amount: US $${amountPaidFormatted}</p><p><a href="${escapeHtml(
+    invoiceDownloadUrl
+  )}">Download Tax Invoice (PDF)</a></p><p><a href="${escapeHtml(
+    audiobookUrl
+  )}">Listen to Complete Audiobook</a></p><p><a href="${escapeHtml(
+    directDownloadUrl
+  )}">Direct Download Audio (MP3)</a></p></body></html>`;
+}
+
+/**
+  * Builds the staff alert email HTML from audiobook-staff-alert.html template.
+  */
+export function buildAudiobookStaffAlertHtml(data: AudiobookInvoiceEmailData): string {
+  const rawTemplate = loadAudiobookTemplate('audiobook-staff-alert.html');
+  const invoiceNumber = data.invoiceNumber || `INV-AB-${data.stripeSessionId.slice(-8).toUpperCase()}`;
+  const fullName = escapeHtml(data.customerName || 'Audiobook Reader');
+  const email = escapeHtml(data.customerEmail);
+  const paidAtFormatted = formatDubaiDate(data.paidAt);
+  const amountPaidCents = data.amountPaidCents ?? 999;
+  const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
+  const currency = escapeHtml((data.currency || 'usd').toUpperCase());
+  const invoiceDownloadUrl = resolveInvoiceDownloadUrl(
+    data.invoicePdf,
+    data.hostedInvoiceUrl,
+    data.stripeSessionId
+  );
+
+  let staffActionButtonsHtml = `
+    <td style="padding-right: 12px; padding-bottom: 10px;">
+      <a href="${escapeHtml(invoiceDownloadUrl)}" target="_blank" style="display: inline-block; background-color: #021329; border: 1px solid #d0a35a; color: #d0a35a; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 22px; text-align: center; border-radius: 2px;">
+        Download PDF Invoice&nbsp;&nbsp;&darr;
+      </a>
+    </td>
+  `;
+
+  if (data.hostedInvoiceUrl && data.hostedInvoiceUrl !== invoiceDownloadUrl) {
+    staffActionButtonsHtml += `
+      <td style="padding-right: 12px; padding-bottom: 10px;">
+        <a href="${escapeHtml(data.hostedInvoiceUrl)}" target="_blank" style="display: inline-block; background-color: #d0a35a; border: 1px solid #d0a35a; color: #010d20; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 22px; text-align: center; border-radius: 2px;">
+          View Stripe Tax Invoice&nbsp;&nbsp;&rarr;
+        </a>
+      </td>
+    `;
+  }
+
+  if (rawTemplate) {
+    return rawTemplate
+      .replace(/{{headline}}/g, `[Staff Alert] Audiobook Purchased: ${fullName} (Invoice ${escapeHtml(invoiceNumber)})`)
+      .replace(/{{full_name}}/g, fullName)
+      .replace(/{{email}}/g, email)
+      .replace(/{{paid_at}}/g, escapeHtml(paidAtFormatted))
+      .replace(/{{amount_paid_formatted}}/g, amountPaidFormatted)
+      .replace(/{{currency}}/g, currency)
+      .replace(/{{invoice_number}}/g, escapeHtml(invoiceNumber))
+      .replace(/{{stripe_session_id}}/g, escapeHtml(data.stripeSessionId))
+      .replace(/{{stripe_payment_intent_id}}/g, escapeHtml(data.stripePaymentIntentId || 'N/A'))
+      .replace(/{{access_token}}/g, escapeHtml(data.accessToken))
+      .replace(/{{invoice_download_url}}/g, escapeHtml(invoiceDownloadUrl))
+      .replace(/{{staff_action_buttons_html}}/g, staffActionButtonsHtml);
+  }
+
+  return `<!DOCTYPE html><html><body><h1>[Staff Alert] New Audiobook Purchase</h1><p>Customer: ${fullName} (${email})</p><p>Amount: US $${amountPaidFormatted} ${currency}</p><p>Invoice: ${escapeHtml(
+    invoiceNumber
+  )}</p><p><a href="${escapeHtml(invoiceDownloadUrl)}">Download PDF Invoice</a></p></body></html>`;
+}
+
+/**
+  * Dispatches confirmation email to customer (with Stripe tax invoice) and alert to info@leadersperformance.ae.
+  */
+export async function sendAudiobookPurchaseEmails(
+  data: AudiobookInvoiceEmailData
+): Promise<{ customerDelivered: boolean; staffDelivered: boolean }> {
+  const invoiceNumber = data.invoiceNumber || `INV-AB-${data.stripeSessionId.slice(-8).toUpperCase()}`;
+  const amountPaidCents = data.amountPaidCents ?? 999;
+  const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
+  let customerDelivered = false;
+  let staffDelivered = false;
+
+  // 1. Dispatch confirmation & invoice email to customer
+  try {
+    const contactId = await upsertContact({
+      email: data.customerEmail,
+      firstName: data.customerName?.split(' ')[0] || 'Reader',
+      lastName: data.customerName?.split(' ').slice(1).join(' ') || undefined,
+      tags: ['Audiobook Customer', 'Reset by Discipline Audiobook', 'Invoice Sent'],
+    });
+
+    if (contactId) {
+      const customerSubject = `Reset by Discipline Audiobook — Payment Receipt & Tax Invoice (${invoiceNumber})`;
+      const customerHtml = buildAudiobookInvoiceEmailHtml(data);
+      await sendEmail(contactId, customerSubject, customerHtml);
+      console.log(
+        `[Audiobook Invoice] Successfully delivered invoice email to customer ${data.customerEmail} (Invoice: ${invoiceNumber})`
+      );
+      customerDelivered = true;
+    }
+  } catch (err: any) {
+    console.warn('[Audiobook Invoice] Notice dispatching invoice email to customer:', err.message);
+  }
+
+  // 2. Dispatch staff alert email to info@leadersperformance.ae
+  try {
+    const staffContactId = await upsertContact({
+      email: 'info@leadersperformance.ae',
+      firstName: 'Leaders',
+      lastName: 'Performance',
+      tags: ['lp-staff', 'internal-notification', 'audiobook-sale'],
+    });
+
+    if (staffContactId) {
+      const staffSubject = `[Audiobook Purchased] ${data.customerName || 'Customer'} (${data.customerEmail}) — US $${amountPaidFormatted} — Invoice ${invoiceNumber}`;
+      const staffHtml = buildAudiobookStaffAlertHtml(data);
+      await sendEmail(staffContactId, staffSubject, staffHtml);
+      console.log(`[Audiobook Invoice] Staff sale alert delivered to: info@leadersperformance.ae`);
+      staffDelivered = true;
+    }
+  } catch (err: any) {
+    console.warn('[Audiobook Invoice] Notice dispatching staff alert email to info@leadersperformance.ae:', err.message);
+  }
+
+  return { customerDelivered, staffDelivered };
 }
