@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --colors",
+    "test:audiobook": "jest src/__tests__/audiobook.test.ts --colors --runInBand",
+    "test:summary": "node scripts/printTestSummary.js"
   },
   "keywords": [],
   "author": "",
