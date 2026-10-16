@@ -324,7 +324,15 @@ export async function createAudiobookCheckoutSession(
   const priceId = getAudiobookPriceId();
   const stripe = getStripeClient();
 
-  const frontendUrl = (params.origin || process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
+  let originBase: string | null = null;
+  if (params.origin) {
+    try {
+      originBase = new URL(params.origin).origin;
+    } catch {
+      originBase = params.origin.replace(/\/$/, '');
+    }
+  }
+  const frontendUrl = (originBase || process.env.FRONTEND_URL || 'http://localhost:8080').replace(/\/$/, '');
   const returnPath = params.returnPath || `/knowledge?book-name=${normalized}&product=audiobook`;
 
   const accessToken = generateAccessToken();

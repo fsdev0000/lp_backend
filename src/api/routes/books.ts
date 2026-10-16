@@ -101,11 +101,24 @@ booksRouter.post('/:bookId/checkout', async (req: Request, res: Response): Promi
 
   try {
     const { returnPath, customerEmail, customerName } = req.body || {};
-    const origin = req.headers.origin || req.headers.referer || undefined;
+    let origin: string | undefined = undefined;
+    if (req.headers.origin) {
+      try {
+        origin = new URL(String(req.headers.origin)).origin;
+      } catch {
+        origin = String(req.headers.origin).replace(/\/$/, '');
+      }
+    } else if (req.headers.referer) {
+      try {
+        origin = new URL(String(req.headers.referer)).origin;
+      } catch {
+        origin = undefined;
+      }
+    }
 
     const sessionData = await createAudiobookCheckoutSession(bookId, {
       returnPath,
-      origin: typeof origin === 'string' ? origin : undefined,
+      origin,
       customerEmail: typeof customerEmail === 'string' ? customerEmail : undefined,
       customerName: typeof customerName === 'string' ? customerName : undefined,
     });
