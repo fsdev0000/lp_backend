@@ -119,6 +119,8 @@ import { unmaskedPrivateRouter } from './api/routes/unmaskedPrivate';
 import { newsletterRouter } from './api/routes/newsletter';
 import { masterclassRouter } from './api/routes/masterclass';
 import { attributionRouter } from './api/routes/attribution';
+import { booksRouter } from './api/routes/books';
+import { handleStripeWebhook } from './api/controllers/stripeWebhookController';
 
 // Prevent all search engine crawling / indexing on backend & staging requests
 app.use((req, res, next) => {
@@ -164,6 +166,14 @@ app.use('/api/v1/unmasked-private', unmaskedPrivateRouter);
 app.use('/masterclass', masterclassRouter);
 app.use('/api/masterclass', masterclassRouter);
 app.use('/api/v1/masterclass', masterclassRouter);
+app.use('/books', booksRouter);
+app.use('/api/books', booksRouter);
+app.use('/api/v1/books', booksRouter);
+
+// Stripe Webhook Endpoint (Universal)
+app.post('/api/v1/webhooks/stripe', handleStripeWebhook);
+app.post('/api/webhooks/stripe', handleStripeWebhook);
+app.post('/webhooks/stripe', handleStripeWebhook);
 app.get('/review', (req, res) => {
   const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
   res.redirect(302, `/masterclass/review${query}`);
@@ -185,6 +195,8 @@ app.use('/', newsletterRouter);
 import { swaggerBasicAuth } from './middleware/swaggerAuth';
 
 app.use('/api-docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use('/api/docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use('/docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 const healthCheckHandler = (_req: express.Request, res: express.Response) => {
   res.status(200).json({
@@ -206,8 +218,10 @@ app.get('/ping', pingHandler);
 app.get('/api/ping', pingHandler);
 
 import { syncDefaultReferralsToDb } from './services/masterclassReferralService';
+import { ensureAudiobookFromSupabase } from './services/audiobookService';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
+  ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
 });

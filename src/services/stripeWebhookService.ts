@@ -7,6 +7,7 @@ import {
 import { isValidEmail, sanitizeEmail } from './emailValidation';
 import { upsertContact } from './ghl';
 import { incrementReferralUsage } from './masterclassReferralService';
+import { handleAudiobookWebhookSession } from './audiobookService';
 
 const prisma = new PrismaClient();
 
@@ -183,7 +184,22 @@ export async function processStripeWebhookEvent(
     case 'checkout.session.completed':
     case 'checkout.session.async_payment_succeeded': {
       const session = event.data.object as Stripe.Checkout.Session;
+      const audiobookHandled = await handleAudiobookWebhookSession(session, eventId, eventType);
+      if (audiobookHandled) {
+        return { success: true, message: 'Audiobook checkout session processed' };
+      }
       return await handleCheckoutSessionSuccess(stripe, session, eventId);
+    }
+
+    case 'checkout.session.async_payment_failed':
+    case 'checkout.session.expired': {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const audiobookHandled = await handleAudiobookWebhookSession(session, eventId, eventType);
+      if (audiobookHandled) {
+        return { success: true, message: `Audiobook session ${eventType} processed` };
+      }
+      await recordEventProcessed(eventId, eventType, { unhandled: true });
+      return { success: true, message: 'Event acknowledged' };
     }
 
     case 'payment_intent.succeeded': {

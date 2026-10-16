@@ -338,3 +338,29 @@ model AttributionVisit {
   @@index([createdAt])
   @@map("attribution_visits")
 }
+
+model AudiobookPurchase {
+  id                    String    @id @default(uuid())
+  bookId                String    @default("reset-by-discipline") @map("book_id")
+  version               String    @default("en")
+  customerEmail         String?   @map("customer_email")
+  customerName          String?   @map("customer_name")
+  amount                Int?
+  currency              String    @default("usd")
+  paymentStatus         String    @default("pending") @map("payment_status")
+  stripeSessionId       String    @unique @map("stripe_session_id")
+  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
+  accessGranted         Boolean   @default(false) @map("access_granted")
+  accessToken           String    @unique @map("access_token")
+  expiresAt             DateTime? @map("expires_at")
+  paidAt                DateTime? @map("paid_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([bookId])
+  @@index([accessToken])
+  @@index([stripeSessionId])
+  @@index([customerEmail])
+  @@map("audiobook_purchases")
+}
+
