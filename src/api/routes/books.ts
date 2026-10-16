@@ -39,6 +39,12 @@ function extractPurchaseToken(req: Request): string | undefined {
   return undefined;
 }
 
+function getBookIdParam(req: Request): string {
+  const raw = req.params?.bookId;
+  if (Array.isArray(raw)) return raw[0] || '';
+  return typeof raw === 'string' ? raw : '';
+}
+
 /**
  * GET /api/v1/books/:bookId/audio/preview
  * 
@@ -47,7 +53,7 @@ function extractPurchaseToken(req: Request): string | undefined {
  * Returns 416 Range Not Satisfiable if a client attempts to seek beyond the preview limit.
  */
 booksRouter.get('/:bookId/audio/preview', async (req: Request, res: Response): Promise<void> => {
-  const { bookId } = req.params;
+  const bookId = getBookIdParam(req);
 
   if (!isValidBookId(bookId)) {
     res.status(404).json({ error: 'Book not found', bookId });
@@ -86,7 +92,7 @@ booksRouter.get('/:bookId/audio/preview', async (req: Request, res: Response): P
  * Returns the hosted checkout URL and session ID.
  */
 booksRouter.post('/:bookId/checkout', async (req: Request, res: Response): Promise<void> => {
-  const { bookId } = req.params;
+  const bookId = getBookIdParam(req);
 
   if (!isValidBookId(bookId)) {
     res.status(404).json({ error: 'Book not found', bookId });
@@ -127,7 +133,7 @@ booksRouter.post('/:bookId/checkout', async (req: Request, res: Response): Promi
  * Returns { hasAccess: true, accessToken, ... } or { hasAccess: false, ... }.
  */
 booksRouter.get('/:bookId/access', async (req: Request, res: Response): Promise<void> => {
-  const { bookId } = req.params;
+  const bookId = getBookIdParam(req);
 
   if (!isValidBookId(bookId)) {
     res.status(404).json({ hasAccess: false, error: 'Book not found', bookId });
@@ -171,7 +177,7 @@ booksRouter.get('/:bookId/access', async (req: Request, res: Response): Promise<
  * Full RFC 7233 Range support for uninterrupted scrubbing/seeking across the entire book.
  */
 booksRouter.get('/:bookId/audio', async (req: Request, res: Response): Promise<void> => {
-  const { bookId } = req.params;
+  const bookId = getBookIdParam(req);
 
   if (!isValidBookId(bookId)) {
     res.status(404).json({ error: 'Book not found', bookId });
@@ -205,6 +211,14 @@ booksRouter.get('/:bookId/audio', async (req: Request, res: Response): Promise<v
   }
 
   try {
+    const isDownload = req.query.download === 'true' || req.query.dl === '1';
+    if (isDownload) {
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="RESET BY DISCIPLINE - ENGLISH AUDIOBOOK.mp3"'
+      );
+    }
+
     // Stream full audio with full Range seeking support
     streamAudioFile(req, res, fileInfo.filePath, {
       isPreview: false,
