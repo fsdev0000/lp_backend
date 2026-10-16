@@ -456,14 +456,14 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
         referralCodeId: referralId,
         metadata: isReferralValid
           ? JSON.stringify({
-              referral: {
-                code: referralCode,
-                referrerName: referrerName,
-                discountPercent: referralDiscountPercent,
-                originalPriceUsd: 750,
-                finalPriceUsd: 500,
-              },
-            })
+            referral: {
+              code: referralCode,
+              referrerName: referrerName,
+              discountPercent: referralDiscountPercent,
+              originalPriceUsd: 750,
+              finalPriceUsd: 500,
+            },
+          })
           : undefined,
         sessionToken,
       },
@@ -483,31 +483,31 @@ export async function createSessionAndEnrollment(payload: MasterclassUserPayload
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = masterclassProductId
     ? [
-        {
-          price_data: {
-            currency: 'usd',
-            unit_amount: isReferralValid ? 50000 : 75000,
-            product: masterclassProductId,
-          },
-          quantity: 1,
+      {
+        price_data: {
+          currency: 'usd',
+          unit_amount: isReferralValid ? 50000 : 75000,
+          product: masterclassProductId,
         },
-      ]
+        quantity: 1,
+      },
+    ]
     : [
-        {
-          price_data: {
-            currency: 'usd',
-            unit_amount: isReferralValid ? 50000 : 75000,
-            product_data: {
-              name: "The Founder’s Next Move — Executive Masterclass",
-              description: isReferralValid
-                ? `Special Referral Privilege via ${referrerName || 'Executive Invitation'} (33.33% off — US $750 down to US $500)`
-                : '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
-              images: [masterclassImageUrl],
-            },
+      {
+        price_data: {
+          currency: 'usd',
+          unit_amount: isReferralValid ? 50000 : 75000,
+          product_data: {
+            name: "The Founder’s Next Move — Executive Masterclass",
+            description: isReferralValid
+              ? `Special Referral Privilege via ${referrerName || 'Executive Invitation'} (33.33% off — US $750 down to US $500)`
+              : '4 Video Briefing Modules, Digital Interactive Workbook & 1-on-1 Strategic Review with Lionel Eersteling',
+            images: [masterclassImageUrl],
           },
-          quantity: 1,
         },
-      ];
+        quantity: 1,
+      },
+    ];
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
@@ -619,6 +619,9 @@ export async function verifyPayment(sessionId: string) {
         { email: session.customer_email || session.metadata?.email },
       ].filter(Boolean) as any,
     },
+    include: {
+      referralCode: true,
+    },
   });
 
   if (isPaid && enrollment) {
@@ -675,7 +678,7 @@ export async function verifyPayment(sessionId: string) {
             }
             if (invoiceObj) break;
           }
-        } catch {}
+        } catch { }
 
         // Fallback: Check customer's latest invoice
         if (!invoiceObj && session.customer) {
@@ -686,7 +689,7 @@ export async function verifyPayment(sessionId: string) {
               invoiceObj = invList.data[0];
               break;
             }
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -730,7 +733,7 @@ export async function verifyPayment(sessionId: string) {
         where: { id: enrollment.id },
         data: { metadata: JSON.stringify(currentMeta) },
       });
-    } catch {}
+    } catch { }
 
     // Always dispatch our executive Payment Receipt & Tax Invoice Email directly to customer & staff
     // This guarantees reliable delivery in Sandbox/Test Mode as well as Live Production!
@@ -762,6 +765,13 @@ export async function verifyPayment(sessionId: string) {
     }
   }
 
+  const actualPaidDollars = enrollment?.amount
+    ? Math.round(enrollment.amount / 100)
+    : (session.amount_total ? Math.round(session.amount_total / 100) : 750);
+
+  const matchedReferralCode = session.metadata?.referralCode || (enrollment as any)?.referralCode?.code || null;
+  const matchedReferrerName = session.metadata?.referrerName || (enrollment as any)?.referralCode?.referrerName || null;
+
   return {
     verified: isPaid,
     paymentStatus: session.payment_status,
@@ -774,6 +784,10 @@ export async function verifyPayment(sessionId: string) {
         company: enrollment.company,
         accessGranted: enrollment.accessGranted,
         paymentStatus: enrollment.paymentStatus,
+        amount: actualPaidDollars,
+        amountPaid: actualPaidDollars,
+        referralCode: matchedReferralCode,
+        referrerName: matchedReferrerName,
       }
       : null,
     token: enrollment?.sessionToken || null,
@@ -1475,7 +1489,7 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
   // Parse date and canonical slot
   const rawSlot = payload.selectedSlot || '';
   const dateMatch = rawSlot.match(/\d{4}-\d{2}-\d{2}/) || (payload.scheduledAt ? payload.scheduledAt.match(/\d{4}-\d{2}-\d{2}/) : null);
-  
+
   let dateStr: string;
   if (dateMatch) {
     dateStr = dateMatch[0];
@@ -2562,7 +2576,7 @@ export function buildMasterclassInvoiceEmailHtml(data: MasterclassPaymentInvoice
       .replace(/{{invoice_links_html}}/g, invoiceLinksHtml);
   }
 
-  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: USD $${amountPaidFormatted}</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
+  return `<!DOCTYPE html><html><body><h1>Payment Confirmed</h1><p>Invoice: ${escapeHtml(invoiceNumber)}</p><p>Amount: US $${amountPaidFormatted}</p><p><a href="${escapeHtml(masterclassUrl)}">Enter Masterclass</a></p></body></html>`;
 }
 
 export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentInvoiceEmailData): string {
@@ -2596,7 +2610,7 @@ export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentIn
     if (meta.referral?.referrerName) {
       referralInfo = `${escapeHtml(meta.referral.referrerName)} (Code: ${escapeHtml(meta.referral.code || '')} — ${meta.referral.discountPercent || 33.33}% Privilege)`;
     }
-  } catch {}
+  } catch { }
 
   const replyUrl = `mailto:${encodeURIComponent(data.enrollment.email)}?subject=${encodeURIComponent(
     `Welcome to The Founder’s Next Move — Leaders Performance`
@@ -2675,7 +2689,7 @@ export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentIn
                 </tr>
                 <tr>
                   <td style="font-family: 'Inter', Arial, sans-serif; font-size: 15px; font-weight: 400; line-height: 24px; color: #4a5568; padding-bottom: 28px;">
-                    <strong>${fullName}</strong> has completed payment of <strong>USD $${amountPaidFormatted}</strong> for <em>The Founder’s Next Move — Executive Masterclass</em>. Curriculum video briefings and interactive workbook access are now unlocked.
+                    <strong>${fullName}</strong> has completed payment of <strong>US $${amountPaidFormatted}</strong> for <em>The Founder’s Next Move — Executive Masterclass</em>. Curriculum video briefings and interactive workbook access are now unlocked.
                   </td>
                 </tr>
               </table>
@@ -2696,7 +2710,7 @@ export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentIn
                 </tr>
                 <tr style="border-bottom: 1px solid #ebe4db;">
                   <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">AMOUNT PAID</td>
-                  <td style="padding: 13px 0; font-size: 16px; font-weight: 700; color: #059669;">USD $${amountPaidFormatted}</td>
+                  <td style="padding: 13px 0; font-size: 16px; font-weight: 700; color: #059669;">US $${amountPaidFormatted}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #ebe4db;">
                   <td style="padding: 13px 0; width: 160px; font-size: 12px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #9f6511;">INVOICE NUMBER</td>
@@ -2784,9 +2798,8 @@ export async function sendMasterclassPaymentInvoiceEmail(
   // 2. Company Staff Alert Dispatch (info@leadersperformance.ae)
   try {
     const amountPaidFormatted = (((data.amountPaid ?? data.enrollment.amount) || 75000) / 100).toFixed(2);
-    const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${
-      data.enrollment.company || 'Individual'
-    }) — USD $${amountPaidFormatted} — Invoice ${invoiceNumber}`;
+    const staffSubject = `[Payment Confirmed] ${data.enrollment.fullName} (${data.enrollment.company || 'Individual'
+      }) — US $${amountPaidFormatted} — Invoice ${invoiceNumber}`;
     const staffHtml = buildMasterclassStaffPaymentAlertHtml(data);
 
     for (const recipient of MASTERCLASS_STAFF_RECIPIENTS) {
@@ -2926,24 +2939,22 @@ export async function sendBookingConfirmationEmail(data: {
           <td>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                ${
-                  data.googleCalendarUrl
-                    ? `<td style="padding-right: 12px;">
+                ${data.googleCalendarUrl
+        ? `<td style="padding-right: 12px;">
                         <a href="${data.googleCalendarUrl}" target="_blank" class="cta-secondary" style="display: inline-block; background-color: transparent; border: 1px solid #9f6511; color: #1b2637; text-decoration: none; font-family: 'Inter', Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 500; line-height: 20px; padding: 10px 18px; text-align: center; border-radius: 2px;">
                           Add to Google Calendar
                         </a>
                       </td>`
-                    : ''
-                }
-                ${
-                  data.outlookCalendarUrl
-                    ? `<td>
+        : ''
+      }
+                ${data.outlookCalendarUrl
+        ? `<td>
                         <a href="${data.outlookCalendarUrl}" target="_blank" class="cta-secondary" style="display: inline-block; background-color: transparent; border: 1px solid #9f6511; color: #1b2637; text-decoration: none; font-family: 'Inter', Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 500; line-height: 20px; padding: 10px 18px; text-align: center; border-radius: 2px;">
                           Add to Outlook
                         </a>
                       </td>`
-                    : ''
-                }
+        : ''
+      }
               </tr>
             </table>
           </td>
@@ -4137,7 +4148,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
   const phone = submission?.phone || 'Not provided';
   const submissionRef = submission?.submissionRef || 'FNM-VERIFIED';
   const bookingRef = booking?.bookingRef || (submission?.bookings?.[0]?.bookingRef || 'Pending Booking');
-  
+
   let formattedSubmittedDate = 'Recently submitted';
   if (submission?.submittedAt) {
     try {
@@ -4963,13 +4974,12 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
           🖨️ Print Dossier
         </button>
 
-        ${
-          email
-            ? `<a href="${replyMailto}" class="btn btn-outline-gold">
+        ${email
+      ? `<a href="${replyMailto}" class="btn btn-outline-gold">
                 ✉️ Email Founder
               </a>`
-            : ''
-        }
+      : ''
+    }
 
         <a href="${escapeHtml(LIONEL_MEETING_ROOM.url)}" target="_blank" class="btn btn-gold">
           🎥 Launch Zoom Meeting
@@ -4980,9 +4990,8 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
 
   <main class="container">
 
-    ${
-      !found && searchRef
-        ? `
+    ${!found && searchRef
+      ? `
       <div class="hero-header" style="border-left: 4px solid #ef4444;">
         <div class="hero-eyebrow" style="color:#b91c1c;">REFERENCE NOTICE</div>
         <h1 class="hero-title">WorkSheet Record Not Found</h1>
@@ -4992,7 +5001,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
         </p>
       </div>
     `
-        : ''
+      : ''
     }
 
     <!-- Hero Header -->
@@ -5010,13 +5019,12 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
           <button onclick="window.print()" class="btn btn-navy">
             🖨️ Print Dossier
           </button>
-          ${
-            email
-              ? `<a href="${replyMailto}" class="btn btn-outline-navy">
+          ${email
+      ? `<a href="${replyMailto}" class="btn btn-outline-navy">
                   ✉️ Email Founder
                 </a>`
-              : ''
-          }
+      : ''
+    }
           <a href="${escapeHtml(LIONEL_MEETING_ROOM.url)}" target="_blank" class="btn btn-gold">
             🎥 Launch Zoom Meeting
           </a>
@@ -5034,11 +5042,10 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
         <span class="badge badge-gray">
           Ref: ${escapeHtml(submissionRef)}
         </span>
-        ${
-          bookingRef && bookingRef !== 'Pending Booking'
-            ? `<span class="badge badge-gray">Booking: ${escapeHtml(bookingRef)}</span>`
-            : ''
-        }
+        ${bookingRef && bookingRef !== 'Pending Booking'
+      ? `<span class="badge badge-gray">Booking: ${escapeHtml(bookingRef)}</span>`
+      : ''
+    }
       </div>
     </section>
 
@@ -5189,21 +5196,19 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
       </div>
     </article>
 
-    ${
-      notesHtml
-        ? `
+    ${notesHtml
+      ? `
       <!-- Personal Reflections & Notes -->
       <section class="notes-card">
         <div class="notes-eyebrow">PARTICIPANT REFLECTIONS &amp; PERSONAL NOTES</div>
         ${notesHtml}
       </section>
     `
-        : ''
+      : ''
     }
 
-    ${
-      extraFieldsHtml
-        ? `
+    ${extraFieldsHtml
+      ? `
       <!-- Additional Responses -->
       <article class="stage-card">
         <header class="stage-card-header">
@@ -5215,7 +5220,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
         </div>
       </article>
     `
-        : ''
+      : ''
     }
 
     <!-- Recent Submissions Directory -->
