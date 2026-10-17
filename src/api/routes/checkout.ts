@@ -280,8 +280,17 @@ checkoutRouter.get('/payments/checkout/:sessionId', async (req: Request, res: Re
       session.metadata?.bookId === 'reset-by-discipline';
 
     if (isAudiobook) {
-      const { checkPurchaseAccess } = require('../../services/audiobookService');
+      const {
+        checkPurchaseAccess,
+        sendAudiobookPurchaseEmailsIfPending,
+      } = require('../../services/audiobookService');
       const accessInfo = await checkPurchaseAccess('reset-by-discipline', { sessionId });
+
+      if (isPaid) {
+        sendAudiobookPurchaseEmailsIfPending(session.id, session, accessInfo.accessToken).catch((err: any) =>
+          console.warn('[Audiobook Checkout Status] Non-blocking invoice dispatch notice:', err?.message || err)
+        );
+      }
 
       res.status(200).json({
         status: isPaid ? 'paid' : session.payment_status || 'pending',

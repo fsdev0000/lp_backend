@@ -1002,5 +1002,129 @@ export async function sendAudiobookPurchaseEmails(
     console.warn('[Audiobook Invoice] Notice dispatching staff alert email to info@leadersperformance.ae:', err.message);
   }
 
+  // Record delivery in SystemLog to guarantee strict idempotency
+  if (customerDelivered || staffDelivered) {
+    try {
+      await prisma.systemLog.create({
+        data: {
+          level: 'info',
+          action: 'AUDIOBOOK_INVOICE_EMAIL_SENT',
+          details: JSON.stringify({
+            sessionId: data.stripeSessionId,
+            customerEmail: data.customerEmail,
+            invoiceNumber,
+            customerDelivered,
+            staffDelivered,
+            sentAt: new Date().toISOString(),
+          }),
+        },
+      });
+    } catch (logErr: any) {
+      console.warn('[Audiobook Invoice] Notice recording email delivery log:', logErr.message);
+    }
+  }
+
   return { customerDelivered, staffDelivered };
 }
+
+/**
+ * Check whether audiobook invoice emails have already been dispatched for this session.
+ */
+export async function isAudiobookInvoiceEmailSent(sessionId: string): Promise<boolean> {
+  try {
+    const existing = await prisma.systemLog.findFirst({
+      where: {
+        action: 'AUDIOBOOK_INVOICE_EMAIL_SENT',
+        details: { contains: sessionId },
+      },
+    });
+    return Boolean(existing);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safety-net email dispatcher for Audiobook purchases.
+ * Triggered on payment confirmation / success page retrieval to guarantee delivery
+ * even if the external Stripe webhook is delayed, blocked, or running in local development.
+ */
+export async function sendAudiobookPurchaseEmailsIfPending(
+  sessionId: string,
+  checkoutSession: Stripe.Checkout.Session,
+  accessToken?: string | null
+): Promise<boolean> {
+  if (checkoutSession.payment_status !== 'paid') {
+    return false;
+  }
+
+  const alreadySent = await isAudiobookInvoiceEmailSent(sessionId);
+  if (alreadySent) {
+    return false;
+  }
+
+  const customerEmail =
+    checkoutSession.customer_details?.email || checkoutSession.customer_email;
+  if (!customerEmail) return false;
+
+  const paymentIntentId =
+    typeof checkoutSession.payment_intent === 'string'
+      ? checkoutSession.payment_intent
+      : checkoutSession.payment_intent?.id || null;
+
+  let invoiceNumber: string | null = null;
+  let hostedInvoiceUrl: string | null = null;
+  let invoicePdf: string | null = null;
+
+  try {
+    const stripe = getStripeClient();
+    if (checkoutSession.invoice) {
+      const invObj =
+        typeof checkoutSession.invoice === 'string'
+          ? await stripe.invoices.retrieve(checkoutSession.invoice)
+          : checkoutSession.invoice;
+      if (invObj) {
+        invoiceNumber = invObj.number || invObj.id || null;
+        hostedInvoiceUrl = invObj.hosted_invoice_url ?? null;
+        invoicePdf = invObj.invoice_pdf ?? null;
+      }
+    }
+    if (!hostedInvoiceUrl && paymentIntentId) {
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ['latest_charge'],
+      });
+      const charge = pi.latest_charge as Stripe.Charge | undefined;
+      if (charge?.receipt_url) {
+        hostedInvoiceUrl = charge.receipt_url;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Audiobook Invoice Safety Net] Notice retrieving invoice details:', err.message);
+  }
+
+  // Resolve access token if not passed
+  let token = accessToken;
+  if (!token) {
+    const purchase = await prisma.audiobookPurchase.findUnique({
+      where: { stripeSessionId: sessionId },
+    });
+    token = purchase?.accessToken || null;
+  }
+
+  await sendAudiobookPurchaseEmails({
+    customerEmail,
+    customerName: checkoutSession.customer_details?.name || null,
+    amountPaidCents: checkoutSession.amount_total ?? 999,
+    currency: checkoutSession.currency || 'usd',
+    paidAt: new Date(),
+    stripeSessionId: sessionId,
+    stripePaymentIntentId: paymentIntentId,
+    accessToken: token || '',
+    invoiceNumber: invoiceNumber || `INV-AB-${sessionId.slice(-8).toUpperCase()}`,
+    hostedInvoiceUrl,
+    invoicePdf,
+  });
+
+  return true;
+}
+
