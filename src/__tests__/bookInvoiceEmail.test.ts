@@ -73,7 +73,7 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain(testEmail);
       expect(html).toContain('19.99');
       expect(html).toContain('Reset by Discipline');
-      expect(html).toContain('Download Book (PDF)');
+      expect(html).toContain('Download Reset by Discipline (PDF)');
       expect(html).toContain('Download Tax Invoice (PDF)');
       // Zero unresolved placeholders
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
@@ -99,7 +99,7 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain(testEmail);
       expect(html).toContain('19.99');
       expect(html).toContain('Reset door Discipline');
-      expect(html).toContain('Download Boek (PDF)');
+      expect(html).toContain('Download Reset door Discipline (PDF)');
       expect(html).toContain('Download Btw-factuur (PDF)');
       expect(html).toContain('Btw-factuur');
       // Zero unresolved placeholders
