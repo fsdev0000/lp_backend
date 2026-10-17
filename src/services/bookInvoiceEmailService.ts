@@ -86,11 +86,47 @@ export function getFrontendUrl(): string {
 
 /**
  * Resolves the Backend API URL dynamically from environment variables.
- * Checks BACKEND_URL, API_URL, or falls back to getFrontendUrl().
+ * Ensures that on staging environments or test payments, it always targets staging.
  */
-export function getBackendUrl(): string {
-  const url = process.env.BACKEND_URL || process.env.API_URL || process.env.API_BASE_URL || getFrontendUrl();
-  return url.replace(/\/$/, '');
+export function getBackendUrl(sessionId?: string): string {
+  const frontendUrl = getFrontendUrl();
+  const isStaging =
+    frontendUrl.includes('staging') ||
+    process.env.APP_ENV === 'staging' ||
+    process.env.NODE_ENV === 'staging' ||
+    Boolean(sessionId && sessionId.startsWith('cs_test_')) ||
+    Boolean(process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_'));
+
+  // 1. Check explicit BACKEND_URL / API_URL / API_BASE_URL
+  const backendEnv = (process.env.BACKEND_URL || process.env.API_URL || process.env.API_BASE_URL)?.trim();
+  if (backendEnv) {
+    const isLocalhost = backendEnv.includes('localhost') || backendEnv.includes('127.0.0.1');
+    const isFrontendRemote = frontendUrl.startsWith('https://') || (frontendUrl.startsWith('http://') && !frontendUrl.includes('localhost'));
+
+    // If on staging or test mode, do not route to production api domain
+    if (isStaging && backendEnv.includes('api.leadersperformance.ae')) {
+      return frontendUrl.includes('staging') ? frontendUrl : 'https://staging.leadersperformance.ae';
+    }
+
+    // If frontend is remote (staging/production) but BACKEND_URL is localhost, do NOT use localhost for email links
+    if (!(isFrontendRemote && isLocalhost)) {
+      return backendEnv.replace(/\/$/, '');
+    }
+  }
+
+  // 2. If staging, the backend is reverse-proxied under the staging domain (https://staging.leadersperformance.ae)
+  if (isStaging) {
+    return frontendUrl.includes('staging') ? frontendUrl : 'https://staging.leadersperformance.ae';
+  }
+
+  // 3. For non-staging / production, check BACKEND_URL_PRODUCTION
+  const prodApi = process.env.BACKEND_URL_PRODUCTION?.trim();
+  if (prodApi && !prodApi.includes('localhost')) {
+    return prodApi.replace(/\/$/, '');
+  }
+
+  // 4. Default to frontendUrl
+  return frontendUrl;
 }
 
 /**
@@ -135,7 +171,7 @@ export function resolveCustomerDownloadUrl(sessionId: string, version: 'en' | 'n
  * Resolves direct PDF book download URL from backend API for staff.
  */
 export function resolveStaffBookDownloadUrl(sessionId: string): string {
-  const backendUrl = getBackendUrl();
+  const backendUrl = getBackendUrl(sessionId);
   return `${backendUrl}/api/download?session_id=${encodeURIComponent(sessionId)}`;
 }
 

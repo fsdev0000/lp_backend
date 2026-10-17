@@ -6,6 +6,8 @@ import {
   sendBookPurchaseEmails,
   isBookInvoiceEmailSent,
   handleTextBookWebhookSession,
+  getBackendUrl,
+  resolveStaffBookDownloadUrl,
 } from '../services/bookInvoiceEmailService';
 import { upsertContact, sendEmail } from '../services/ghl';
 
@@ -135,9 +137,9 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('pi_test_staff_en_123');
       expect(html).toContain('Download Book PDF');
       expect(html).toContain('Download PDF Invoice');
-      // Staff email has direct backend download link
-      expect(html).toContain(`/api/download?session_id=${encodeURIComponent(testSessionIdEn)}`);
-      // Staff email only contains invoice and download links (no reply to customer button)
+      // Staff email only contains invoice and download action buttons (table rows removed)
+      expect(html).not.toContain('INVOICE DOWNLOAD');
+      expect(html).not.toContain('BOOK DOWNLOAD');
       expect(html).not.toContain('Reply to Customer');
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
@@ -168,7 +170,9 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('Download Boek PDF');
       // Staff email has direct backend download link
       expect(html).toContain(`/api/download?session_id=${encodeURIComponent(testSessionIdNl)}`);
-      // Staff email only contains invoice and download links (no reply to customer button)
+      // Staff email only contains invoice and download action buttons (table rows removed)
+      expect(html).not.toContain('FACTUUR DOWNLOADEN');
+      expect(html).not.toContain('BOEK DOWNLOADEN');
       expect(html).not.toContain('Klant Beantwoorden');
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
@@ -329,6 +333,42 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(webhookHandled).toBe(true);
       // No duplicate emails dispatched
       expect(sendEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('4. Dynamic Backend URL & Staff Download URL Resolution', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it('resolves staff download URL to staging domain when on staging', () => {
+      process.env.FRONTEND_URL = 'https://staging.leadersperformance.ae';
+      process.env.BACKEND_URL = 'https://staging.leadersperformance.ae';
+
+      const downloadUrl = resolveStaffBookDownloadUrl('cs_test_abc123');
+      expect(downloadUrl).toBe('https://staging.leadersperformance.ae/api/download?session_id=cs_test_abc123');
+      expect(downloadUrl).not.toContain('api.leadersperformance.ae');
+    });
+
+    it('prevents accidental routing to production api.leadersperformance.ae when on staging or test mode', () => {
+      process.env.FRONTEND_URL = 'https://staging.leadersperformance.ae';
+      // Even if BACKEND_URL was incorrectly set to production api domain
+      process.env.BACKEND_URL = 'https://api.leadersperformance.ae';
+
+      const downloadUrl = resolveStaffBookDownloadUrl('cs_test_abc123');
+      expect(downloadUrl).toBe('https://staging.leadersperformance.ae/api/download?session_id=cs_test_abc123');
+      expect(downloadUrl).not.toContain('api.leadersperformance.ae');
+    });
+
+    it('dynamically respects custom BACKEND_URL without hardcoding', () => {
+      delete process.env.APP_ENV;
+      process.env.FRONTEND_URL = 'https://app.leadersperformance.ae';
+      process.env.BACKEND_URL = 'https://api-custom.leadersperformance.ae';
+
+      const url = getBackendUrl();
+      expect(url).toBe('https://api-custom.leadersperformance.ae');
     });
   });
 });

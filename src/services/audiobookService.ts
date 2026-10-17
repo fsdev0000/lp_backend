@@ -7,6 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 import { getStripeClient, isProductionEnvironment, recordEventProcessed, isEventProcessed } from './stripeWebhookService';
 import { upsertContact, sendEmail } from './ghl';
+import { getFrontendUrl, getBackendUrl } from './bookInvoiceEmailService';
 
 const prisma = new PrismaClient();
 
@@ -826,7 +827,7 @@ function resolveInvoiceDownloadUrl(
     }
     return hostedInvoiceUrl;
   }
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const frontendUrl = getFrontendUrl();
   return `${frontendUrl}/payment-success?session_id=${encodeURIComponent(
     sessionId || ''
   )}&book=reset-by-discipline&product=audiobook`;
@@ -837,8 +838,8 @@ function resolveInvoiceDownloadUrl(
   */
 export function buildAudiobookInvoiceEmailHtml(data: AudiobookInvoiceEmailData): string {
   const rawTemplate = loadAudiobookTemplate('audiobook-invoice-confirmation.html');
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
-  const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || frontendUrl).replace(/\/$/, '');
+  const frontendUrl = getFrontendUrl();
+  const backendUrl = getBackendUrl(data.stripeSessionId);
   const tokenParam = data.accessToken ? `&token=${encodeURIComponent(data.accessToken)}` : '';
   const sessionParam = data.stripeSessionId ? `&session_id=${encodeURIComponent(data.stripeSessionId)}` : '';
   const audiobookUrl = `${frontendUrl}/knowledge?book-name=reset-by-discipline&product=audiobook&format=audiobook${tokenParam}${sessionParam}#reset-by-discipline`;
@@ -928,7 +929,7 @@ export function buildAudiobookStaffAlertHtml(data: AudiobookInvoiceEmailData): s
     `;
   }
 
-  const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const backendUrl = getBackendUrl(data.stripeSessionId);
   const directAudioDownloadUrl = `${backendUrl}/api/v1/books/reset-by-discipline/audio?token=${encodeURIComponent(
     data.accessToken
   )}&download=true`;
