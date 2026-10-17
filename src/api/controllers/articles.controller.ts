@@ -28,6 +28,7 @@ export class ArticlesController {
     try {
       console.log(`[articles] GET /articles from IP=${req.ip}`);
       const articles = await this.service.listPublishedArticles();
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return res.status(200).json({ articles });
     } catch (error) {
       console.error('[articles] GET list error:', error instanceof Error ? error.message : String(error));
@@ -54,6 +55,7 @@ export class ArticlesController {
         return res.status(404).json({ error: 'Article not found' });
       }
 
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return res.status(200).json({ article });
     } catch (error) {
       console.error(`[articles] GET /articles/${req.params?.slug} error:`, error instanceof Error ? error.message : String(error));

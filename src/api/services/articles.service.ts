@@ -4,7 +4,23 @@ import { getSecret } from '../../services/secrets';
 import { normalizeArticleContent } from '../utils/articleContentNormalizer';
 
 export class ArticlesService {
+  private cachedArticlesList: { data: ArticleSummary[]; timestamp: number } | null = null;
+  private cachedArticlesBySlug: Map<string, { data: Article; timestamp: number }> = new Map();
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   constructor(private repo: ArticlesRepository = articlesRepository) {}
+
+  /**
+   * Clears in-memory cache when articles are updated or deleted.
+   */
+  public clearCache(slug?: string): void {
+    this.cachedArticlesList = null;
+    if (slug) {
+      this.cachedArticlesBySlug.delete(slug);
+    } else {
+      this.cachedArticlesBySlug.clear();
+    }
+  }
 
   /**
    * Verifies if the provided x-api-key matches ARTICLES_API_KEY from environment or Vault.
@@ -22,11 +38,16 @@ export class ArticlesService {
 
   /**
    * Lists all published articles for the website.
-   * If any article entry includes content, normalizes it.
+   * Cached in memory for high-speed delivery.
    */
   async listPublishedArticles(): Promise<ArticleSummary[]> {
+    const now = Date.now();
+    if (this.cachedArticlesList && now - this.cachedArticlesList.timestamp < this.CACHE_TTL_MS) {
+      return this.cachedArticlesList.data;
+    }
+
     const articles = await this.repo.findPublishedArticles();
-    return articles.map((article: any) => {
+    const normalized = articles.map((article: any) => {
       if (article.content) {
         return {
           ...article,
@@ -35,19 +56,40 @@ export class ArticlesService {
       }
       return article;
     });
+
+    this.cachedArticlesList = {
+      data: normalized,
+      timestamp: now,
+    };
+
+    return normalized;
   }
 
   /**
    * Returns a single published article by slug.
-   * Inspects and normalizes malformed Markdown in memory before returning.
+   * Cached in memory for high-speed delivery.
    */
   async getPublishedArticleBySlug(slug: string): Promise<Article | null> {
+    const now = Date.now();
+    const cached = this.cachedArticlesBySlug.get(slug);
+    if (cached && now - cached.timestamp < this.CACHE_TTL_MS) {
+      return cached.data;
+    }
+
     const article = await this.repo.findArticleBySlug(slug, true);
     if (!article) return null;
-    return {
+
+    const normalized = {
       ...article,
       content: normalizeArticleContent(article.content),
     };
+
+    this.cachedArticlesBySlug.set(slug, {
+      data: normalized,
+      timestamp: now,
+    });
+
+    return normalized;
   }
 
   /**
@@ -68,6 +110,7 @@ export class ArticlesService {
     }
 
     const saved = await this.repo.upsertArticle(validation.data);
+    this.clearCache(validation.data.slug);
     return {
       success: true,
       article: saved,
@@ -78,8 +121,13 @@ export class ArticlesService {
    * Deletes an article by slug.
    */
   async deleteArticle(slug: string): Promise<boolean> {
-    return this.repo.deleteArticle(slug);
+    const deleted = await this.repo.deleteArticle(slug);
+    if (deleted) {
+      this.clearCache(slug);
+    }
+    return deleted;
   }
 }
 
 export const articlesService = new ArticlesService();
+
