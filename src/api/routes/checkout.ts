@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import path from 'path';
 import fs from 'fs';
 import { handleStripeWebhook } from '../controllers/stripeWebhookController';
+import { sendTextBookPurchaseEmailsIfPending } from '../../services/bookInvoiceEmailService';
 
 export const checkoutRouter = Router();
 
@@ -232,6 +233,12 @@ checkoutRouter.get('/payment-status', async (req: Request, res: Response): Promi
 
     const version = getSessionVersion(session);
 
+    if (isPaid) {
+      sendTextBookPurchaseEmailsIfPending(session.id, session).catch((err: any) =>
+        console.warn('[Stripe Payment Status] Non-blocking invoice dispatch notice:', err?.message || err)
+      );
+    }
+
     res.status(200).json({
       status: isPaid ? 'paid' : session.payment_status || 'pending',
       version,
@@ -294,6 +301,13 @@ checkoutRouter.get('/payments/checkout/:sessionId', async (req: Request, res: Re
 
     // Default: Book or standard checkout
     const version = getSessionVersion(session);
+
+    if (isPaid) {
+      sendTextBookPurchaseEmailsIfPending(session.id, session).catch((err: any) =>
+        console.warn('[Stripe Checkout Status] Non-blocking invoice dispatch notice:', err?.message || err)
+      );
+    }
+
     res.status(200).json({
       status: isPaid ? 'paid' : session.payment_status || 'pending',
       paid: isPaid,

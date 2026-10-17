@@ -8,6 +8,7 @@ import { isValidEmail, sanitizeEmail } from './emailValidation';
 import { upsertContact } from './ghl';
 import { incrementReferralUsage } from './masterclassReferralService';
 import { handleAudiobookWebhookSession } from './audiobookService';
+import { handleTextBookWebhookSession } from './bookInvoiceEmailService';
 
 const prisma = new PrismaClient();
 
@@ -188,6 +189,10 @@ export async function processStripeWebhookEvent(
       if (audiobookHandled) {
         return { success: true, message: 'Audiobook checkout session processed' };
       }
+      const textBookHandled = await handleTextBookWebhookSession(session, eventId, eventType);
+      if (textBookHandled) {
+        return { success: true, message: 'Text book checkout session processed' };
+      }
       return await handleCheckoutSessionSuccess(stripe, session, eventId);
     }
 
@@ -197,6 +202,10 @@ export async function processStripeWebhookEvent(
       const audiobookHandled = await handleAudiobookWebhookSession(session, eventId, eventType);
       if (audiobookHandled) {
         return { success: true, message: `Audiobook session ${eventType} processed` };
+      }
+      const textBookHandled = await handleTextBookWebhookSession(session, eventId, eventType);
+      if (textBookHandled) {
+        return { success: true, message: `Text book session ${eventType} processed` };
       }
       await recordEventProcessed(eventId, eventType, { unhandled: true });
       return { success: true, message: 'Event acknowledged' };
