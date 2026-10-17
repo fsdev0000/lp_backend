@@ -243,3 +243,72 @@ booksRouter.get('/:bookId/audio', async (req: Request, res: Response): Promise<v
     }
   }
 });
+
+/**
+ * GET /api/v1/books/:bookId/stream
+ *
+ * Unified streaming endpoint:
+ * - Free Preview: Unauthenticated listeners automatically receive 60s preview stream.
+ * - Full Playback: Unlocks complete audiobook when valid purchase entitlement token or session is provided.
+ */
+booksRouter.get('/:bookId/stream', async (req: Request, res: Response): Promise<void> => {
+  const bookId = getBookIdParam(req);
+
+  if (!isValidBookId(bookId)) {
+    res.status(404).json({ error: 'Book not found', bookId });
+    return;
+  }
+
+  const fileInfo = getAudiobookFilePath();
+  if (!fileInfo) {
+    console.error(`[Audiobook Stream] Audio file not found for book: ${bookId}`);
+    res.status(404).json({ error: 'Audiobook audio file is not available on this server' });
+    return;
+  }
+
+  const token = extractPurchaseToken(req);
+
+  // If token is present, verify entitlement for full playback
+  if (token) {
+    const verification = await verifyEntitlementForStream(bookId, token);
+    if (verification.valid) {
+      try {
+        const isDownload = req.query.download === 'true' || req.query.dl === '1';
+        if (isDownload) {
+          res.setHeader(
+            'Content-Disposition',
+            'attachment; filename="RESET BY DISCIPLINE - ENGLISH AUDIOBOOK.mp3"'
+          );
+        }
+
+        streamAudioFile(req, res, fileInfo.filePath, {
+          isPreview: false,
+        });
+        return;
+      } catch (err: any) {
+        console.error('[Audiobook Stream] Full stream error:', err.message);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream audiobook' });
+        }
+        return;
+      }
+    }
+  }
+
+  // Otherwise, automatically restrict to 60-second free preview stream
+  try {
+    const previewDurationSeconds = 60;
+    const maxAllowedByte = calculatePreviewByteLimit(fileInfo.filePath, previewDurationSeconds);
+
+    streamAudioFile(req, res, fileInfo.filePath, {
+      maxAllowedByte,
+      isPreview: true,
+    });
+  } catch (err: any) {
+    console.error('[Audiobook Stream] Preview stream error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to stream audio preview' });
+    }
+  }
+});
+
