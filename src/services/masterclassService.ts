@@ -2059,7 +2059,7 @@ function buildMasterclassStaffBriefingHtml(data: {
           <tr>
             <td style="background-color: #021329; border-bottom: 1px solid #d0a35a; padding: 34px 40px;">
               <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
               </a>
             </td>
           </tr>
@@ -2220,7 +2220,7 @@ function buildMasterclassBookingStaffAlertHtml(data: {
           <tr>
             <td style="background-color: #021329; border-bottom: 1px solid #d0a35a; padding: 34px 40px;">
               <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
               </a>
             </td>
           </tr>
@@ -2380,7 +2380,7 @@ export async function sendWorkbookSubmissionNotifications(data: {
           <tr>
             <td style="background-color: #021329; border-bottom: 1px solid #d0a35a; padding: 34px 40px;">
               <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
               </a>
             </td>
           </tr>
@@ -2664,7 +2664,7 @@ export function buildMasterclassStaffPaymentAlertHtml(data: MasterclassPaymentIn
                 <tr>
                   <td align="left" style="vertical-align: middle;">
                     <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                      <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                      <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
                     </a>
                   </td>
                   <td align="right" style="vertical-align: middle; font-family: 'Inter', Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #d0a35a;">
@@ -3000,7 +3000,7 @@ export async function sendBookingConfirmationEmail(data: {
           <tr>
             <td style="background-color: #021329; border-bottom: 1px solid #d0a35a; padding: 34px 40px;">
               <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" height="58" style="display: block; width: 146px; height: auto; border: 0; outline: none;" />
               </a>
             </td>
           </tr>
@@ -4959,7 +4959,7 @@ export function renderWorksheetReviewHtml(searchRef: string, dossier: WorksheetR
     <div class="topbar-content">
       <div class="brand-section">
         <a href="https://leadersperformance.ae" target="_blank">
-          <img src="https://leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" class="brand-logo">
+          <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" class="brand-logo">
         </a>
         <div class="brand-divider"></div>
         <div class="brand-badge">Lionel Eersteling · Executive Review</div>
