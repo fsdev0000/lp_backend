@@ -838,10 +838,11 @@ function resolveInvoiceDownloadUrl(
 export function buildAudiobookInvoiceEmailHtml(data: AudiobookInvoiceEmailData): string {
   const rawTemplate = loadAudiobookTemplate('audiobook-invoice-confirmation.html');
   const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || frontendUrl).replace(/\/$/, '');
   const tokenParam = data.accessToken ? `&token=${encodeURIComponent(data.accessToken)}` : '';
   const sessionParam = data.stripeSessionId ? `&session_id=${encodeURIComponent(data.stripeSessionId)}` : '';
   const audiobookUrl = `${frontendUrl}/knowledge?book-name=reset-by-discipline&product=audiobook&format=audiobook${tokenParam}${sessionParam}#reset-by-discipline`;
-  const directDownloadUrl = `${frontendUrl}/api/v1/books/reset-by-discipline/audio?token=${encodeURIComponent(
+  const directDownloadUrl = `${backendUrl}/api/v1/books/reset-by-discipline/audio?token=${encodeURIComponent(
     data.accessToken
   )}&download=true`;
   const invoiceNumber = data.invoiceNumber || `INV-AB-${data.stripeSessionId.slice(-8).toUpperCase()}`;
@@ -926,6 +927,19 @@ export function buildAudiobookStaffAlertHtml(data: AudiobookInvoiceEmailData): s
       </td>
     `;
   }
+
+  const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const directAudioDownloadUrl = `${backendUrl}/api/v1/books/reset-by-discipline/audio?token=${encodeURIComponent(
+    data.accessToken
+  )}&download=true`;
+
+  staffActionButtonsHtml += `
+    <td style="padding-right: 12px; padding-bottom: 10px;">
+      <a href="${escapeHtml(directAudioDownloadUrl)}" target="_blank" style="display: inline-block; background-color: transparent; border: 1px solid #021329; color: #010d20; text-decoration: none; font-family: 'Inter', Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 22px; text-align: center; border-radius: 2px;">
+        Download Audio (MP3)&nbsp;&nbsp;&darr;
+      </a>
+    </td>
+  `;
 
   if (rawTemplate) {
     return rawTemplate

@@ -75,6 +75,8 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('Reset by Discipline');
       expect(html).toContain('Download Reset by Discipline (PDF)');
       expect(html).toContain('Download Tax Invoice (PDF)');
+      // Customer download CTA redirects to frontend payment-success
+      expect(html).toContain(`/payment-success?session_id=${encodeURIComponent(testSessionIdEn)}&amp;version=en&amp;book=reset-by-discipline`);
       // Zero unresolved placeholders
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
@@ -102,6 +104,8 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('Download Reset door Discipline (PDF)');
       expect(html).toContain('Download Btw-factuur (PDF)');
       expect(html).toContain('Btw-factuur');
+      // Customer download CTA redirects to frontend payment-success
+      expect(html).toContain(`/payment-success?session_id=${encodeURIComponent(testSessionIdNl)}&amp;version=nl&amp;book=reset-by-discipline`);
       // Zero unresolved placeholders
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
@@ -131,6 +135,10 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('pi_test_staff_en_123');
       expect(html).toContain('Download Book PDF');
       expect(html).toContain('Download PDF Invoice');
+      // Staff email has direct backend download link
+      expect(html).toContain(`/api/download?session_id=${encodeURIComponent(testSessionIdEn)}`);
+      // Staff email only contains invoice and download links (no reply to customer button)
+      expect(html).not.toContain('Reply to Customer');
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
     });
@@ -158,6 +166,10 @@ describe('Reset by Discipline Text Version Invoice Emails (English & Dutch)', ()
       expect(html).toContain('Nederlandse Editie');
       expect(html).toContain('Download PDF Factuur');
       expect(html).toContain('Download Boek PDF');
+      // Staff email has direct backend download link
+      expect(html).toContain(`/api/download?session_id=${encodeURIComponent(testSessionIdNl)}`);
+      // Staff email only contains invoice and download links (no reply to customer button)
+      expect(html).not.toContain('Klant Beantwoorden');
       const leftoverPlaceholders = html.match(/\{\{[a-z0-9_]+\}\}/gi);
       expect(leftoverPlaceholders).toBeNull();
     });

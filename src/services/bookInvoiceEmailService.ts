@@ -76,6 +76,24 @@ function formatDubaiDate(date?: Date | string | null, version: 'en' | 'nl' = 'en
 }
 
 /**
+ * Resolves the Frontend URL dynamically from environment variables.
+ * Checks FRONTEND_URL or falls back to 'https://leadersperformance.ae'.
+ */
+export function getFrontendUrl(): string {
+  const url = process.env.FRONTEND_URL || 'https://leadersperformance.ae';
+  return url.replace(/\/$/, '');
+}
+
+/**
+ * Resolves the Backend API URL dynamically from environment variables.
+ * Checks BACKEND_URL, API_URL, or falls back to getFrontendUrl().
+ */
+export function getBackendUrl(): string {
+  const url = process.env.BACKEND_URL || process.env.API_URL || process.env.API_BASE_URL || getFrontendUrl();
+  return url.replace(/\/$/, '');
+}
+
+/**
  * Resolves direct PDF invoice download URL from Stripe invoice data.
  */
 function resolveInvoiceDownloadUrl(
@@ -96,18 +114,29 @@ function resolveInvoiceDownloadUrl(
     }
     return hostedInvoiceUrl;
   }
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const frontendUrl = getFrontendUrl();
   return `${frontendUrl}/payment-success?session_id=${encodeURIComponent(
     sessionId || ''
   )}&version=${version}&book=reset-by-discipline`;
 }
 
 /**
- * Resolves direct PDF book download URL.
+ * Resolves customer download URL, redirecting the customer to the frontend
+ * payment-success page where the verified download button and access are presented.
  */
-function resolveBookDownloadUrl(sessionId: string): string {
-  const apiBase = (process.env.API_URL || process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
-  return `${apiBase}/api/download?session_id=${encodeURIComponent(sessionId)}`;
+export function resolveCustomerDownloadUrl(sessionId: string, version: 'en' | 'nl'): string {
+  const frontendUrl = getFrontendUrl();
+  return `${frontendUrl}/payment-success?session_id=${encodeURIComponent(
+    sessionId
+  )}&version=${version}&book=reset-by-discipline`;
+}
+
+/**
+ * Resolves direct PDF book download URL from backend API for staff.
+ */
+export function resolveStaffBookDownloadUrl(sessionId: string): string {
+  const backendUrl = getBackendUrl();
+  return `${backendUrl}/api/download?session_id=${encodeURIComponent(sessionId)}`;
 }
 
 /**
@@ -120,9 +149,9 @@ export function buildBookInvoiceEmailHtml(data: BookInvoiceEmailData): string {
     : 'book-invoice-confirmation-en.html';
   const rawTemplate = loadTemplate(templateName);
 
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
+  const frontendUrl = getFrontendUrl();
   const bookUrl = `${frontendUrl}/knowledge?book-name=reset-by-discipline&version=${data.version}#reset-by-discipline`;
-  const downloadUrl = resolveBookDownloadUrl(data.stripeSessionId);
+  const downloadUrl = resolveCustomerDownloadUrl(data.stripeSessionId, data.version);
   const invoiceDownloadUrl = resolveInvoiceDownloadUrl(
     data.invoicePdf,
     data.hostedInvoiceUrl,
@@ -206,7 +235,7 @@ export function buildBookStaffAlertHtml(data: BookInvoiceEmailData): string {
   const amountPaidCents = data.amountPaidCents ?? 1999;
   const amountPaidFormatted = (amountPaidCents / 100).toFixed(2);
   const currency = escapeHtml((data.currency || 'usd').toUpperCase());
-  const downloadUrl = resolveBookDownloadUrl(data.stripeSessionId);
+  const downloadUrl = resolveStaffBookDownloadUrl(data.stripeSessionId);
   const invoiceDownloadUrl = resolveInvoiceDownloadUrl(
     data.invoicePdf,
     data.hostedInvoiceUrl,
