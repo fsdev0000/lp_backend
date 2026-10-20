@@ -6,24 +6,30 @@ declare const process: any;
 const prisma = new PrismaClient();
 
 const defaultQuestions = [
-  { domain: "Founder Involvement", text: "How often does day-to-day progress depend on your direct involvement?" },
-  { domain: "Decision Load", text: "How often can the business maintain momentum when you step back?" },
-  { domain: "Execution Cadence", text: "How often do important decisions wait for your approval before work can continue?" },
-  { domain: "Leadership Alignment", text: "How often are decisions resolved at the appropriate level without being escalated to you?" },
-  { domain: "Operational Resilience", text: "How consistently are priorities translated into completed actions?" },
-  { domain: "Decision Load", text: "How often do commitments or deadlines slip without your intervention?" },
-  { domain: "Execution Cadence", text: "How consistently do leaders make and own decisions within clear boundaries?" },
-  { domain: "Leadership Alignment", text: "How often do leaders wait for your direction before moving forward?" },
-  { domain: "Operational Resilience", text: "How often can the current operating rhythm absorb additional pressure without losing focus or pace?" },
-  { domain: "Founder Pressure", text: "How often does accumulated operational pressure reduce the quality or speed of decision-making?" },
+  // 1. Founder Involvement (2 questions)
+  { domain: "Founder Involvement", text: "How often does day-to-day progress depend directly on your personal involvement?" },
+  { domain: "Founder Involvement", text: "How often does operational momentum pause when you are unavailable or focused elsewhere?" },
+  // 2. Decision Load (2 questions)
+  { domain: "Decision Load", text: "How often do important operational or strategic decisions wait for your review before work can proceed?" },
+  { domain: "Decision Load", text: "How often do decisions that belong at team level get escalated back to you?" },
+  // 3. Execution Rhythm (2 questions)
+  { domain: "Execution Rhythm", text: "How often do strategic priorities or commitments slip without your repeated follow-up?" },
+  { domain: "Execution Rhythm", text: "How often does delivery consistency require founder-level intervention to stay on schedule?" },
+  // 4. Leadership Ownership (2 questions)
+  { domain: "Leadership Ownership", text: "How often do leaders wait for your explicit direction before taking action on ambiguous challenges?" },
+  { domain: "Leadership Ownership", text: "How often do leaders defer consequential accountability back to you instead of resolving outcomes?" },
+  // 5. Operational Resilience (2 questions)
+  { domain: "Operational Resilience", text: "How often does unexpected operational friction disrupt your organisation's core rhythm?" },
+  { domain: "Operational Resilience", text: "How sensitive is current performance when you or key team members are under sustained demand?" },
 ];
 
 const defaultPressureOptions = [
-  { key: "decisions", title: "Too many decisions still require my involvement", hint: "Progress slows while people wait." },
-  { key: "execution", title: "Execution is inconsistent", hint: "Commitments and deadlines are not reliably met." },
-  { key: "leadership", title: "Leadership ownership is unclear", hint: "Responsibilities exist, but accountability is inconsistent." },
-  { key: "growth", title: "Growth is increasing pressure on people and systems.", hint: "Complexity is rising faster than operating capacity." },
-  { key: "unsure", title: "I’m not sure yet", hint: "The questions will help clarify where the pressure may be coming from." },
+  { key: "founder_involvement", title: "Progress still depends heavily on my personal involvement", hint: "Execution and decisions slow whenever I am not directly driving them." },
+  { key: "decision_load", title: "Too many decisions continue to concentrate around me", hint: "Important operational and strategic approvals create bottlenecks." },
+  { key: "execution_rhythm", title: "Execution and commitments slip without repeated intervention", hint: "Priorities lack self-sustaining consistency and momentum." },
+  { key: "leadership_ownership", title: "Leaders hesitate to make decisions or take full ownership", hint: "Responsibilities exist, but accountability repeatedly returns to me." },
+  { key: "operational_resilience", title: "The organisation struggles when I am unavailable or focused elsewhere", hint: "Operating rhythm experiences strain as complexity increases." },
+  { key: "unsure", title: "I am not sure yet", hint: "The scan questions will help clarify where directional pressure is concentrating." },
 ];
 
 const revenueBands = ["Under €1M", "€1M–€5M", "€5M–€15M", "€15M–€50M", "€50M+"];

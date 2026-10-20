@@ -88,8 +88,14 @@ export function renderTemplate(templateHtml: string, variables: Record<string, s
 
 export async function sendAssessmentEmail(contactId: string, emailData: { tier: string, firstName: string, score: number, sessionId: string }) {
   let templateName = 'strong.html';
-  if (emailData.tier.toLowerCase() === 'critical') templateName = 'critical.html';
-  else if (emailData.tier.toLowerCase() === 'moderate') templateName = 'moderate.html';
+  const lowerTier = (emailData.tier || '').toLowerCase();
+  if (lowerTier.includes('priority') || lowerTier === 'critical') {
+    templateName = 'critical.html';
+  } else if (lowerTier.includes('active') || lowerTier.includes('emerging') || lowerTier === 'moderate') {
+    templateName = 'moderate.html';
+  } else {
+    templateName = 'strong.html';
+  }
 
   const templatePath = path.join(__dirname, '../../templates', templateName);
   

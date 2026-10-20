@@ -14,6 +14,7 @@ import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
 import { consentRoutes } from './consent';
 import { assessmentRateLimiter } from '../../middleware/rateLimiter';
 import { getMasterclassMonthAvailability } from '../../services/masterclassService';
+import { sendNewsletterWelcomeEmail } from './newsletter';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -46,12 +47,18 @@ apiRoutes.use('/consent', consentRoutes);
 // Ephemeral in-memory session store (Zero Database Retention)
 interface EphemeralSession {
   answers: any[];
+  domainScores?: { domain: string; mean: number; normalised: number }[];
+  finalScore?: number;
+  overallMean?: number;
+  tier?: string;
+  methodologyVersion?: string;
   founder: {
     name: string;
     company: string;
     email: string;
     phone: string;
     revenue: string;
+    reference_number?: string;
   };
   expiresAt: number;
 }
@@ -246,12 +253,12 @@ apiRoutes.get('/ping', (req, res) => {
  */
 let cachedConfig: any = null;
 let cacheTime = 0;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 30 * 1000; // 30 seconds
 
 apiRoutes.get('/scan/config', async (req, res) => {
   try {
     const now = Date.now();
-    if (cachedConfig && now - cacheTime < CACHE_TTL) {
+    if (cachedConfig && !req.query.refresh && now - cacheTime < CACHE_TTL) {
       return res.json(cachedConfig);
     }
 
@@ -336,6 +343,12 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
       return res.json({
         answers: session.answers,
         founder: session.founder,
+        reference_number: session.founder?.reference_number,
+        domainScores: session.domainScores,
+        score: session.finalScore,
+        tier: session.tier,
+        overallMean: session.overallMean,
+        methodologyVersion: session.methodologyVersion || '1.0',
       });
     }
 
@@ -377,14 +390,16 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
 
     const validCount = numericAnswers.length;
     const totalScore = numericAnswers.reduce((sum, val) => sum + val, 0);
-    const overallScore = validCount > 0 ? totalScore / validCount : 0;
+    const overallMean = validCount > 0 ? totalScore / validCount : 1;
 
-    // Normalized score out of 100
-    const finalScore = validCount > 0 ? Math.min(100, Math.max(0, Math.round((overallScore / 4) * 100))) : 0;
+    // Correct conversion from 1-5 scale to 0-100 scale: ((Mean - 1) / 4) * 100
+    const finalScore = validCount > 0 ? Math.min(100, Math.max(0, Math.round(((overallMean - 1) / 4) * 100))) : 0;
 
-    let tier = 'Strong';
-    if (overallScore >= 3) tier = 'Critical';
-    else if (overallScore >= 2) tier = 'Moderate';
+    // Directional signal framework labels per Founder Pressure Scan V1.0 specifications
+    let tier = 'Limited Signal';
+    if (finalScore >= 75) tier = 'Priority Signal';
+    else if (finalScore >= 50) tier = 'Active Signal';
+    else if (finalScore >= 25) tier = 'Emerging Signal';
 
     // Figure out primary focus based on domain averages
     const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
@@ -409,28 +424,33 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
       }
     });
 
-    let primaryFocus = 'General Operations';
+    const domainAverages: { domain: string, mean: number, normalised: number }[] = [];
     let maxDomainScore = -1;
 
     for (const [domain, stats] of Object.entries(domainScores)) {
       if (stats.n > 0) {
         const avg = stats.sum / stats.n;
+        const norm = Math.round(((avg - 1) / 4) * 100);
+        domainAverages.push({ domain, mean: avg, normalised: norm });
         if (avg > maxDomainScore) {
           maxDomainScore = avg;
-          primaryFocus = domain;
         }
       }
     }
 
-    // Map insights based on primary focus
+    const highestDomains = domainAverages.filter(d => Math.abs(d.mean - maxDomainScore) < 0.01).map(d => d.domain);
+    const primaryFocus = highestDomains.length > 1 ? highestDomains.join(' & ') : (highestDomains[0] || 'Founder Involvement');
+
+    // Map insights based on the 5 official domains
     const insights: Record<string, { opp: string, q: string }> = {
-      'Decisions': { opp: 'Delegation of Operational Decisions', q: 'Where are decisions bottlenecking at your level?' },
-      'Execution': { opp: 'Rhythm and Cadence of Execution', q: 'Are your teams executing smoothly without your direct intervention?' },
-      'Leadership': { opp: 'Leadership Autonomy', q: 'Does your leadership team own their outcomes fully?' },
-      'Growth': { opp: 'Scalable Growth Infrastructure', q: 'Is the business scaling efficiently with the current infrastructure?' }
+      'Founder Involvement': { opp: 'Delegation of Operational Execution', q: 'Where does progress slow down when you are not directly involved?' },
+      'Decision Load': { opp: 'Distribution of Strategic and Operational Decision Rights', q: 'Which decisions continue to bottleneck around you?' },
+      'Execution Rhythm': { opp: 'Operating Cadence and Delivery Consistency', q: 'Are priorities holding their schedule without repeated founder intervention?' },
+      'Leadership Ownership': { opp: 'Executive Mandates and Autonomous Ownership', q: 'Do your leaders resolve ambiguous issues within clear boundaries?' },
+      'Operational Resilience': { opp: 'Scalable Operating Systems and Team Resilience', q: 'How well does the organisation absorb pressure without losing cadence?' },
     };
 
-    const insight = insights[primaryFocus] || { opp: 'Overall Alignment', q: 'What is the biggest operational constraint today?' };
+    const insight = insights[primaryFocus] || { opp: 'Operational Alignment', q: 'What is the most significant operational pressure pattern today?' };
 
     // Zero Database Retention: Generate ephemeral IDs and cache in temporary memory
     const assessmentId = randomUUID();
@@ -438,12 +458,18 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
 
     ephemeralSessions.set(sessionId, {
       answers,
+      domainScores: domainAverages,
+      finalScore,
+      overallMean,
+      tier,
+      methodologyVersion: '1.0',
       founder: {
         name: founder.founder || founder.name || 'Unknown',
         company: founder.company || '',
         email: founder.email || '',
         phone: founder.phone || '',
         revenue: founder.revenue || '',
+        reference_number: founder.reference_number || founder.ref || '',
       },
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
@@ -451,11 +477,18 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
     // --- GHL & Email Integration ---
     if (founder.email) {
       try {
+        const isMarketingOptedIn = Boolean(
+          req.body.consent?.marketingOptional ?? founder.marketingConsent ?? founder.marketingOptional
+        );
+        const contactTags = isMarketingOptedIn
+          ? ['Founder Pressure Scan', 'Newsletter']
+          : ['Founder Pressure Scan'];
+
         const contactId = await upsertContact({
           email: founder.email,
           firstName: founder.founder || founder.name,
           phone: founder.phone,
-          tags: ['Founder Pressure Scan'],
+          tags: contactTags,
           howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear,
           attribution: req.body.attribution,
         });
@@ -470,10 +503,66 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
             attribution: req.body.attribution,
             phone: founder.phone,
             ghlContactId: contactId,
-            tags: ['Founder Pressure Scan'],
+            tags: contactTags,
           },
           req
         ).catch((attrErr) => console.warn('[Pressure Scan] Attribution tracking notice:', attrErr));
+
+        // Enroll in newsletter if opted in
+        if (isMarketingOptedIn) {
+          try {
+            const cleanEmail = founder.email.toLowerCase().trim();
+            const existingSub = await prisma.newsletterSubscriber.findUnique({
+              where: { email: cleanEmail },
+            });
+            let token: string = randomUUID();
+            if (!existingSub) {
+              await prisma.newsletterSubscriber.create({
+                data: {
+                  email: cleanEmail,
+                  firstName: (founder.founder || founder.name || '').trim() || null,
+                  consentGiven: true,
+                  consentDate: new Date(),
+                  consentSource: 'founder_pressure_scan',
+                  privacyPolicyVersion: 'v2026.3',
+                  subscribed: true,
+                  status: 'subscribed',
+                  unsubscribeToken: token,
+                  source: 'Founder Pressure Scan',
+                  ghlContactId: contactId || null,
+                  subscribedAt: new Date(),
+                },
+              });
+              console.log(`[Pressure Scan] Enrolled ${cleanEmail} into Newsletter subscribers.`);
+            } else if (!existingSub.subscribed) {
+              token = existingSub.unsubscribeToken || token;
+              await prisma.newsletterSubscriber.update({
+                where: { email: cleanEmail },
+                data: {
+                  subscribed: true,
+                  status: 'subscribed',
+                  unsubscribedAt: null,
+                  subscribedAt: new Date(),
+                  ghlContactId: contactId || existingSub.ghlContactId,
+                },
+              });
+              console.log(`[Pressure Scan] Reactivated Newsletter subscription for ${cleanEmail}.`);
+            } else {
+              token = existingSub.unsubscribeToken || token;
+            }
+
+            // Send Welcome Email
+            await sendNewsletterWelcomeEmail(
+              cleanEmail,
+              contactId,
+              token,
+              (founder.founder || founder.name || '').trim() || null
+            );
+            console.log(`[Pressure Scan] Dispatched welcome newsletter email to ${cleanEmail}`);
+          } catch (nlErr) {
+            console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr);
+          }
+        }
 
         if (contactId) {
           await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
@@ -745,7 +834,7 @@ apiRoutes.post('/voice/tts', async (req, res) => {
  *         description: Booking scheduled
  */
 apiRoutes.post('/booking/schedule', async (req, res) => {
-  const { email, date, time, timezone, name, phone } = req.body;
+  const { email, date, time, timezone, name, phone, reference } = req.body;
 
   if (!email || !date || !time) {
     return res.status(400).json({ error: 'Missing required booking fields' });
@@ -776,9 +865,10 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
     }
 
     const dateTimeStr = `${date}T${formattedTime}:00`;
-    await bookAppointment(contactId, dateTimeStr, `Strategy Session - ${name || email}`);
+    const appointmentTitle = `Personal Review Conversation - ${name || email}${reference ? ` (${reference})` : ''}`;
+    await bookAppointment(contactId, dateTimeStr, appointmentTitle);
 
-    console.log(`[Booking Scheduled] Zero-DB Mode: Successfully booked for ${email} at ${dateTimeStr}`);
+    console.log(`[Booking Scheduled] Successfully booked for ${email} (${name || 'Founder'}) at ${dateTimeStr} [Ref: ${reference || 'N/A'}]`);
 
     // Emit event to connected clients for real-time update
     const io = req.app.get('io');
@@ -886,18 +976,20 @@ apiRoutes.get('/bookings/availability/month', async (req, res) => {
 apiRoutes.get('/bookings/calendar-info', async (_req, res) => {
   try {
     const info = await getCalendarInfo();
+    const duration = process.env.REVIEW_SESSION_DURATION ? parseInt(process.env.REVIEW_SESSION_DURATION, 10) : info.duration;
     res.status(200).json({
       name: info.name,
-      duration: info.duration,
-      sessionLabel: `Strategic Review · ${info.duration} min`,
+      duration,
+      sessionLabel: `Personal Review Conversation · ${duration} min`,
     });
   } catch (error) {
     console.error('Failed to get calendar info:', error);
     // Fallback so the UI always has something to show
+    const fallbackDuration = process.env.REVIEW_SESSION_DURATION ? parseInt(process.env.REVIEW_SESSION_DURATION, 10) : 30;
     res.status(200).json({
-      name: 'Strategic Review',
-      duration: 30,
-      sessionLabel: 'Strategic Review · 30 min',
+      name: 'Personal Review Conversation',
+      duration: fallbackDuration,
+      sessionLabel: `Personal Review Conversation · ${fallbackDuration} min`,
     });
   }
 });
