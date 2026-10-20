@@ -295,6 +295,67 @@ export async function bookAppointment(contactId: string, dateTime: string, title
   return data;
 }
 
+export async function getOpenOpportunitiesForContact(contactId: string): Promise<any[]> {
+    try {
+        const locationId = await getSecret('GHL_LOCATION_ID');
+        const headers = await ghlHeaders();
+        const res = await fetch(`${GHL_BASE}/opportunities/search?contact_id=${encodeURIComponent(contactId)}&location_id=${encodeURIComponent(locationId)}&status=open`, {
+            method: 'GET',
+            headers,
+        });
+        if (!res.ok) return [];
+        const data: any = await res.json();
+        return data.opportunities || [];
+    } catch (err) {
+        console.error('Failed to search opportunities for contact:', err);
+        return [];
+    }
+}
+
+export async function addContactNote(contactId: string, noteBody: string): Promise<void> {
+    try {
+        const headers = await ghlHeaders();
+        await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/notes`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ body: noteBody }),
+        });
+    } catch (err) {
+        console.error('Failed to add note to contact:', err);
+    }
+}
+
+export async function createOpportunityWithDedup(contactId: string, title: string, referenceNumber: string) {
+    try {
+        const openOpps = await getOpenOpportunitiesForContact(contactId);
+        if (openOpps && openOpps.length > 0) {
+            console.log(`[GHL Dedup] Open opportunity exists for contact ${contactId}. Appending note instead of duplicate.`);
+            await addContactNote(contactId, `Repeat Founder Pressure Scan submitted: ${referenceNumber}`);
+            return { duplicated: false, existingId: openOpps[0]?.id };
+        }
+
+        const locationId = await getSecret('GHL_LOCATION_ID');
+        const headers = await ghlHeaders();
+        const res = await fetch(`${GHL_BASE}/opportunities/`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                pipelineId: PIPELINE_ID,
+                locationId,
+                pipelineStageId: STAGE_NEW_LEAD,
+                contactId,
+                name: title,
+                status: 'open',
+            }),
+        });
+        const oppData = await res.json().catch(() => ({}));
+        return { duplicated: false, createdId: (oppData as any)?.opportunity?.id };
+    } catch (e) {
+        console.error('Failed to create opportunity with dedup:', e);
+        return null;
+    }
+}
+
 export async function createOpportunity(contactId: string, title: string) {
     const locationId = await getSecret('GHL_LOCATION_ID');
     const headers = await ghlHeaders();

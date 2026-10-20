@@ -364,3 +364,39 @@ model AudiobookPurchase {
   @@map("audiobook_purchases")
 }
 
+model PressureScanSubmission {
+  id                      String    @id @default(uuid())
+  referenceNumber         String    @unique @map("reference_number")
+  methodologyVersion      String    @default("1.0") @map("methodology_version")
+  questionSetVersion      String    @default("1.0") @map("question_set_version")
+  fullName                String    @map("full_name")
+  email                   String
+  companyName             String    @map("company_name")
+  phone                   String?
+  submittedContext        Json?     @map("submitted_context")
+  answers                 Json
+  overallRawMean          Float     @map("overall_raw_mean")
+  overallNormalised       Float     @map("overall_normalised")
+  domainScores            Json      @map("domain_scores")
+  primarySignalAreas      String[]  @map("primary_signal_areas")
+  signalClassification    String    @map("signal_classification")
+  methodologyAcknowledged Boolean   @map("methodology_acknowledged")
+  privacyAcknowledged     Boolean   @map("privacy_acknowledged")
+  marketingConsent        Boolean   @default(false) @map("marketing_consent")
+  reviewStatus            String    @default("AWAITING_REVIEW") @map("review_status")
+  reviewerNotes           String?   @db.Text @map("reviewer_notes")
+  reviewerDecision        String?   @map("reviewer_decision")
+  reviewedAt              DateTime? @map("reviewed_at")
+  reviewedBy              String?   @map("reviewed_by")
+  zoomMeetingUrl          String?   @map("zoom_meeting_url")
+  scheduledReviewAt       DateTime? @map("scheduled_review_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@index([referenceNumber])
+  @@index([email])
+  @@index([reviewStatus])
+  @@index([createdAt])
+  @@map("pressure_scan_submissions")
+}
+

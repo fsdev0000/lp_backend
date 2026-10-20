@@ -152,7 +152,8 @@ export async function buildAdminBriefingEmail(founderData: AdminBriefingData): P
   const referenceNumber = (founderData.reference_number || founderData.ref || generateReferenceNumber()).trim();
   const submittedAt = formatOperationalSubmissionDate(founderData.submission_date);
   const reviewStatus = (founderData.review_status || 'Awaiting Human Review').trim();
-  const reviewUrl = '#';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
+  const reviewUrl = founderData.review_url || `${frontendUrl}/diagnostics?id=${referenceNumber}`;
 
   const initialReason = (
     founderData.initial_reason ||
@@ -160,8 +161,8 @@ export async function buildAdminBriefingEmail(founderData: AdminBriefingData): P
     'We are preparing for the next stage of growth and I want to understand where my involvement may be limiting leadership ownership and execution.'
   ).trim();
 
-  // Subject requirement: New Founder Pressure Scan Submission — [Company Name] — [Reference Number]
-  const subject = `New Founder Pressure Scan Submission — ${companyName} — ${referenceNumber}`;
+  // Subject requirement per Sub-Task 6: [Founder Pressure Scan] New Submission: [Name] - [Company] (Ref: [Ref])
+  const subject = `[Founder Pressure Scan] New Submission: ${participantName} — ${companyName} (Ref: ${referenceNumber})`;
 
   // Safe HTML template variables map (strictly excluding raw scores, tiers, answers, or consultant diagnostics)
   const variables: Record<string, string> = {
