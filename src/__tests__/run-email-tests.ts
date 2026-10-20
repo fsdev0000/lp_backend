@@ -49,14 +49,14 @@ async function main() {
     name: 'Sarah Connor',
     company: 'Cyberdyne Systems',
   });
-  assert(/^New Founder Pressure Scan Submission — Cyberdyne Systems — FPS-\d{4}-\d{4}$/.test(email2.subject), 'Subject must match generated reference number');
+  assert(/^\[Founder Pressure Scan\] New Submission: Sarah Connor — Cyberdyne Systems \(Ref: FPS-\d{4}-\d{4}\)$/.test(email2.subject), 'Subject must match generated reference number');
   assert(email2.html.includes(email2.referenceNumber), 'HTML must display reference number');
   console.log('✓ Test 4 Passed: Canonical reference number generation verified');
 
-  // Test 5: Approved Secure CTA "Open Secure Review" & Disabled link to '#'
-  assert(email.html.includes('Open Secure Review'), 'Must contain exact CTA text "Open Secure Review"');
-  assert(email.html.includes('href="#"'), 'CTA button link must be disabled to "#"');
-  console.log('✓ Test 5 Passed: Secure review CTA disabled with empty link "#" verified');
+  // Test 5: Executive Dossier PDF Attached Notice present & button removed
+  assert(email.html.includes('EXECUTIVE DOSSIER ATTACHED'), 'Must contain attached dossier notice');
+  assert(!email.html.includes('Open Secure Review'), 'CTA button must be removed');
+  console.log('✓ Test 5 Passed: Executive dossier PDF attached notice verified');
 
   // Test 6: Zero Exposure of Confidential Submission Data in Subject or Body
   assert(!email.subject.includes('87'), 'Subject must not leak score');

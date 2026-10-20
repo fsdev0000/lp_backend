@@ -25,6 +25,7 @@ jest.mock('../services/email', () => {
   return {
     ...original,
     sendAdminBriefing: jest.fn().mockResolvedValue(true as never),
+    sendCalendarBookingEmails: jest.fn().mockResolvedValue(true as never),
   };
 });
 

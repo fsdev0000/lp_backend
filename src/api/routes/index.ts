@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
-import { sendAdminBriefing } from '../../services/email';
+import { sendAdminBriefing, sendCalendarBookingEmails } from '../../services/email';
 import { syncLeadAttribution } from '../../services/attributionService';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
@@ -765,6 +764,9 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
             company: companyName,
             company_name: companyName,
             phone: founder.phone,
+            revenue: founder.revenue,
+            stage: founder.companyStage || founder.stage,
+            signal_classification: signalClassification,
             reference_number: referenceNumber,
             initial_reason: founder.initial_reason || founder.reason || founder.pressure,
             primary_focus: primaryJoined,
@@ -1216,6 +1218,40 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
         },
       }).catch((e) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
     }
+
+    // Resolve founder name/company from scan submission if not directly provided in booking body
+    let finalName = name;
+    let finalCompany = req.body.company;
+    let finalPhone = phone;
+
+    if (reference && (!finalName || !finalCompany || !finalPhone)) {
+      try {
+        const existingSub = await prisma.pressureScanSubmission.findFirst({
+          where: {
+            OR: [{ referenceNumber: reference }, { id: reference }],
+          },
+          select: { fullName: true, companyName: true, phone: true },
+        });
+        if (existingSub) {
+          if (!finalName && existingSub.fullName) finalName = existingSub.fullName;
+          if (!finalCompany && existingSub.companyName) finalCompany = existingSub.companyName;
+          if (!finalPhone && existingSub.phone) finalPhone = existingSub.phone;
+        }
+      } catch (_) {}
+    }
+
+    // Dispatch Calendar Booking Emails:
+    // 1) Founder receives calendar confirmation with confirmed time & Zoom meeting link
+    // 2) Lionel's side receives notification alert with founder details and link to review
+    sendCalendarBookingEmails({
+      participantName: finalName || 'Founder',
+      email: email,
+      phone: finalPhone || undefined,
+      companyName: finalCompany || 'Enterprise',
+      dateTimeStr: dateTimeStr,
+      referenceNumber: reference || 'FPS-2026-N/A',
+      zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    }).catch((e) => console.error('[Pressure Scan] Error sending calendar booking emails:', e));
 
     // Emit event to connected clients for real-time update
     const io = req.app.get('io');

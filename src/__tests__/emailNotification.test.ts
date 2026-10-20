@@ -40,7 +40,7 @@ describe('Founder Pressure Scan Internal Notification Email Template', () => {
       reference_number: 'FPS-2026-0048',
     });
 
-    expect(email.subject).toBe('New Founder Pressure Scan Submission — Mercer Group — FPS-2026-0048');
+    expect(email.subject).toBe('[Founder Pressure Scan] New Submission: Daniel Mercer — Mercer Group (Ref: FPS-2026-0048)');
   });
 
   test('generates canonical reference number if omitted', async () => {
@@ -49,19 +49,19 @@ describe('Founder Pressure Scan Internal Notification Email Template', () => {
       company: 'Cyberdyne Systems',
     });
 
-    expect(email.subject).toMatch(/^New Founder Pressure Scan Submission — Cyberdyne Systems — FPS-\d{4}-\d{4}$/);
+    expect(email.subject).toMatch(/^\[Founder Pressure Scan\] New Submission: Sarah Connor — Cyberdyne Systems \(Ref: FPS-\d{4}-\d{4}\)$/);
     expect(email.html).toContain(email.referenceNumber);
   });
 
-  test('contains approved Secure CTA text "Open Secure Review" with disabled href "#"', async () => {
+  test('verifies review button is removed and attached dossier notice is present', async () => {
     const email = await buildAdminBriefingEmail({
       name: 'Daniel Mercer',
       company: 'Mercer Group',
       reference_number: 'FPS-2026-0048',
     });
 
-    expect(email.html).toContain('Open Secure Review');
-    expect(email.html).toContain('href="#"');
+    expect(email.html).toContain('EXECUTIVE DOSSIER ATTACHED');
+    expect(email.html).not.toContain('Open Secure Review');
   });
 
   test('strictly protects confidential information: no scores, tiers, or raw answers exposed', async () => {
