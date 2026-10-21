@@ -311,71 +311,117 @@ export async function sendCalendarBookingEmails(data: CalendarBookingEmailData) 
   // 1. FOUNDER CONFIRMATION EMAIL (Sent ONLY to Founder)
   try {
     const founderSubject = `[Confirmed] 1-on-1 Strategic Review with Lionel Eersteling (Ref: ${data.referenceNumber})`;
-    const founderHtml = `<!DOCTYPE html>
-<html>
+    const founderHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${founderSubject}</title>
-  <style>
-    body { font-family: 'Inter', Arial, sans-serif; background: #f2ede3; margin: 0; padding: 24px 0; }
-    .card { max-width: 600px; margin: 0 auto; background: #fbf8f2; border: 1px solid #ebe4db; }
-    .header { background: #021329; border-bottom: 1px solid #d0a35a; padding: 28px 36px; }
-    .content { padding: 36px; color: #1b2637; }
-    .btn { display: inline-block; background: #d0a35a; color: #010d20; padding: 14px 28px; text-decoration: none; font-weight: 600; border-radius: 2px; }
-    .row { border-bottom: 1px solid #ebe4db; padding: 12px 0; }
-    .label { font-size: 11px; font-weight: 600; color: #9f6511; text-transform: uppercase; letter-spacing: 1px; }
-    .val { font-size: 14px; font-weight: 500; color: #1b2637; margin-top: 4px; }
-  </style>
 </head>
-<body>
-  <div class="card">
-    <div class="header">
-      <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="140" style="display:block;" />
-    </div>
-    <div class="content">
-      <div style="font-size: 11px; font-weight: 600; color: #9f6511; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px;">
-        CONFIRMED 1-ON-1 STRATEGIC REVIEW
-      </div>
-      <h2 style="font-family: Georgia, serif; font-size: 26px; color: #021329; margin: 0 0 16px;">
-        Your consultation with Lionel Eersteling is confirmed.
-      </h2>
-      <p style="font-size: 14px; line-height: 22px; color: #4a5568; margin-bottom: 24px;">
-        Dear ${escapeHtml(data.participantName)}, your private 1-on-1 strategic review conversation with <strong>Lionel Eersteling</strong> has been scheduled.
-      </p>
+<body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+              <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
+              </a>
+            </td>
+          </tr>
 
-      <div style="background: #ffffff; border: 1px solid #ebe4db; padding: 20px 24px; margin-bottom: 28px;">
-        <div class="row">
-          <div class="label">CONFIRMED DATE & TIME</div>
-          <div class="val">${escapeHtml(formattedDate)}</div>
-        </div>
-        <div class="row">
-          <div class="label">EXECUTIVE ADVISOR</div>
-          <div class="val">Lionel Eersteling</div>
-        </div>
-        <div class="row">
-          <div class="label">SCAN REFERENCE</div>
-          <div class="val">${escapeHtml(data.referenceNumber)}</div>
-        </div>
-        <div class="row" style="border-bottom: none;">
-          <div class="label">MEETING ROOM (ZOOM)</div>
-          <div class="val"><a href="${escapeHtml(zoomUrl)}" target="_blank" style="color: #9f6511; text-decoration: underline;">${escapeHtml(zoomUrl)}</a></div>
-        </div>
-      </div>
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
+                    CONFIRMED 1-ON-1 STRATEGIC REVIEW
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                    Your consultation with Lionel Eersteling is confirmed.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
+                    Dear ${escapeHtml(data.participantName)}, your private 30-minute strategic review conversation with <strong>Lionel Eersteling</strong> has been scheduled.
+                  </td>
+                </tr>
+              </table>
 
-      <div style="text-align: center; margin-bottom: 30px;">
-        <a href="${escapeHtml(zoomUrl)}" target="_blank" class="btn">
-          Launch Zoom Meeting&nbsp;&nbsp;&rarr;
-        </a>
-      </div>
+              <!-- Metadata Section -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    CONFIRMED DATE &amp; TIME
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                    ${escapeHtml(formattedDate)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    EXECUTIVE ADVISOR
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    Lionel Eersteling
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    SCAN REFERENCE
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.referenceNumber)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    MEETING ROOM (ZOOM)
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:14px;font-weight:500;line-height:20px;color:#1b2637;">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="color:#9f6511;text-decoration:underline;word-break:break-all;">${escapeHtml(zoomUrl)}</a>
+                  </td>
+                </tr>
+              </table>
 
-      <div style="background: #ebe4db; border-left: 3px solid #9f6511; padding: 18px 20px; font-size: 13px; line-height: 20px; color: #4a5568;">
-        <strong>Preparation Note:</strong> Please ensure your camera and microphone are ready 2 minutes before the session starts. Lionel will review your scan answers beforehand to focus directly on strategic priorities.
-      </div>
-    </div>
-    <div style="background: #010d20; color: #fbf8f2; padding: 18px 36px; font-size: 11px; text-align: left;">
-      Leaders Performance · Executive Advisory · Dubai, UAE
-    </div>
-  </div>
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
+                      Launch Zoom Meeting Room &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Preparation Note -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border-left:3px solid #9f6511;border-top:1px solid #ebe4db;border-right:1px solid #ebe4db;border-bottom:1px solid #ebe4db;padding:16px 20px;">
+                <tr>
+                  <td style="font-family:'Inter',Arial,sans-serif;font-size:13px;line-height:20px;color:#4a5568;">
+                    <strong style="color:#1b2637;">Preparation Note:</strong> Please ensure your camera and microphone are ready 2 minutes before the session starts. Lionel will review your scan answers beforehand to focus directly on strategic priorities.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+              Leaders Performance &middot; Executive Advisory &middot; Dubai, UAE
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 
@@ -399,75 +445,138 @@ export async function sendCalendarBookingEmails(data: CalendarBookingEmailData) 
   // 2. LIONEL'S SIDE CALENDAR ALERT (Sent to lionel@leadersperformance.ae & info@leadersperformance.ae)
   try {
     const staffSubject = `[Calendar Booked] 1-on-1 Session Confirmed: ${data.participantName} — ${data.companyName || 'Enterprise'} (Ref: ${data.referenceNumber})`;
-    const staffHtml = `<!DOCTYPE html>
-<html>
+    const staffHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${staffSubject}</title>
-  <style>
-    body { font-family: 'Inter', Arial, sans-serif; background: #f2ede3; margin: 0; padding: 24px 0; }
-    .card { max-width: 600px; margin: 0 auto; background: #fbf8f2; border: 1px solid #ebe4db; }
-    .header { background: #021329; border-bottom: 1px solid #d0a35a; padding: 28px 36px; }
-    .content { padding: 36px; color: #1b2637; }
-    .btn { display: inline-block; background: #d0a35a; color: #010d20; padding: 14px 28px; text-decoration: none; font-weight: 600; border-radius: 2px; }
-    .row { border-bottom: 1px solid #ebe4db; padding: 12px 0; }
-    .label { font-size: 11px; font-weight: 600; color: #9f6511; text-transform: uppercase; letter-spacing: 1px; }
-    .val { font-size: 14px; font-weight: 500; color: #1b2637; margin-top: 4px; }
-  </style>
 </head>
-<body>
-  <div class="card">
-    <div class="header">
-      <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="140" style="display:block;" />
-    </div>
-    <div class="content">
-      <div style="font-size: 11px; font-weight: 600; color: #9f6511; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px;">
-        1-ON-1 CALENDAR RESERVATION CONFIRMED
-      </div>
-      <h2 style="font-family: Georgia, serif; font-size: 24px; color: #021329; margin: 0 0 16px;">
-        New consultation booked on your calendar
-      </h2>
+<body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+              <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
+              </a>
+            </td>
+          </tr>
 
-      <div style="background: #ffffff; border: 1px solid #ebe4db; padding: 20px 24px; margin-bottom: 28px;">
-        <div class="row">
-          <div class="label">FOUNDER / PARTICIPANT</div>
-          <div class="val">${escapeHtml(data.participantName)}</div>
-        </div>
-        <div class="row">
-          <div class="label">ORGANISATION</div>
-          <div class="val">${escapeHtml(data.companyName || 'Confidential')}</div>
-        </div>
-        <div class="row">
-          <div class="label">DIRECT EMAIL & PHONE</div>
-          <div class="val">${escapeHtml(data.email)} · ${escapeHtml(data.phone || 'N/A')}</div>
-        </div>
-        <div class="row">
-          <div class="label">BOOKED SESSION TIME</div>
-          <div class="val" style="color: #9f6511; font-weight: 600;">${escapeHtml(formattedDate)}</div>
-        </div>
-        <div class="row">
-          <div class="label">SCAN REFERENCE</div>
-          <div class="val">${escapeHtml(data.referenceNumber)}</div>
-        </div>
-        <div class="row" style="border-bottom: none;">
-          <div class="label">ZOOM MEETING LINK</div>
-          <div class="val"><a href="${escapeHtml(zoomUrl)}" target="_blank" style="color: #9f6511; text-decoration: underline;">${escapeHtml(zoomUrl)}</a></div>
-        </div>
-      </div>
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
+                    1-ON-1 CALENDAR RESERVATION CONFIRMED
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                    New consultation booked on your calendar
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
+                    A founder has scheduled their 30-minute private executive review session.
+                  </td>
+                </tr>
+              </table>
 
-      <div style="margin-bottom: 24px; padding: 14px 18px; background: #faf7f2; border: 1px solid #d0a35a; border-radius: 2px; text-align: left;">
-        <div style="font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #9f6511; margin-bottom: 4px;">
-          EXECUTIVE DOSSIER ATTACHED
-        </div>
-        <div style="font-size: 13.5px; color: #1b2637; line-height: 20px;">
-          The complete Founder Pressure Scan Executive Review PDF is attached directly to this email.
-        </div>
-      </div>
-    </div>
-    <div style="background: #010d20; color: #fbf8f2; padding: 18px 36px; font-size: 11px; text-align: left;">
-      Leaders Performance · Internal Calendar Notification · Staging
-    </div>
-  </div>
+              <!-- Metadata Section -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    FOUNDER / PARTICIPANT
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.participantName)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    ORGANISATION
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.companyName || 'Confidential')}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    DIRECT EMAIL &amp; PHONE
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.email)} &middot; ${escapeHtml(data.phone || '—')}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    BOOKED SESSION TIME
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                    ${escapeHtml(formattedDate)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    SCAN REFERENCE
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.referenceNumber)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    ZOOM MEETING LINK
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:14px;font-weight:500;line-height:20px;color:#1b2637;">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="color:#9f6511;text-decoration:underline;word-break:break-all;">${escapeHtml(zoomUrl)}</a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Callout Box: Executive Dossier Attached -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
+                      EXECUTIVE DOSSIER ATTACHED
+                    </div>
+                    <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
+                      The complete Founder Pressure Scan Executive Review PDF (dossier with full 10-question breakdown, domain scores, and founder profile) is attached directly to this email.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
+                      Launch Zoom Meeting Room &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+              Leaders Performance &middot; Internal Calendar Notification &middot; Executive Advisory
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 
