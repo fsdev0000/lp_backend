@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
@@ -1216,7 +1217,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
           scheduledReviewAt: new Date(dateTimeStr),
           zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
         },
-      }).catch((e) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
+      }).catch((e: unknown) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
     }
 
     // Resolve founder name/company from scan submission if not directly provided in booking body

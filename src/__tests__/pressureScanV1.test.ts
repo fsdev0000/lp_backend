@@ -9,7 +9,7 @@ jest.mock('../services/ghl', () => {
   return {
     ...original,
     upsertContact: jest.fn().mockImplementation(async (payload: any) => 'mock-contact-id-123'),
-    createOpportunityWithDedup: jest.fn().mockImplementation(async (contactId: string, title: string, ref: string) => {
+    createOpportunityWithDedup: jest.fn().mockImplementation(async (...args: any[]) => {
       opportunityCallCount++;
       if (opportunityCallCount > 1) {
         return { duplicated: false, existingId: 'existing-opp-id' };

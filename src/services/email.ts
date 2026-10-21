@@ -227,7 +227,7 @@ export async function resolveScanPdfAttachmentUrl(referenceNumber: string): Prom
         domainScores: domainScoresList,
         primarySignalAreas: submission.primarySignalAreas,
         signalClassification: submission.signalClassification,
-        submittedAt: submission.submittedAt,
+        submittedAt: submission.createdAt,
         reviewStatus: submission.reviewStatus,
         reviewerNotes: submission.reviewerNotes,
         reviewerDecision: submission.reviewerDecision,

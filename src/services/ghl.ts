@@ -22,6 +22,7 @@ export async function upsertContact(payload: {
   firstName?: string;
   lastName?: string;
   phone?: string;
+  companyName?: string;
   source?: string;
   tags?: string[];
   howDidYouHear?: string;
@@ -65,6 +66,7 @@ export async function upsertContact(payload: {
     firstName: payload.firstName,
     lastName: payload.lastName,
     phone: payload.phone,
+    companyName: payload.companyName,
     source: payload.source || 'Leaders Performance Website',
     tags: payload.tags || ['Scan Lead'],
   };
@@ -298,6 +300,7 @@ export async function bookAppointment(contactId: string, dateTime: string, title
 export async function getOpenOpportunitiesForContact(contactId: string): Promise<any[]> {
     try {
         const locationId = await getSecret('GHL_LOCATION_ID');
+        if (!locationId) return [];
         const headers = await ghlHeaders();
         const res = await fetch(`${GHL_BASE}/opportunities/search?contact_id=${encodeURIComponent(contactId)}&location_id=${encodeURIComponent(locationId)}&status=open`, {
             method: 'GET',
