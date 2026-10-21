@@ -219,9 +219,11 @@ app.get('/api/ping', pingHandler);
 
 import { syncDefaultReferralsToDb } from './services/masterclassReferralService';
 import { ensureAudiobookFromSupabase } from './services/audiobookService';
+import { initAppointmentReminderWorker } from './services/reminderService';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
+  initAppointmentReminderWorker();
 });

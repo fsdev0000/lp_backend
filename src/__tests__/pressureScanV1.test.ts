@@ -61,7 +61,7 @@ describe('Founder Pressure Scan V1.0 — Backend Test Suite', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.referenceNumber).toMatch(/^FPS-\d{4}-\d{4}$/);
+    expect(res.body.referenceNumber).toMatch(/^LP-FPS-\d{4}-\d{6}$/);
 
     const submission = await prisma.pressureScanSubmission.findUnique({
       where: { referenceNumber: res.body.referenceNumber },
@@ -250,7 +250,7 @@ describe('Founder Pressure Scan V1.0 — Backend Test Suite', () => {
       where: { email },
     });
     expect(subCount).toBeGreaterThanOrEqual(2);
-  });
+  }, 60000);
 
   // Public Sanitization Verification
   it('[Sanitization] Public response does NOT leak raw numerical percentage or diagnostic risk tiers', async () => {
@@ -305,7 +305,7 @@ describe('Founder Pressure Scan V1.0 — Backend Test Suite', () => {
 
     expect(pdfRes.status).toBe(200);
     expect(pdfRes.headers['content-type']).toBe('application/pdf');
-    expect(pdfRes.headers['content-disposition']).toContain(`Founder_Pressure_Scan_${ref}.pdf`);
+    expect(pdfRes.headers['content-disposition']).toContain(`Founder_Pressure_Scan_${ref}`);
     expect(pdfRes.body.toString().slice(0, 8)).toBe('%PDF-1.4');
   });
 

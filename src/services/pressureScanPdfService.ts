@@ -109,16 +109,21 @@ export const DOMAIN_ADVISORY_PROFILES: Record<string, {
 };
 
 /**
- * Analyzes whether scores are tied or if standout areas exist
+ * Analyzes whether scores are tied or if standout areas exist, plus detects intra-domain answer conflicts
  */
-function analyzeScoreDistinction(domainScores: Array<{ domain: string; mean: number; normalised: number }>) {
+function analyzeScoreDistinction(
+  domainScores: Array<{ domain: string; mean: number; normalised: number }>,
+  answers?: any[]
+) {
   if (!domainScores || domainScores.length === 0) {
     return {
       isTied: false,
       isAllTied: false,
       distinctionBadge: 'UNAVAILABLE',
       distinctionSummary: 'No domain scores recorded.',
-      orderedDomains: []
+      orderedDomains: [] as Array<{ domain: string; mean: number; normalised: number }>,
+      topTied: [] as Array<{ domain: string; mean: number; normalised: number }>,
+      divergentDomains: [] as Array<{ domain: string; q1: number; q2: number; diff: number; desc: string }>
     };
   }
 
@@ -145,13 +150,37 @@ function analyzeScoreDistinction(domainScores: Array<{ domain: string; mean: num
     distinctionSummary = `${sorted[0].domain} stands out as the primary operational friction area at ${sorted[0].normalised.toFixed(0)}%, clearly exceeding other operational domains and representing the primary discussion anchor.`;
   }
 
+  // Detect intra-domain divergent/conflicting answer patterns
+  const divergentDomains: Array<{ domain: string; q1: number; q2: number; diff: number; desc: string }> = [];
+  if (answers && Array.isArray(answers) && answers.length >= 10) {
+    Object.values(DOMAIN_ADVISORY_PROFILES).forEach(profile => {
+      const v1 = getAnswerValue(answers, profile.qNums[0]);
+      const v2 = getAnswerValue(answers, profile.qNums[1]);
+      const diff = Math.abs(v1 - v2);
+      if (diff >= 2) {
+        divergentDomains.push({
+          domain: profile.name,
+          q1: v1,
+          q2: v2,
+          diff,
+          desc: `Q${profile.qNums[0]}=${SCALE_LABELS[v1] || v1} vs Q${profile.qNums[1]}=${SCALE_LABELS[v2] || v2}`
+        });
+      }
+    });
+  }
+
+  if (divergentDomains.length > 0 && !isAllTied) {
+    distinctionSummary += ` Divergent Patterns Note: Contrasting answers observed in ${divergentDomains.map(d => `${d.domain} (${d.desc})`).join('; ')}. The mean domain score masks contrasting operational realities; explore this variance in conversation.`;
+  }
+
   return {
     isTied: isJoint,
     isAllTied,
     topTied,
     distinctionBadge,
     distinctionSummary,
-    orderedDomains: sorted
+    orderedDomains: sorted,
+    divergentDomains
   };
 }
 
@@ -185,7 +214,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   const cardBg: [number, number, number] = [0.976, 0.969, 0.957]; // #F9F7F4
   const white: [number, number, number] = [1, 1, 1];
 
-  const analysis = analyzeScoreDistinction(data.domainScores);
+  const analysis = analyzeScoreDistinction(data.domainScores, data.answers);
 
   // ─── PAGE 1: STRATEGIC BRIEFING & SIGNAL DISTINCTION ───────────────────────
   doc.addRect(leftX, doc.currentY, usableWidth, 68, { fillColor: navyBg });
@@ -222,7 +251,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.currentY += 78;
 
   // Signal Distinction Analysis Box (Directly addresses Lionel's request for tied/standout distinction)
-  const distBoxHeight = 84;
+  const distBoxHeight = 90;
   doc.addRect(leftX, doc.currentY, usableWidth, distBoxHeight, {
     fillColor: [0.988, 0.980, 0.965],
     strokeColor: goldAccent,
@@ -231,9 +260,9 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.addText('SIGNAL DISTINCTION & PRIMARY FOCUS ANALYSIS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   doc.addText(analysis.distinctionBadge, leftX + 14, doc.currentY + 30, { font: 'F2', size: 10, color: navyBg });
-  doc.addWrappedText(analysis.distinctionSummary, leftX + 14, doc.currentY + 44, usableWidth - 28, 12, {
+  doc.addWrappedText(analysis.distinctionSummary, leftX + 14, doc.currentY + 44, usableWidth - 28, 11.5, {
     font: 'F1',
-    size: 8.5,
+    size: 8,
     color: textDark,
   });
 
@@ -248,8 +277,8 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.addText('DOMAIN', leftX + 10, doc.currentY + 14, { font: 'F2', size: 8, color: white });
   doc.addText('QUESTIONS', leftX + 180, doc.currentY + 14, { font: 'F2', size: 8, color: white });
   doc.addText('RAW MEAN', leftX + 270, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('NORMALISED', leftX + 355, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('SIGNAL LEVEL', leftX + 440, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('INTENSITY', leftX + 355, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('DIRECTIONAL SIGNAL', leftX + 440, doc.currentY + 14, { font: 'F2', size: 8, color: white });
 
   doc.currentY += 20;
 
@@ -269,12 +298,12 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     doc.addText(domName, leftX + 10, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
     doc.addText(`Q${idx * 2 + 1} & Q${idx * 2 + 2}`, leftX + 180, doc.currentY + 15, { font: 'F1', size: 8, color: textMuted });
     doc.addText(scoreItem.mean.toFixed(2), leftX + 270, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
-    doc.addText(`${scoreItem.normalised.toFixed(1)}%`, leftX + 355, doc.currentY + 15, { font: 'F2', size: 8.5, color: goldAccent });
+    doc.addText(`${scoreItem.normalised.toFixed(0)}%`, leftX + 355, doc.currentY + 15, { font: 'F2', size: 8.5, color: goldAccent });
 
     let sigLabel = 'Limited';
-    if (scoreItem.normalised >= 75) sigLabel = 'Priority';
-    else if (scoreItem.normalised >= 50) sigLabel = 'Active';
-    else if (scoreItem.normalised >= 25) sigLabel = 'Emerging';
+    if (scoreItem.normalised >= 75) sigLabel = 'Priority Signal';
+    else if (scoreItem.normalised >= 50) sigLabel = 'Active Signal';
+    else if (scoreItem.normalised >= 25) sigLabel = 'Emerging Signal';
 
     doc.addText(sigLabel, leftX + 440, doc.currentY + 15, { font: 'F2', size: 8, color: textDark });
     doc.currentY += 22;
@@ -301,67 +330,97 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   // Footer for Page 1
   doc.addText('Strictly Confidential | Internal Executive Dossier for Lionel Eersteling | Leaders Performance', leftX, doc.currentY + 10, { font: 'F1', size: 7.5, color: textMuted });
 
-  // ─── PAGE 2: OPERATIONAL HYPOTHESES & SUPPORTING ANSWERS ───────────────────
+  // ─── PAGE 2: OPERATIONAL HYPOTHESES & SUPPORTING EVIDENCE ──────────────────
   doc.startNewPage();
 
   doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: navyBg });
-  doc.addText('DOMAIN-BY-DOMAIN OPERATIONAL HYPOTHESES & EVIDENCE', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
-  doc.addText(`REF: ${data.referenceNumber}`, leftX + usableWidth - 130, doc.currentY + 21, { font: 'F2', size: 9.5, color: goldAccent });
+  doc.addText('DOMAIN OPERATIONAL HYPOTHESES & SUPPORTING EVIDENCE', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
+  doc.addText(`PAGE 2 OF 3`, leftX + usableWidth - 90, doc.currentY + 21, { font: 'F2', size: 9.5, color: goldAccent });
 
   doc.currentY += 44;
 
   domainOrder.forEach((domName) => {
-    doc.ensureSpace(120);
-
     const profile = DOMAIN_ADVISORY_PROFILES[domName];
     const scoreItem = data.domainScores.find(d => d.domain === domName) || { mean: 0, normalised: 0 };
     const q1Val = getAnswerValue(data.answers, profile.qNums[0]);
     const q2Val = getAnswerValue(data.answers, profile.qNums[1]);
+    const diff = Math.abs(q1Val - q2Val);
+    const isMixed = diff >= 2;
 
-    doc.addRect(leftX, doc.currentY, usableWidth, 110, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    const cardHeight = isMixed ? 122 : 100;
+    doc.addRect(leftX, doc.currentY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
 
     // Domain header & score badge
-    doc.addText(domName.toUpperCase(), leftX + 12, doc.currentY + 16, { font: 'F2', size: 9.5, color: navyBg });
-    doc.addText(`Intensity: ${scoreItem.mean.toFixed(2)} / 5.00 (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 150, doc.currentY + 16, { font: 'F2', size: 8.5, color: goldAccent });
+    doc.addText(domName.toUpperCase(), leftX + 12, doc.currentY + 15, { font: 'F2', size: 9, color: navyBg });
+    doc.addText(`Intensity: ${scoreItem.mean.toFixed(2)}/5.00 (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 140, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
 
-    // Operational dynamic (framed as point to explore)
-    doc.addText('OPERATIONAL HYPOTHESIS TO EXPLORE IN CONVERSATION:', leftX + 12, doc.currentY + 30, { font: 'F2', size: 7.5, color: goldAccent });
-    doc.addWrappedText(profile.operationalHypothesis, leftX + 12, doc.currentY + 41, usableWidth - 24, 11, {
+    if (isMixed) {
+      doc.addText(`[!] MIXED PATTERN (DELTA: ${diff} PTS)`, leftX + 175, doc.currentY + 15, { font: 'F2', size: 7.5, color: [0.75, 0.2, 0.1] });
+    }
+
+    // Operational hypothesis (Framed as point to explore, NOT confirmed fact)
+    doc.addText('OPERATIONAL HYPOTHESIS (POINT TO EXPLORE - NOT A CONFIRMED FACT):', leftX + 12, doc.currentY + 28, { font: 'F2', size: 7, color: goldAccent });
+    doc.addWrappedText(profile.operationalHypothesis, leftX + 12, doc.currentY + 38, usableWidth - 24, 10, {
       font: 'F1',
-      size: 8,
+      size: 7.5,
       color: textDark,
     });
 
+    let evidenceStartY = doc.currentY + 68;
+
+    if (isMixed) {
+      // Divergent answers qualification note
+      doc.addText('EVIDENCE QUALIFICATION (DIVERGENT ANSWERS):', leftX + 12, doc.currentY + 68, { font: 'F2', size: 7, color: [0.75, 0.2, 0.1] });
+      const qualNote = `Q${profile.qNums[0]} scored "${SCALE_LABELS[q1Val]}" while Q${profile.qNums[1]} scored "${SCALE_LABELS[q2Val]}". Note for Lionel: The average score (${scoreItem.mean.toFixed(2)}) masks internal polarity. Treat as situational variance to explore, not a uniform baseline.`;
+      doc.addWrappedText(qualNote, leftX + 12, doc.currentY + 77, usableWidth - 24, 9, { font: 'F1', size: 7, color: textDark });
+      evidenceStartY = doc.currentY + 95;
+    }
+
     // Supporting answers
-    doc.addText('SUPPORTING PARTICIPANT ANSWERS:', leftX + 12, doc.currentY + 76, { font: 'F2', size: 7.5, color: textMuted });
-    const q1Text = `Q${profile.qNums[0]}: ${OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text} -> [${SCALE_LABELS[q1Val] || q1Val}]`;
-    const q2Text = `Q${profile.qNums[1]}: ${OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text} -> [${SCALE_LABELS[q2Val] || q2Val}]`;
+    doc.addText('RECORDED FOUNDER RESPONSES:', leftX + 12, evidenceStartY, { font: 'F2', size: 7, color: textMuted });
+    const q1Text = `Q${profile.qNums[0]}: ${OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q1Val] || q1Val}]`;
+    const q2Text = `Q${profile.qNums[1]}: ${OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q2Val] || q2Val}]`;
 
-    doc.addWrappedText(q1Text, leftX + 12, doc.currentY + 87, usableWidth - 24, 10, { font: 'F1', size: 7.5, color: textDark });
-    doc.addWrappedText(q2Text, leftX + 12, doc.currentY + 98, usableWidth - 24, 10, { font: 'F1', size: 7.5, color: textDark });
+    doc.addText(q1Text, leftX + 12, evidenceStartY + 10, { font: 'F1', size: 7, color: textDark });
+    doc.addText(q2Text, leftX + 12, evidenceStartY + 20, { font: 'F1', size: 7, color: textDark });
 
-    doc.currentY += 118;
+    doc.currentY += cardHeight + 8;
   });
 
   // Footer for Page 2
-  doc.addText('Strictly Confidential | Operational Diagnostics & Evidence Trail | Leaders Performance', leftX, doc.currentY + 10, { font: 'F1', size: 7.5, color: textMuted });
+  doc.addText('Strictly Confidential | Operational Diagnostics & Evidence Trail | Leaders Performance', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
 
-  // ─── PAGE 3: STRATEGIC CONVERSATION QUESTIONS FOR LIONEL ──────────────────
+  // ─── PAGE 3: STRATEGIC CONVERSATION BLUEPRINT FOR LIONEL ──────────────────
   doc.startNewPage();
 
   doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: navyBg });
-  doc.addText('STRATEGIC CONVERSATION BLUEPRINT - QUESTIONS FOR LIONEL', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
+  doc.addText('STRATEGIC CONVERSATION BLUEPRINT - PREPARED FOR LIONEL EERSTELING', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
   doc.addText(`PAGE 3 OF 3`, leftX + usableWidth - 90, doc.currentY + 21, { font: 'F2', size: 9.5, color: goldAccent });
 
   doc.currentY += 44;
 
-  doc.addText('PRACTICAL CONVERSATIONAL INQUIRIES FOR 1-ON-1 REVIEW', leftX, doc.currentY + 12, { font: 'F2', size: 10, color: navyBg });
-  doc.addText('Framed as collaborative exploration rather than confirmed clinical conclusions:', leftX, doc.currentY + 24, { font: 'F1', size: 8.5, color: textMuted });
-  doc.addLine(leftX, doc.currentY + 28, leftX + usableWidth, doc.currentY + 28, goldAccent, 0.75);
+  // Review Focus & Logical Flow Box
+  doc.addRect(leftX, doc.currentY, usableWidth, 68, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1 });
+  doc.addText('RECOMMENDED CONVERSATION FLOW & STRATEGIC FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
+  
+  let flowFocusText = '';
+  if (analysis.isAllTied) {
+    flowFocusText = 'Scores are tied across all five domains (100% intensity). RECOMMENDED FLOW: Do not attempt to tackle all five domains during the 30-minute review. Anchor the conversation by asking: "Which of these five friction areas caused you the most operational disruption this past week?" to identify their immediate psychological priority and root domino.';
+  } else if (analysis.isTied && analysis.topTied.length > 0) {
+    flowFocusText = `Joint primary signals in ${analysis.topTied.map(d => d.domain).join(' & ')} (${analysis.topTied[0].normalised.toFixed(0)}%). RECOMMENDED FLOW: Explore how these two areas interact before moving to secondary operational domains.`;
+  } else {
+    flowFocusText = `Primary standout signal in ${analysis.orderedDomains[0]?.domain} (${analysis.orderedDomains[0]?.normalised.toFixed(0)}%). RECOMMENDED FLOW: Open by validating this primary friction point, explore the operational hypotheses, examine any contrasting answers, and co-design a single high-leverage delegation shift.`;
+  }
 
-  doc.currentY += 36;
+  doc.addWrappedText(flowFocusText, leftX + 14, doc.currentY + 28, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
+  doc.currentY += 78;
 
-  // Selected High-Impact Inquiries based on the founder's results
+  doc.addText('CURATED EXPLORATION QUESTIONS FOR 1-ON-1 REVIEW', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
+  doc.addText('Framed as collaborative exploration rather than confirmed clinical diagnoses:', leftX, doc.currentY + 23, { font: 'F1', size: 8, color: textMuted });
+  doc.addLine(leftX, doc.currentY + 27, leftX + usableWidth, doc.currentY + 27, goldAccent, 0.75);
+
+  doc.currentY += 34;
+
   const curatedQuestions = [
     {
       theme: '1. UNHOOKING THE FOUNDER AS THE OPERATIONAL BOTTLE NECK',
@@ -386,29 +445,28 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   ];
 
   curatedQuestions.forEach((qItem) => {
-    doc.addRect(leftX, doc.currentY, usableWidth, 44, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
-    doc.addText(qItem.theme, leftX + 12, doc.currentY + 14, { font: 'F2', size: 8, color: goldAccent });
-    doc.addWrappedText(`"${qItem.question}"`, leftX + 12, doc.currentY + 27, usableWidth - 24, 11, { font: 'F3', size: 8.5, color: navyBg });
-    doc.currentY += 50;
+    doc.addRect(leftX, doc.currentY, usableWidth, 40, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    doc.addText(qItem.theme, leftX + 12, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
+    doc.addWrappedText(`"${qItem.question}"`, leftX + 12, doc.currentY + 25, usableWidth - 24, 10, { font: 'F3', size: 8, color: navyBg });
+    doc.currentY += 46;
   });
 
-  doc.currentY += 10;
+  doc.currentY += 6;
 
   // Structured Consultation Notes Box
-  doc.addRect(leftX, doc.currentY, usableWidth, 120, { fillColor: white, strokeColor: goldAccent, lineWidth: 1 });
-  doc.addText('MR. LIONEL EERSTELING - STRATEGIC SESSION NOTES & ACTION DISCOVERY', leftX + 14, doc.currentY + 18, { font: 'F2', size: 8.5, color: navyBg });
-  doc.addText('Record agreed decoupling actions, decision boundaries, or next roadmap priorities:', leftX + 14, doc.currentY + 30, { font: 'F1', size: 8, color: textMuted });
+  doc.addRect(leftX, doc.currentY, usableWidth, 90, { fillColor: white, strokeColor: goldAccent, lineWidth: 1 });
+  doc.addText('MR. LIONEL EERSTELING - STRATEGIC SESSION NOTES & ACTION DISCOVERY', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: navyBg });
+  doc.addText('Record agreed decoupling actions, decision boundaries, or next roadmap priorities:', leftX + 14, doc.currentY + 27, { font: 'F1', size: 7.5, color: textMuted });
 
-  // Subtle note-taking lines
-  for (let i = 0; i < 4; i++) {
-    const lineY = doc.currentY + 48 + i * 16;
+  for (let i = 0; i < 3; i++) {
+    const lineY = doc.currentY + 42 + i * 16;
     doc.addLine(leftX + 14, lineY, leftX + usableWidth - 14, lineY, [0.92, 0.90, 0.88], 0.5);
   }
 
-  doc.currentY += 130;
+  doc.currentY += 100;
 
   // Footer for Page 3
-  doc.addText('Strictly Confidential | Advisors Executive Preparation Blueprint | Leaders Performance', leftX, doc.currentY + 10, { font: 'F1', size: 7.5, color: textMuted });
+  doc.addText('Strictly Confidential | Advisors Executive Preparation Blueprint | Leaders Performance', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
 
   return doc.compileBuffer();
 }
@@ -430,7 +488,7 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   const cardBg: [number, number, number] = [0.976, 0.969, 0.957]; // #F9F7F4
   const white: [number, number, number] = [1, 1, 1];
 
-  const analysis = analyzeScoreDistinction(data.domainScores);
+  const analysis = analyzeScoreDistinction(data.domainScores, data.answers);
 
   // ─── PAGE 1: PARTICIPANT EXECUTIVE SUMMARY ──────────────────────────────────
   doc.addRect(leftX, doc.currentY, usableWidth, 68, { fillColor: navyBg });
@@ -441,18 +499,18 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.currentY += 76;
 
   // Participant Metadata Box
-  doc.addRect(leftX, doc.currentY, usableWidth, 64, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 1 });
-  doc.addText('PREPARED EXCLUSIVELY FOR', leftX + 14, doc.currentY + 16, { font: 'F2', size: 7.5, color: goldAccent });
-  doc.addText(data.fullName || 'Participating Founder', leftX + 14, doc.currentY + 30, { font: 'F2', size: 11, color: textDark });
-  doc.addText(data.companyName || 'Enterprise', leftX + 14, doc.currentY + 44, { font: 'F1', size: 9, color: textMuted });
+  doc.addRect(leftX, doc.currentY, usableWidth, 60, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 1 });
+  doc.addText('PREPARED EXCLUSIVELY FOR', leftX + 14, doc.currentY + 15, { font: 'F2', size: 7.5, color: goldAccent });
+  doc.addText(data.fullName || 'Participating Founder', leftX + 14, doc.currentY + 28, { font: 'F2', size: 10.5, color: textDark });
+  doc.addText(data.companyName || 'Enterprise', leftX + 14, doc.currentY + 42, { font: 'F1', size: 8.5, color: textMuted });
 
   const rightMetaX = leftX + usableWidth - 190;
-  doc.addText('DIAGNOSTIC VERIFICATION', rightMetaX, doc.currentY + 16, { font: 'F2', size: 7.5, color: textMuted });
+  doc.addText('DIAGNOSTIC VERIFICATION', rightMetaX, doc.currentY + 15, { font: 'F2', size: 7.5, color: textMuted });
   const subDateStr = data.submittedAt ? new Date(data.submittedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB');
-  doc.addText(`Completed: ${subDateStr}`, rightMetaX, doc.currentY + 30, { font: 'F1', size: 9, color: textDark });
-  doc.addText('Advisory Host: Lionel Eersteling', rightMetaX, doc.currentY + 44, { font: 'F1', size: 9, color: textMuted });
+  doc.addText(`Completed: ${subDateStr}`, rightMetaX, doc.currentY + 28, { font: 'F1', size: 8.5, color: textDark });
+  doc.addText('Advisory Host: Lionel Eersteling', rightMetaX, doc.currentY + 42, { font: 'F1', size: 8.5, color: textMuted });
 
-  doc.currentY += 74;
+  doc.currentY += 70;
 
   // Directional Executive Summary Box
   const summaryBoxHeight = 84;
@@ -460,20 +518,30 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.addText('DIRECTIONAL SUMMARY & ORGANISATIONAL FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   
   const headline = analysis.isAllTied
-    ? 'Systemic Organizational Friction Across All 5 Operating Domains'
+    ? 'Systemic Operational Demand Distributed Across All Five Domains'
     : `Primary Focus Concentration: ${data.primarySignalAreas.join(' & ')}`;
-  doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 10.5, color: navyBg });
+  doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 10, color: navyBg });
 
   const explanation = analysis.isAllTied
     ? 'Your responses reflect that operational demand is distributed evenly across your organization rather than bottlenecked in a single department. Founder involvement, decision escalations, and execution cadence are interacting simultaneously. Your upcoming review with Lionel Eersteling will focus on identifying the primary lever to decouple this cycle.'
     : `Your responses highlight ${data.primarySignalAreas.join(' and ')} as the key area where operational dependency concentrates. Clarifying decision boundaries and operational cadence in this domain will yield the highest immediate organizational velocity.`;
 
-  doc.addWrappedText(explanation, leftX + 14, doc.currentY + 44, usableWidth - 28, 12, { font: 'F1', size: 8.5, color: textDark });
+  doc.addWrappedText(explanation, leftX + 14, doc.currentY + 44, usableWidth - 28, 11.5, { font: 'F1', size: 8, color: textDark });
 
-  doc.currentY += summaryBoxHeight + 14;
+  doc.currentY += summaryBoxHeight + 12;
+
+  // Directional Scale Legend (Explaining labels without risk percentages)
+  doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
+  doc.addText('DIRECTIONAL SCALE DEFINITIONS (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 10, doc.currentY + 12, { font: 'F2', size: 7, color: goldAccent });
+  doc.addText('Priority (75-100%): Concentrated friction', leftX + 10, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
+  doc.addText('Active (50-74%): Operational drag present', leftX + 140, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
+  doc.addText('Emerging (25-49%): Occasional friction', leftX + 275, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
+  doc.addText('Limited (0-24%): Healthy autonomy', leftX + 395, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
+
+  doc.currentY += 46;
 
   // 5 Domains Summary Table
-  doc.addText('THE FIVE OPERATIONAL DOMAINS - OBSERVED LEVELS', leftX, doc.currentY + 12, { font: 'F2', size: 10, color: navyBg });
+  doc.addText('THE FIVE OPERATIONAL DOMAINS - OBSERVED LEVELS', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
   doc.currentY += 22;
 
@@ -489,55 +557,55 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     const scoreItem = data.domainScores.find(d => d.domain === item.name) || { mean: 0, normalised: 0 };
     const rowBg: [number, number, number] = idx % 2 === 0 ? white : cardBg;
 
-    doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
-    doc.addText(item.name.toUpperCase(), leftX + 12, doc.currentY + 14, { font: 'F2', size: 8.5, color: navyBg });
+    doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
+    doc.addText(item.name.toUpperCase(), leftX + 12, doc.currentY + 13, { font: 'F2', size: 8, color: navyBg });
 
-    let sigLabel = 'Subtle / Balanced';
+    let sigLabel = 'Limited Signal';
     if (scoreItem.normalised >= 75) sigLabel = 'Priority Signal';
     else if (scoreItem.normalised >= 50) sigLabel = 'Active Signal';
     else if (scoreItem.normalised >= 25) sigLabel = 'Emerging Signal';
 
-    doc.addText(sigLabel, leftX + usableWidth - 130, doc.currentY + 14, { font: 'F2', size: 8, color: goldAccent });
-    doc.addWrappedText(item.desc, leftX + 12, doc.currentY + 26, usableWidth - 24, 10, { font: 'F1', size: 7.5, color: textMuted });
+    doc.addText(`${sigLabel} (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 130, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
+    doc.addWrappedText(item.desc, leftX + 12, doc.currentY + 24, usableWidth - 24, 9, { font: 'F1', size: 7, color: textMuted });
 
-    doc.currentY += 42;
+    doc.currentY += 38;
   });
 
-  doc.currentY += 10;
+  doc.currentY += 8;
 
   // Next Step Box: Review Conversation
-  doc.addRect(leftX, doc.currentY, usableWidth, 54, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
-  doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
+  doc.addRect(leftX, doc.currentY, usableWidth, 52, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
+  doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 15, { font: 'F2', size: 7.5, color: goldAccent });
   const reviewNote = data.scheduledReviewAt
-    ? `Your 30-minute private consultation with Lionel Eersteling is scheduled for ${new Date(data.scheduledReviewAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. Check your inbox for Zoom access coordinates.`
+    ? `Your 30-minute private consultation with Lionel Eersteling is confirmed for ${new Date(data.scheduledReviewAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. Check your inbox for Zoom access coordinates.`
     : 'You are invited to a private 30-minute Strategic Review Conversation with Lionel Eersteling to translate these signals into clear organizational decoupling actions.';
-  doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 29, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
+  doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 27, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
 
-  doc.currentY += 66;
+  doc.currentY += 62;
 
   // Footer for Page 1
-  doc.addText('Leaders Performance | Confidential Founder Results Dossier | Leaders Performance LLC', leftX, doc.currentY + 10, { font: 'F1', size: 7.5, color: textMuted });
+  doc.addText('Leaders Performance | Confidential Founder Results Dossier | Leaders Performance LLC', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
 
-  // ─── PAGE 2: CONTEXTUAL GUIDANCE & GOVERNANCE ─────────────────────────────
+  // ─── PAGE 2: METHODOLOGY LIMITS & RECORDED AUDIT RESPONSES ─────────────────
   doc.startNewPage();
 
   doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: navyBg });
-  doc.addText('CONTEXTUAL INTERPRETATION & METHODOLOGY GOVERNANCE', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
-  doc.addText(`REF: ${data.referenceNumber}`, leftX + usableWidth - 130, doc.currentY + 21, { font: 'F2', size: 9.5, color: goldAccent });
+  doc.addText('METHODOLOGY LIMITS & RECORDED RESPONSES', leftX + 14, doc.currentY + 21, { font: 'F2', size: 10, color: white });
+  doc.addText(`PAGE 2 OF 2`, leftX + usableWidth - 90, doc.currentY + 21, { font: 'F2', size: 9.5, color: goldAccent });
 
   doc.currentY += 44;
 
-  doc.addText('HOW TO INTERPRET YOUR DIRECTIONAL RESULTS', leftX, doc.currentY + 12, { font: 'F2', size: 10, color: navyBg });
+  doc.addText('HOW TO INTERPRET YOUR DIRECTIONAL RESULTS', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
-  doc.currentY += 24;
+  doc.currentY += 22;
 
   const guidancePoints = [
     {
-      title: '1. Directional, Not Clinical',
+      title: '1. Directional, Not Diagnostic or Clinical',
       text: 'The Founder Pressure Scan is an executive operational inquiry designed to reveal where founder dependency limits organizational velocity. It is not an assessment of personal capability or psychological stress.'
     },
     {
-      title: '2. Natural Stages of Growth',
+      title: '2. Natural Stages of Scaling',
       text: 'Heavy dependency on personal founder involvement is standard and effective during early scaling. However, as an enterprise scales, informal oversight becomes a ceiling on organizational execution.'
     },
     {
@@ -547,41 +615,39 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   ];
 
   guidancePoints.forEach((pt) => {
-    doc.addRect(leftX, doc.currentY, usableWidth, 54, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
-    doc.addText(pt.title, leftX + 14, doc.currentY + 16, { font: 'F2', size: 8.5, color: navyBg });
-    doc.addWrappedText(pt.text, leftX + 14, doc.currentY + 29, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
-    doc.currentY += 62;
+    doc.addRect(leftX, doc.currentY, usableWidth, 50, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    doc.addText(pt.title, leftX + 14, doc.currentY + 14, { font: 'F2', size: 8, color: navyBg });
+    doc.addWrappedText(pt.text, leftX + 14, doc.currentY + 26, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
+    doc.currentY += 56;
   });
 
-  doc.currentY += 10;
+  doc.currentY += 6;
 
   // Complete Audit Question Answers Reference for Founder
-  doc.addText('YOUR RECORDED RESPONSES', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
+  doc.addText('YOUR RECORDED RESPONSES', leftX, doc.currentY + 12, { font: 'F2', size: 9, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
   doc.currentY += 22;
 
   OFFICIAL_QUESTIONS.forEach((q) => {
-    doc.ensureSpace(26);
     const val = getAnswerValue(data.answers, q.qNum);
-    doc.addText(`Q${q.qNum} (${q.domain}):`, leftX + 10, doc.currentY + 12, { font: 'F2', size: 7.5, color: textDark });
-    doc.addText(SCALE_LABELS[val] || `${val}/5`, leftX + usableWidth - 110, doc.currentY + 12, { font: 'F2', size: 7.5, color: goldAccent });
-    doc.addText(q.text.substring(0, 78) + '...', leftX + 130, doc.currentY + 12, { font: 'F1', size: 7.5, color: textMuted });
-    doc.currentY += 18;
+    doc.addText(`Q${q.qNum} (${q.domain}):`, leftX + 10, doc.currentY + 11, { font: 'F2', size: 7, color: textDark });
+    doc.addText(SCALE_LABELS[val] || `${val}/5`, leftX + usableWidth - 110, doc.currentY + 11, { font: 'F2', size: 7, color: goldAccent });
+    doc.addText(q.text.substring(0, 78) + '...', leftX + 130, doc.currentY + 11, { font: 'F1', size: 7, color: textMuted });
+    doc.currentY += 16;
   });
 
-  doc.currentY += 14;
+  doc.currentY += 10;
 
   // Regulatory Governance Notice
-  doc.ensureSpace(50);
-  doc.addRect(leftX, doc.currentY, usableWidth, 42, { fillColor: [0.95, 0.95, 0.95], strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & LEGAL COMPLIANCE', leftX + 10, doc.currentY + 14, { font: 'F2', size: 7.5, color: textMuted });
+  doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: [0.95, 0.95, 0.95], strokeColor: lineBorder, lineWidth: 0.5 });
+  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & LEGAL COMPLIANCE', leftX + 10, doc.currentY + 13, { font: 'F2', size: 7, color: textMuted });
   doc.addWrappedText(
     'This directional report is non-clinical and intended solely for organizational performance analysis. Data is handled under strict UAE PDPL and GDPR compliance. Leaders Performance LLC, Dubai, UAE.',
     leftX + 10,
-    doc.currentY + 26,
+    doc.currentY + 24,
     usableWidth - 20,
-    9.5,
-    { font: 'F1', size: 7, color: textMuted }
+    9,
+    { font: 'F1', size: 6.5, color: textMuted }
   );
 
   return doc.compileBuffer();

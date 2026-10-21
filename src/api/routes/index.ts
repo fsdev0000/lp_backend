@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
-import { sendAdminBriefing, sendCalendarBookingEmails } from '../../services/email';
+import { sendAdminBriefing, sendParticipantScanResultsEmail, sendCalendarBookingEmails } from '../../services/email';
 import { syncLeadAttribution } from '../../services/attributionService';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
@@ -771,6 +771,8 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
         });
 
         const adminRecipients = [lionelContactId, infoContactId].filter(Boolean);
+
+        // 1. Send Internal Advisor Briefing (Executive Dossier PDF) to Lionel & Staff
         await sendAdminBriefing(
           {
             name: participantName,
@@ -789,6 +791,17 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
           },
           adminRecipients
         );
+
+        // 2. Send Participant-Facing Results Report (Results PDF) to Founder
+        await sendParticipantScanResultsEmail({
+          participantName,
+          email: cleanEmail,
+          companyName,
+          referenceNumber,
+          primarySignalArea: primaryJoined,
+          signalClassification,
+          contactId,
+        });
       }
     } catch (ghlError) {
       console.error('[Pressure Scan] GHL/Email integration non-fatal error:', ghlError);
@@ -924,33 +937,39 @@ apiRoutes.get('/scan/review/:referenceNumber/pdf', async (req, res) => {
     const answersList = Array.isArray(submission.answers) ? (submission.answers as any[]) : [];
     const domainScoresList = Array.isArray(submission.domainScores) ? (submission.domainScores as any[]) : [];
 
-    const pdfBuffer = generatePressureScanPdf({
-      referenceNumber: submission.referenceNumber,
-      fullName: submission.fullName,
-      email: submission.email,
-      companyName: submission.companyName,
-      phone: submission.phone,
-      submittedContext: submission.submittedContext as any,
-      answers: answersList,
-      overallRawMean: submission.overallRawMean,
-      overallNormalised: submission.overallNormalised,
-      domainScores: domainScoresList,
-      primarySignalAreas: submission.primarySignalAreas,
-      signalClassification: submission.signalClassification,
-      submittedAt: submission.createdAt,
-      reviewStatus: submission.reviewStatus,
-      reviewerNotes: submission.reviewerNotes,
-      reviewerDecision: submission.reviewerDecision,
-      reviewedAt: submission.reviewedAt,
-      reviewedBy: submission.reviewedBy,
-      zoomMeetingUrl: submission.zoomMeetingUrl,
-      scheduledReviewAt: submission.scheduledReviewAt,
-    });
+    const audience = (req.query.audience === 'participant' ? 'participant' : 'internal') as 'internal' | 'participant';
 
+    const pdfBuffer = generatePressureScanPdf(
+      {
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        email: submission.email,
+        companyName: submission.companyName,
+        phone: submission.phone,
+        submittedContext: submission.submittedContext as any,
+        answers: answersList,
+        overallRawMean: submission.overallRawMean,
+        overallNormalised: submission.overallNormalised,
+        domainScores: domainScoresList,
+        primarySignalAreas: submission.primarySignalAreas,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
+        reviewStatus: submission.reviewStatus,
+        reviewerNotes: submission.reviewerNotes,
+        reviewerDecision: submission.reviewerDecision,
+        reviewedAt: submission.reviewedAt,
+        reviewedBy: submission.reviewedBy,
+        zoomMeetingUrl: submission.zoomMeetingUrl,
+        scheduledReviewAt: submission.scheduledReviewAt,
+      },
+      audience
+    );
+
+    const suffix = audience === 'participant' ? '_Results' : '_Executive_Dossier';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="Founder_Pressure_Scan_${submission.referenceNumber}.pdf"`
+      `attachment; filename="Founder_Pressure_Scan_${submission.referenceNumber}${suffix}.pdf"`
     );
     res.setHeader('Content-Length', pdfBuffer.length);
     return res.end(pdfBuffer);
