@@ -111,6 +111,13 @@ export const DOMAIN_ADVISORY_PROFILES: Record<string, {
 /**
  * Analyzes whether scores are tied or if standout areas exist, plus detects intra-domain answer conflicts
  */
+function getApprovedSignalBadge(mean: number): string {
+  return mean >= 3.5 ? 'Emerging Signal' : 'Subtle / Balanced';
+}
+
+/**
+ * Analyzes whether scores are tied or if standout areas exist, plus detects intra-domain answer conflicts
+ */
 function analyzeScoreDistinction(
   domainScores: Array<{ domain: string; mean: number; normalised: number }>,
   answers?: any[]
@@ -139,15 +146,16 @@ function analyzeScoreDistinction(
   let distinctionSummary = '';
 
   if (isAllTied) {
-    distinctionBadge = 'UNIFORM / TIED SIGNALS (ALL DOMAINS EQUAL)';
-    distinctionSummary = 'The scan does not distinguish a single primary area. Scores are evenly tied across all five operational domains (100% intensity). This reflects diffuse, systemic pressure across both founder involvement and team execution rather than an isolated functional bottleneck. Focus the conversation on uncovering the root domino rather than attempting to fix all five areas at once.';
+    distinctionBadge = 'EQUALLY STRONG REPORTED SIGNALS (ALL 5 DOMAINS EQUAL)';
+    distinctionSummary = 'The scan reflects equally strong reported pressure across all five operational domains (5.00/5.00 — Emerging Signals) rather than an isolated functional bottleneck. Any suggestion that they interact or reinforce one another is framed as a possibility to explore in the review, not as an established finding. Recommended review flow: Anchor the opening discussion on the founder\'s immediate acute pain ("Which of these five friction areas caused you the most operational disruption this past week?") to uncover the root domino.';
   } else if (isJoint) {
-    const names = topTied.map(d => d.domain).join(' and ');
-    distinctionBadge = `JOINT PRIMARY SIGNALS (${topTied.length} TIED HIGHEST)`;
-    distinctionSummary = `The scan does not distinguish a single area, but identifies joint standout signals in ${names} (${topTied[0].normalised.toFixed(0)}%), separating them clearly from lower-scoring operational dimensions.`;
+    const names = topTied.map(d => d.domain).join(' & ');
+    distinctionBadge = `JOINT FOCUS SIGNALS (${topTied.length} TIED HIGHEST)`;
+    distinctionSummary = `The scan identifies joint standout signals in ${names} (${getApprovedSignalBadge(topTied[0].mean)}), distinguishing them from lower-scoring operational dimensions.`;
   } else {
-    distinctionBadge = `STANDOUT AREA: ${sorted[0].domain.toUpperCase()}`;
-    distinctionSummary = `${sorted[0].domain} stands out as the primary operational friction area at ${sorted[0].normalised.toFixed(0)}%, clearly exceeding other operational domains and representing the primary discussion anchor.`;
+    const isEmerging = sorted[0].mean >= 3.5;
+    distinctionBadge = `PRIMARY SIGNAL: ${sorted[0].domain.toUpperCase()} (${getApprovedSignalBadge(sorted[0].mean).toUpperCase()})`;
+    distinctionSummary = `${sorted[0].domain} stands out as the primary focus area at ${sorted[0].mean.toFixed(2)}/5.00 (${sorted[0].normalised.toFixed(0)}% intensity), representing the primary discussion anchor for the review.`;
   }
 
   // Detect intra-domain divergent/conflicting answer patterns
@@ -170,7 +178,7 @@ function analyzeScoreDistinction(
   }
 
   if (divergentDomains.length > 0 && !isAllTied) {
-    distinctionSummary += ` Divergent Patterns Note: Contrasting answers observed in ${divergentDomains.map(d => `${d.domain} (${d.desc})`).join('; ')}. The mean domain score masks contrasting operational realities; explore this variance in conversation.`;
+    distinctionSummary += ` Divergent Patterns Note: Contrasting answers observed in ${divergentDomains.map(d => `${d.domain} (${d.desc})`).join('; ')}. The mean domain score masks contrasting operational realities; explore this variance in conversation without drawing a firm conclusion.`;
   }
 
   return {
@@ -202,6 +210,7 @@ function getAnswerValue(answers: any[], qNum: number): number {
 // ─────────────────────────────────────────────────────────────────────────────
 export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   const doc = new SimplePdfDocument();
+  doc.footerLabel = 'Founder Pressure Scan V1.0';
   const usableWidth = doc.getUsableWidth();
   const leftX = 40;
 
@@ -237,7 +246,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.addText('ORGANISATION & SCALE', col2X, doc.currentY + 15, { font: 'F2', size: 7.5, color: textMuted });
   doc.addText(data.companyName || 'Confidential Enterprise', col2X, doc.currentY + 28, { font: 'F2', size: 10.5, color: textDark });
-  const rev = data.submittedContext?.revenue || 'Under €1M';
+  const rev = (data.submittedContext?.revenue || 'Under EUR 1M').replace(/€/g, 'EUR ');
   const stage = data.submittedContext?.companyStage || data.submittedContext?.stage || 'Scale-stage';
   doc.addText(`Revenue: ${rev}`, col2X, doc.currentY + 41, { font: 'F1', size: 8.5, color: textMuted });
   doc.addText(`Stage: ${stage}`, col2X, doc.currentY + 54, { font: 'F1', size: 8.5, color: textMuted });
@@ -250,35 +259,35 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.currentY += 78;
 
-  // Signal Distinction Analysis Box (Directly addresses Lionel's request for tied/standout distinction)
-  const distBoxHeight = 90;
+  // Signal Distinction Analysis Box
+  const distBoxHeight = 100;
   doc.addRect(leftX, doc.currentY, usableWidth, distBoxHeight, {
     fillColor: [0.988, 0.980, 0.965],
     strokeColor: goldAccent,
     lineWidth: 1.2,
   });
 
-  doc.addText('SIGNAL DISTINCTION & PRIMARY FOCUS ANALYSIS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
-  doc.addText(analysis.distinctionBadge, leftX + 14, doc.currentY + 30, { font: 'F2', size: 10, color: navyBg });
-  doc.addWrappedText(analysis.distinctionSummary, leftX + 14, doc.currentY + 44, usableWidth - 28, 11.5, {
+  doc.addText('SIGNAL DISTINCTION & PRIMARY FOCUS ANALYSIS', leftX + 14, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
+  doc.addText(analysis.distinctionBadge, leftX + 14, doc.currentY + 28, { font: 'F2', size: 9.5, color: navyBg });
+  doc.addWrappedText(analysis.distinctionSummary, leftX + 14, doc.currentY + 42, usableWidth - 28, 11, {
     font: 'F1',
     size: 8,
     color: textDark,
   });
 
-  doc.currentY += distBoxHeight + 14;
+  doc.currentY += distBoxHeight + 12;
 
-  // Five-Domain Intensity Snapshot Table
-  doc.addText('FIVE-DOMAIN INTENSITY BREAKDOWN', leftX, doc.currentY + 12, { font: 'F2', size: 10, color: navyBg });
+  // Five-Domain Intensity Snapshot Table (Approved V1.0 Categories: Emerging Signal vs Subtle / Balanced)
+  doc.addText('FIVE-DOMAIN INTENSITY BREAKDOWN (V1.0 SPECIFICATION)', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
   doc.currentY += 22;
 
   doc.addRect(leftX, doc.currentY, usableWidth, 20, { fillColor: navyBg });
   doc.addText('DOMAIN', leftX + 10, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('QUESTIONS', leftX + 180, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('RAW MEAN', leftX + 270, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('INTENSITY', leftX + 355, doc.currentY + 14, { font: 'F2', size: 8, color: white });
-  doc.addText('DIRECTIONAL SIGNAL', leftX + 440, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('QUESTIONS', leftX + 165, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('RAW MEAN', leftX + 250, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('INTENSITY', leftX + 325, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('SIGNAL STATUS', leftX + 400, doc.currentY + 14, { font: 'F2', size: 8, color: white });
 
   doc.currentY += 20;
 
@@ -296,16 +305,13 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
     doc.addRect(leftX, doc.currentY, usableWidth, 22, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
     doc.addText(domName, leftX + 10, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
-    doc.addText(`Q${idx * 2 + 1} & Q${idx * 2 + 2}`, leftX + 180, doc.currentY + 15, { font: 'F1', size: 8, color: textMuted });
-    doc.addText(scoreItem.mean.toFixed(2), leftX + 270, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
-    doc.addText(`${scoreItem.normalised.toFixed(0)}%`, leftX + 355, doc.currentY + 15, { font: 'F2', size: 8.5, color: goldAccent });
+    doc.addText(`Q${idx * 2 + 1} & Q${idx * 2 + 2}`, leftX + 165, doc.currentY + 15, { font: 'F1', size: 8, color: textMuted });
+    doc.addText(scoreItem.mean.toFixed(2), leftX + 250, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
+    doc.addText(`${scoreItem.normalised.toFixed(0)}%`, leftX + 325, doc.currentY + 15, { font: 'F2', size: 8.5, color: goldAccent });
 
-    let sigLabel = 'Limited';
-    if (scoreItem.normalised >= 75) sigLabel = 'Priority Signal';
-    else if (scoreItem.normalised >= 50) sigLabel = 'Active Signal';
-    else if (scoreItem.normalised >= 25) sigLabel = 'Emerging Signal';
-
-    doc.addText(sigLabel, leftX + 440, doc.currentY + 15, { font: 'F2', size: 8, color: textDark });
+    const sigStatus = getApprovedSignalBadge(scoreItem.mean);
+    const sigColor: [number, number, number] = scoreItem.mean >= 3.5 ? goldAccent : textDark;
+    doc.addText(sigStatus, leftX + 400, doc.currentY + 15, { font: 'F2', size: 8, color: sigColor });
     doc.currentY += 22;
   });
 
@@ -327,9 +333,6 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     doc.currentY += 52;
   }
 
-  // Footer for Page 1
-  doc.addText('Strictly Confidential | Internal Executive Dossier for Lionel Eersteling | Leaders Performance', leftX, doc.currentY + 10, { font: 'F1', size: 7.5, color: textMuted });
-
   // ─── PAGE 2: OPERATIONAL HYPOTHESES & SUPPORTING EVIDENCE ──────────────────
   doc.startNewPage();
 
@@ -347,37 +350,37 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     const diff = Math.abs(q1Val - q2Val);
     const isMixed = diff >= 2;
 
-    const cardHeight = isMixed ? 122 : 100;
+    // Point 2: Correct mixed-pattern interpretation without drawing firm conclusion
+    let dynamicHypothesis = profile.operationalHypothesis;
+    if (domName === 'Founder Involvement' && isMixed) {
+      dynamicHypothesis = 'Contrasting responses recorded (Q1: Never vs Q2: Consistently). The founder reports that routine day-to-day operations proceed without constant personal involvement, yet operational momentum reportedly pauses when unavailable. Point to explore: Rather than the founder acting as the daily operational bottleneck, does momentum pause due to specific uncodified decision escalations or key external commitments?';
+    } else if (isMixed) {
+      dynamicHypothesis = `Contrasting responses recorded (Q${profile.qNums[0]}=${SCALE_LABELS[q1Val]} vs Q${profile.qNums[1]}=${SCALE_LABELS[q2Val]}). The domain mean masks contrasting operational realities. Point to explore: Examine what specific conditions trigger this operational friction rather than assuming a uniform baseline.`;
+    }
+
+    const cardHeight = isMixed ? 116 : 96;
     doc.addRect(leftX, doc.currentY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
 
     // Domain header & score badge
-    doc.addText(domName.toUpperCase(), leftX + 12, doc.currentY + 15, { font: 'F2', size: 9, color: navyBg });
-    doc.addText(`Intensity: ${scoreItem.mean.toFixed(2)}/5.00 (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 140, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
+    const sigStatus = getApprovedSignalBadge(scoreItem.mean);
+    doc.addText(`${domName.toUpperCase()} — ${sigStatus}`, leftX + 12, doc.currentY + 15, { font: 'F2', size: 8.5, color: navyBg });
+    doc.addText(`Mean: ${scoreItem.mean.toFixed(2)}/5.00 (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 140, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
 
     if (isMixed) {
-      doc.addText(`[!] MIXED PATTERN (DELTA: ${diff} PTS)`, leftX + 175, doc.currentY + 15, { font: 'F2', size: 7.5, color: [0.75, 0.2, 0.1] });
+      doc.addText(`[!] CONFLICTING ANSWERS (DELTA: ${diff} PTS)`, leftX + 220, doc.currentY + 15, { font: 'F2', size: 7.5, color: [0.75, 0.2, 0.1] });
     }
 
     // Operational hypothesis (Framed as point to explore, NOT confirmed fact)
     doc.addText('OPERATIONAL HYPOTHESIS (POINT TO EXPLORE - NOT A CONFIRMED FACT):', leftX + 12, doc.currentY + 28, { font: 'F2', size: 7, color: goldAccent });
-    doc.addWrappedText(profile.operationalHypothesis, leftX + 12, doc.currentY + 38, usableWidth - 24, 10, {
+    doc.addWrappedText(dynamicHypothesis, leftX + 12, doc.currentY + 38, usableWidth - 24, 10, {
       font: 'F1',
       size: 7.5,
       color: textDark,
     });
 
-    let evidenceStartY = doc.currentY + 68;
-
-    if (isMixed) {
-      // Divergent answers qualification note
-      doc.addText('EVIDENCE QUALIFICATION (DIVERGENT ANSWERS):', leftX + 12, doc.currentY + 68, { font: 'F2', size: 7, color: [0.75, 0.2, 0.1] });
-      const qualNote = `Q${profile.qNums[0]} scored "${SCALE_LABELS[q1Val]}" while Q${profile.qNums[1]} scored "${SCALE_LABELS[q2Val]}". Note for Lionel: The average score (${scoreItem.mean.toFixed(2)}) masks internal polarity. Treat as situational variance to explore, not a uniform baseline.`;
-      doc.addWrappedText(qualNote, leftX + 12, doc.currentY + 77, usableWidth - 24, 9, { font: 'F1', size: 7, color: textDark });
-      evidenceStartY = doc.currentY + 95;
-    }
-
     // Supporting answers
-    doc.addText('RECORDED FOUNDER RESPONSES:', leftX + 12, evidenceStartY, { font: 'F2', size: 7, color: textMuted });
+    const evidenceStartY = isMixed ? doc.currentY + 70 : doc.currentY + 66;
+    doc.addText('RECORDED FOUNDER RESPONSES (EVIDENCE AUDIT):', leftX + 12, evidenceStartY, { font: 'F2', size: 7, color: textMuted });
     const q1Text = `Q${profile.qNums[0]}: ${OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q1Val] || q1Val}]`;
     const q2Text = `Q${profile.qNums[1]}: ${OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q2Val] || q2Val}]`;
 
@@ -386,9 +389,6 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
     doc.currentY += cardHeight + 8;
   });
-
-  // Footer for Page 2
-  doc.addText('Strictly Confidential | Operational Diagnostics & Evidence Trail | Leaders Performance', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
 
   // ─── PAGE 3: STRATEGIC CONVERSATION BLUEPRINT FOR LIONEL ──────────────────
   doc.startNewPage();
@@ -399,17 +399,17 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.currentY += 44;
 
-  // Review Focus & Logical Flow Box
+  // Review Focus & Logical Flow Box (Point 5: describe 5 domains as equally strong signals, interaction framed as possibility to explore)
   doc.addRect(leftX, doc.currentY, usableWidth, 68, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1 });
   doc.addText('RECOMMENDED CONVERSATION FLOW & STRATEGIC FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   
   let flowFocusText = '';
   if (analysis.isAllTied) {
-    flowFocusText = 'Scores are tied across all five domains (100% intensity). RECOMMENDED FLOW: Do not attempt to tackle all five domains during the 30-minute review. Anchor the conversation by asking: "Which of these five friction areas caused you the most operational disruption this past week?" to identify their immediate psychological priority and root domino.';
+    flowFocusText = 'Scores are tied across all five domains (5.00 / 5.00 — Emerging Signals). RECOMMENDED REVIEW FLOW: Describe the five domains as equally strong reported signals. Frame any potential interaction or reinforcement between them as a possibility to explore in the review, not as an established finding. Anchor the opening question on immediate acute pain: "Which of these five friction areas caused you the most operational disruption this past week?" to identify the root domino.';
   } else if (analysis.isTied && analysis.topTied.length > 0) {
-    flowFocusText = `Joint primary signals in ${analysis.topTied.map(d => d.domain).join(' & ')} (${analysis.topTied[0].normalised.toFixed(0)}%). RECOMMENDED FLOW: Explore how these two areas interact before moving to secondary operational domains.`;
+    flowFocusText = `Joint primary signals in ${analysis.topTied.map(d => d.domain).join(' & ')} (${getApprovedSignalBadge(analysis.topTied[0].mean)}). RECOMMENDED FLOW: Explore how these two areas relate before moving to secondary operational dimensions.`;
   } else {
-    flowFocusText = `Primary standout signal in ${analysis.orderedDomains[0]?.domain} (${analysis.orderedDomains[0]?.normalised.toFixed(0)}%). RECOMMENDED FLOW: Open by validating this primary friction point, explore the operational hypotheses, examine any contrasting answers, and co-design a single high-leverage delegation shift.`;
+    flowFocusText = `Primary standout signal in ${analysis.orderedDomains[0]?.domain} (${analysis.orderedDomains[0]?.mean.toFixed(2)}/5.00 — ${getApprovedSignalBadge(analysis.orderedDomains[0]?.mean)}). RECOMMENDED FLOW: Validate this primary friction point first, explore the conflicting answers in any divergent domains without drawing a firm conclusion, and co-design a directional inquiry with the founder.`;
   }
 
   doc.addWrappedText(flowFocusText, leftX + 14, doc.currentY + 28, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
@@ -463,11 +463,6 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     doc.addLine(leftX + 14, lineY, leftX + usableWidth - 14, lineY, [0.92, 0.90, 0.88], 0.5);
   }
 
-  doc.currentY += 100;
-
-  // Footer for Page 3
-  doc.addText('Strictly Confidential | Advisors Executive Preparation Blueprint | Leaders Performance', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
-
   return doc.compileBuffer();
 }
 
@@ -476,6 +471,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 // ─────────────────────────────────────────────────────────────────────────────
 export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer {
   const doc = new SimplePdfDocument();
+  doc.footerLabel = 'Founder Pressure Scan V1.0';
   const usableWidth = doc.getUsableWidth();
   const leftX = 40;
 
@@ -512,36 +508,54 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
 
   doc.currentY += 70;
 
-  // Directional Executive Summary Box
+  // Directional Executive Summary Box (Point 3 & 5: Match leading signal directionally & frame tied scores as possibility to explore)
   const summaryBoxHeight = 84;
   doc.addRect(leftX, doc.currentY, usableWidth, summaryBoxHeight, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1.2 });
   doc.addText('DIRECTIONAL SUMMARY & ORGANISATIONAL FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   
-  const headline = analysis.isAllTied
-    ? 'Systemic Operational Demand Distributed Across All Five Domains'
-    : `Primary Focus Concentration: ${data.primarySignalAreas.join(' & ')}`;
-  doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 10, color: navyBg });
+  let headline = '';
+  let explanation = '';
 
-  const explanation = analysis.isAllTied
-    ? 'Your responses reflect that operational demand is distributed evenly across your organization rather than bottlenecked in a single department. Founder involvement, decision escalations, and execution cadence are interacting simultaneously. Your upcoming review with Lionel Eersteling will focus on identifying the primary lever to decouple this cycle.'
-    : `Your responses highlight ${data.primarySignalAreas.join(' and ')} as the key area where operational dependency concentrates. Clarifying decision boundaries and operational cadence in this domain will yield the highest immediate organizational velocity.`;
+  if (analysis.isAllTied) {
+    headline = 'Equally Strong Reported Signals Across All Five Domains';
+    explanation = 'Your responses reflect equally strong reported pressure across all five operational domains (5.00 / 5.00 — Emerging Signals) rather than an isolated functional bottleneck. Any potential interaction between these domains represents a possibility to explore during your review with Lionel Eersteling, helping anchor which operational lever to address first.';
+  } else {
+    const primaryName = data.primarySignalAreas[0] || analysis.orderedDomains[0]?.domain;
+    const isEmerging = (analysis.orderedDomains[0]?.mean ?? 0) >= 3.5;
+    const signalTag = isEmerging ? 'Emerging Signal' : 'Subtle / Balanced';
+    headline = `Primary Focus Concentration: ${primaryName} (${signalTag})`;
 
-  doc.addWrappedText(explanation, leftX + 14, doc.currentY + 44, usableWidth - 28, 11.5, { font: 'F1', size: 8, color: textDark });
+    if (primaryName === 'Operational Resilience') {
+      explanation = 'Your responses highlight Operational Resilience as the primary focus area, where capacity buffer and delivery consistency under demand surges warrant exploration. The 30-minute review with Lionel Eersteling will explore practical ways to strengthen operational elasticity and protect delivery consistency under peak volume without overburdening key contributors.';
+    } else if (primaryName === 'Founder Involvement') {
+      explanation = 'Your responses highlight Founder Involvement as the primary focus area, where operational momentum during founder absence warrants exploration. The 30-minute review with Lionel Eersteling will explore practical ways to codify key workflows so execution continues smoothly without direct founder presence.';
+    } else if (primaryName === 'Decision Load') {
+      explanation = 'Your responses highlight Decision Load as the primary focus area, where the volume of operational decisions escalating to the founder warrants exploration. The 30-minute review with Lionel Eersteling will explore practical ways to define clear decision thresholds so your leadership team acts with greater autonomy.';
+    } else if (primaryName === 'Execution Rhythm') {
+      explanation = 'Your responses highlight Execution Rhythm as the primary focus area, where strategic follow-through and delivery consistency warrant exploration. The 30-minute review with Lionel Eersteling will explore objective review cadences that sustain execution without continuous prompting.';
+    } else if (primaryName === 'Leadership Ownership') {
+      explanation = 'Your responses highlight Leadership Ownership as the primary focus area, where proactive initiative under ambiguous challenges warrants exploration. The 30-minute review with Lionel Eersteling will explore ways to empower leaders to resolve consequential challenges autonomously.';
+    } else {
+      explanation = `Your responses highlight ${primaryName} as the primary operational focus area. The upcoming 30-minute review with Lionel Eersteling will explore practical reflections and next steps tailored to your operating context.`;
+    }
+  }
+
+  doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 9.5, color: navyBg });
+  doc.addWrappedText(explanation, leftX + 14, doc.currentY + 44, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
 
   doc.currentY += summaryBoxHeight + 12;
 
-  // Directional Scale Legend (Explaining labels without risk percentages)
-  doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('DIRECTIONAL SCALE DEFINITIONS (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 10, doc.currentY + 12, { font: 'F2', size: 7, color: goldAccent });
-  doc.addText('Priority (75-100%): Concentrated friction', leftX + 10, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
-  doc.addText('Active (50-74%): Operational drag present', leftX + 140, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
-  doc.addText('Emerging (25-49%): Occasional friction', leftX + 275, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
-  doc.addText('Limited (0-24%): Healthy autonomy', leftX + 395, doc.currentY + 24, { font: 'F1', size: 7, color: textDark });
+  // Directional Scale Legend (Official V1.0 Two-Tier Specification)
+  const legendBoxHeight = 48;
+  doc.addRect(leftX, doc.currentY, usableWidth, legendBoxHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
+  doc.addText('APPROVED V1.0 DIRECTIONAL SCALE (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 10, doc.currentY + 12, { font: 'F2', size: 7.5, color: goldAccent });
+  doc.addText('- Emerging Signal (Score >= 3.50 / 5.00): Active operational friction reported; candidate for exploration in review', leftX + 10, doc.currentY + 24, { font: 'F1', size: 7.5, color: textDark });
+  doc.addText('- Subtle / Balanced (Score < 3.50 / 5.00): Lower reported friction; relative operational autonomy and balance', leftX + 10, doc.currentY + 36, { font: 'F1', size: 7.5, color: textDark });
 
-  doc.currentY += 46;
+  doc.currentY += legendBoxHeight + 10;
 
   // 5 Domains Summary Table
-  doc.addText('THE FIVE OPERATIONAL DOMAINS - OBSERVED LEVELS', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
+  doc.addText('THE FIVE OPERATIONAL DOMAINS - OBSERVED LEVELS (V1.0 SPECIFICATION)', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
   doc.currentY += 22;
 
@@ -560,13 +574,10 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
     doc.addText(item.name.toUpperCase(), leftX + 12, doc.currentY + 13, { font: 'F2', size: 8, color: navyBg });
 
-    let sigLabel = 'Limited Signal';
-    if (scoreItem.normalised >= 75) sigLabel = 'Priority Signal';
-    else if (scoreItem.normalised >= 50) sigLabel = 'Active Signal';
-    else if (scoreItem.normalised >= 25) sigLabel = 'Emerging Signal';
-
-    doc.addText(`${sigLabel} (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 130, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
-    doc.addWrappedText(item.desc, leftX + 12, doc.currentY + 24, usableWidth - 24, 9, { font: 'F1', size: 7, color: textMuted });
+    const sigLabel = getApprovedSignalBadge(scoreItem.mean);
+    const sigColor: [number, number, number] = scoreItem.mean >= 3.5 ? goldAccent : textDark;
+    doc.addText(`${sigLabel} (${scoreItem.mean.toFixed(2)}/5.00)`, leftX + usableWidth - 150, doc.currentY + 13, { font: 'F2', size: 7.5, color: sigColor });
+    doc.addWrappedText(item.desc, leftX + 12, doc.currentY + 24, usableWidth - 24, 9, { font: 'F1', size: 7.5, color: textMuted });
 
     doc.currentY += 38;
   });
@@ -578,13 +589,10 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 15, { font: 'F2', size: 7.5, color: goldAccent });
   const reviewNote = data.scheduledReviewAt
     ? `Your 30-minute private consultation with Lionel Eersteling is confirmed for ${new Date(data.scheduledReviewAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. Check your inbox for Zoom access coordinates.`
-    : 'You are invited to a private 30-minute Strategic Review Conversation with Lionel Eersteling to translate these signals into clear organizational decoupling actions.';
+    : 'You are invited to a private 30-minute Strategic Review Conversation with Lionel Eersteling to translate these signals into clear organizational reflections.';
   doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 27, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
 
   doc.currentY += 62;
-
-  // Footer for Page 1
-  doc.addText('Leaders Performance | Confidential Founder Results Dossier | Leaders Performance LLC', leftX, doc.currentY + 8, { font: 'F1', size: 7.5, color: textMuted });
 
   // ─── PAGE 2: METHODOLOGY LIMITS & RECORDED AUDIT RESPONSES ─────────────────
   doc.startNewPage();

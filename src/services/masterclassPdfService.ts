@@ -34,14 +34,18 @@ function getCharWidth(char: string, isBold: boolean = false): number {
 }
 
 function escapePdfText(text: string): string {
-  // Replace smart quotes, en/em dashes, bullets with clean ASCII equivalents
+  if (!text) return '';
+  // Map currencies and symbols cleanly without creating random space gaps
   const clean = text
+    .replace(/€/g, 'EUR ')
+    .replace(/£/g, 'GBP ')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/[\u2022\u2023\u25E6·\u00B7]/g, '|')
     .replace(/[\u2026]/g, '...')
-    .replace(/[^\x20-\x7E]/g, ' ');
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/  +/g, ' ');
 
   // Escape PDF special syntax: backslash, open paren, close paren
   return clean
@@ -147,6 +151,7 @@ export class SimplePdfDocument {
   private pages: string[] = [];
   private currentPageContent: string[] = [];
   public currentY: number;
+  public footerLabel: string = "The Founder's Next Move";
 
   constructor() {
     this.currentY = this.topMargin;
@@ -341,7 +346,7 @@ export class SimplePdfDocument {
     // For each page, render contents and inject running footer with total page count
     for (let p = 0; p < totalPages; p++) {
       const pageIndex = p + 1;
-      const footerText = `Page ${pageIndex} of ${totalPages}  |  Strictly Confidential  |  The Founder's Next Move  |  Leaders Performance`;
+      const footerText = `Page ${pageIndex} of ${totalPages}  |  Strictly Confidential  |  ${this.footerLabel}  |  Leaders Performance`;
       const escapedFooter = escapePdfText(footerText);
       const footerOps = `BT /F1 8.5 Tf 0.5 0.5 0.5 rg 40.00 25.00 Td (${escapedFooter}) Tj ET`;
       const fullPageStream = this.pages[p] + '\n' + footerOps;

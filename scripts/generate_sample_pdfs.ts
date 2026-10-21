@@ -49,7 +49,7 @@ const scenario1Data: PressureScanPdfData = {
     { domain: 'Operational Resilience', mean: 5.0, normalised: 100.0 }, // Standout primary area
   ],
   primarySignalAreas: ['Operational Resilience'],
-  signalClassification: 'Priority Signal',
+  signalClassification: 'Emerging Signal',
   submittedAt: new Date('2026-10-21T09:30:00Z'),
   reviewStatus: 'SCHEDULED',
   scheduledReviewAt: new Date('2026-10-24T14:00:00Z'),
@@ -92,7 +92,7 @@ const scenario2Data: PressureScanPdfData = {
     'Leadership Ownership',
     'Operational Resilience'
   ],
-  signalClassification: 'Priority Signal',
+  signalClassification: 'Emerging Signal',
   submittedAt: new Date('2026-10-21T11:15:00Z'),
   reviewStatus: 'AWAITING_REVIEW',
   scheduledReviewAt: null
