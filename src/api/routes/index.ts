@@ -426,8 +426,8 @@ function domainToSlug(d: string): string {
 async function generateUniqueScanRef(): Promise<string> {
   const year = new Date().getFullYear();
   for (let attempt = 0; attempt < 25; attempt++) {
-    const seq = Math.floor(1000 + Math.random() * 9000);
-    const candidate = `FPS-${year}-${seq}`;
+    const seq = Math.floor(100000 + Math.random() * 900000);
+    const candidate = `LP-FPS-${year}-${seq}`;
     const exists = await prisma.pressureScanSubmission.findUnique({
       where: { referenceNumber: candidate },
     });
@@ -435,7 +435,7 @@ async function generateUniqueScanRef(): Promise<string> {
       return candidate;
     }
   }
-  return `FPS-${year}-${Date.now().toString().slice(-4)}`;
+  return `LP-FPS-${year}-${Date.now().toString().slice(-6)}`;
 }
 
 apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) => {
@@ -478,16 +478,22 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
       validatedScores.push(val);
     }
 
-    // 2.2 Mandatory Consent & Disclosures
+    // 2.2 Mandatory Consent & Disclosures (supporting both backend and frontend property conventions)
     const methodologyAcknowledged = Boolean(
       req.body.methodologyAcknowledged ??
       founder.methodologyAcknowledged ??
-      req.body.consent?.methodologyAcknowledged
+      req.body.consent?.methodologyAcknowledged ??
+      req.body.consent?.acknowledgedHowItWorks ??
+      founder.understandsScan ??
+      founder.acknowledgedHowItWorks
     );
     const privacyAcknowledged = Boolean(
       req.body.privacyAcknowledged ??
       founder.privacyAcknowledged ??
-      req.body.consent?.privacyAcknowledged
+      req.body.consent?.privacyAcknowledged ??
+      req.body.consent?.privacyAccepted ??
+      founder.agreedToPolicy ??
+      founder.privacyAccepted
     );
 
     if (!methodologyAcknowledged) {
@@ -583,7 +589,15 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
     const primaryInsight = insights[firstPrimary] || insights['Founder Involvement'];
 
     // ─── Sub-Task 4: Reference Generation & PostgreSQL Persistence ───────────
-    const referenceNumber = await generateUniqueScanRef();
+    const incomingRef = (
+      req.body.founder?.reference_number ||
+      req.body.founder?.reference ||
+      req.body.reference_number ||
+      req.body.referenceNumber
+    );
+    const referenceNumber = (incomingRef && typeof incomingRef === 'string' && incomingRef.startsWith('LP-FPS-'))
+      ? incomingRef
+      : await generateUniqueScanRef();
 
     const structuredAnswers = validatedScores.map((score, i) => ({
       questionNumber: i + 1,
