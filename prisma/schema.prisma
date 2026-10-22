@@ -400,3 +400,30 @@ model PressureScanSubmission {
   @@map("pressure_scan_submissions")
 }
 
+model ScheduledEmail {
+  id              String    @id @default(uuid())
+  contactId       String    @map("contact_id")
+  contactEmail    String    @map("contact_email")
+  emailType       String    @map("email_type")
+  subject         String
+  htmlBody        String    @db.Text @map("html_body")
+  sendAt          DateTime  @map("send_at")
+  status          String    @default("pending") @map("status")
+  scanType        String    @default("founder_pressure_scan") @map("scan_type")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  sentAt          DateTime? @map("sent_at")
+  errorMessage    String?   @db.Text @map("error_message")
+
+  appointmentId   String?   @map("appointment_id")
+  referenceNumber String?   @map("reference_number")
+  retryCount      Int       @default(0) @map("retry_count")
+  maxRetries      Int       @default(3) @map("max_retries")
+  idempotencyKey  String?   @unique @map("idempotency_key")
+
+  @@index([status, sendAt])
+  @@index([contactEmail])
+  @@index([referenceNumber])
+  @@index([appointmentId])
+  @@map("scheduled_emails")
+}
+

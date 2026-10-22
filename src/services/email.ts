@@ -970,7 +970,7 @@ export async function sendBookingReminder24hEmail(data: BookingReminderEmailData
     return false;
   } catch (err: any) {
     console.error('[ERROR] Failed to send 24-hour reminder email:', err.message || err);
-    return false;
+    throw err;
   }
 }
 
@@ -1122,6 +1122,478 @@ export async function sendBookingReminder2hEmail(data: BookingReminderEmailData)
   } catch (err: any) {
     console.error('[ERROR] Failed to send 2-hour reminder email:', err.message || err);
     return false;
+  }
+}
+
+/**
+ * 1-Hour Appointment Reminder Email with Participant Results PDF
+ */
+export async function sendBookingReminder1hEmail(data: BookingReminderEmailData): Promise<boolean> {
+  try {
+    const zoomUrl = data.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+    let formattedDate = data.dateTimeStr;
+    try {
+      const d = new Date(data.dateTimeStr);
+      formattedDate = d.toLocaleString('en-GB', {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        timeZone: 'Asia/Dubai',
+      }) + ' (Dubai GST)';
+    } catch (_) {}
+
+    const subject = `[Starting in 1 Hour] Your 1-on-1 Strategic Review with Lionel Eersteling (Ref: ${data.referenceNumber})`;
+    const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+              <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
+              </a>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
+                    URGENT REMINDER &middot; STARTING IN 1 HOUR
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                    Your consultation begins in 1 hour
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
+                    Dear ${escapeHtml(data.participantName)}, your private 30-minute strategic review conversation with <strong>Lionel Eersteling</strong> begins in 1 hour.
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Prominent Join Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;padding:16px 36px;text-align:center;border-radius:2px;box-shadow:0 2px 8px rgba(208,163,90,0.3);">
+                      Join Zoom Meeting Room Now &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Metadata Section -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    SESSION START TIME
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                    ${escapeHtml(formattedDate)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    EXECUTIVE ADVISOR
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    Lionel Eersteling
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    DIRECT ZOOM LINK
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:14px;font-weight:500;line-height:20px;color:#1b2637;">
+                    <a href="${escapeHtml(zoomUrl)}" target="_blank" style="color:#9f6511;text-decoration:underline;word-break:break-all;">${escapeHtml(zoomUrl)}</a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Callout Box: Executive Results Report Attached -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
+                      EXECUTIVE RESULTS REPORT ATTACHED
+                    </div>
+                    <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
+                      Your personalized Founder Pressure Scan Results Report PDF is attached for immediate reference during your consultation.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+              Leaders Performance &middot; Executive Advisory &middot; Dubai, UAE
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    let contactId = undefined;
+    try {
+      contactId = await upsertContact({
+        email: data.email,
+        firstName: data.participantName.split(' ')[0],
+        lastName: data.participantName.split(' ').slice(1).join(' ') || undefined,
+        phone: data.phone,
+        companyName: data.companyName,
+        tags: ['founder-pressure-scan', 'reminder-1h'],
+      });
+    } catch (_) {}
+
+    if (contactId) {
+      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
+      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
+      await sendEmail(contactId, subject, html, undefined, attachments);
+      console.log(`[SUCCESS] 1-Hour Reminder Email Sent with PDF to: ${data.email} (Ref: ${data.referenceNumber})`);
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.error('[ERROR] Failed to send 1-hour reminder email:', err.message || err);
+    throw err;
+  }
+}
+
+export interface FollowupEmailData {
+  participantName: string;
+  email: string;
+  companyName?: string;
+  referenceNumber: string;
+  primarySignalArea?: string;
+  contactId?: string;
+}
+
+/**
+ * First Follow-up Email: 2 days (48 hours) after scan submission if no call booked
+ */
+export function buildScanFollowup1Email(data: FollowupEmailData): { subject: string; html: string } {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
+  const scheduleUrl = `${frontendUrl}/diagnostics?id=${encodeURIComponent(data.referenceNumber)}`;
+  const primarySignal = data.primarySignalArea || 'Operational Resilience';
+  const subject = `[Founder Pressure Scan] Reviewing your scan results & next steps (Ref: ${data.referenceNumber})`;
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+              <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
+              </a>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
+                    FOUNDER PRESSURE SCAN &middot; 48-HOUR STRATEGIC FOLLOW-UP
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                    Translating your diagnostic signals into operational velocity
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:24px;">
+                    Dear ${escapeHtml(data.participantName)}, two days ago you completed the Founder Pressure Scan. Your directional diagnostic evaluation identified <strong>${escapeHtml(primarySignal)}</strong> as your primary structural signal area.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
+                    Translating diagnostic clarity into sustainable founder decoupling requires examining where organizational dependencies continue to flow through your desk. We invite you to schedule your private 30-minute review consultation with <strong>Lionel Eersteling</strong> to unpack these findings.
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Metadata Section -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    PARTICIPANT
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.participantName)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    ORGANISATION
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.companyName || 'Confidential')}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    SCAN REFERENCE
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.referenceNumber)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    PRIMARY SIGNAL
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                    ${escapeHtml(primarySignal)}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(scheduleUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
+                      Schedule Your 1-on-1 Review Session &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Advisory Note -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border-left:3px solid #9f6511;border-top:1px solid #ebe4db;border-right:1px solid #ebe4db;border-bottom:1px solid #ebe4db;padding:16px 20px;">
+                <tr>
+                  <td style="font-family:'Inter',Arial,sans-serif;font-size:13px;line-height:20px;color:#4a5568;">
+                    <strong style="color:#1b2637;">Note:</strong> The consultation is conducted privately via Zoom and is limited to qualified executive founders. Lionel reviews your full diagnostic dossier beforehand.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+              Leaders Performance &middot; Executive Advisory &middot; Dubai, UAE
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html };
+}
+
+export async function sendScanFollowup1Email(data: FollowupEmailData): Promise<boolean> {
+  try {
+    const { subject, html } = buildScanFollowup1Email(data);
+    let contactId = data.contactId;
+    if (!contactId) {
+      contactId = await upsertContact({
+        email: data.email,
+        firstName: data.participantName.split(' ')[0],
+        lastName: data.participantName.split(' ').slice(1).join(' ') || undefined,
+        companyName: data.companyName,
+        tags: ['founder-pressure-scan', 'followup-day-2'],
+      });
+    }
+
+    if (contactId) {
+      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
+      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
+      await sendEmail(contactId, subject, html, undefined, attachments);
+      console.log(`[SUCCESS] Follow-up 1 (Day 2) Email Sent to: ${data.email} (Ref: ${data.referenceNumber})`);
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.error('[ERROR] Failed to send Follow-up 1 email:', err.message || err);
+    throw err;
+  }
+}
+
+/**
+ * Final Follow-up Email: 5 days (120 hours) after scan submission if no call booked
+ */
+export function buildScanFollowup2Email(data: FollowupEmailData): { subject: string; html: string } {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
+  const scheduleUrl = `${frontendUrl}/diagnostics?id=${encodeURIComponent(data.referenceNumber)}`;
+  const primarySignal = data.primarySignalArea || 'Operational Resilience';
+  const subject = `[Founder Pressure Scan] Final note regarding your strategic review (Ref: ${data.referenceNumber})`;
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+              <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
+                <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
+              </a>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:40px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
+                    FOUNDER PRESSURE SCAN &middot; FINAL FOLLOW-UP
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                    Final note regarding your executive review consultation
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:24px;">
+                    Dear ${escapeHtml(data.participantName)}, this is a final follow-up regarding your Founder Pressure Scan (Ref: ${escapeHtml(data.referenceNumber)}).
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
+                    Your directional signal assessment in <strong>${escapeHtml(primarySignal)}</strong> remains on file. If you would like to explore practical steps to systematically remove bottlenecks and increase executive autonomy with Lionel Eersteling, please reserve your preferred consultation slot before your initial review window closes.
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Metadata Section -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    PARTICIPANT
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.participantName)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    ORGANISATION
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.companyName || 'Confidential')}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    SCAN REFERENCE
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                    ${escapeHtml(data.referenceNumber)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #ebe4db;">
+                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                    PRIMARY SIGNAL
+                  </td>
+                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                    ${escapeHtml(primarySignal)}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(scheduleUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
+                      Schedule Your 1-on-1 Review Session &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+              Leaders Performance &middot; Executive Advisory &middot; Dubai, UAE
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html };
+}
+
+export async function sendScanFollowup2Email(data: FollowupEmailData): Promise<boolean> {
+  try {
+    const { subject, html } = buildScanFollowup2Email(data);
+    let contactId = data.contactId;
+    if (!contactId) {
+      contactId = await upsertContact({
+        email: data.email,
+        firstName: data.participantName.split(' ')[0],
+        lastName: data.participantName.split(' ').slice(1).join(' ') || undefined,
+        companyName: data.companyName,
+        tags: ['founder-pressure-scan', 'followup-day-5'],
+      });
+    }
+
+    if (contactId) {
+      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
+      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
+      await sendEmail(contactId, subject, html, undefined, attachments);
+      console.log(`[SUCCESS] Follow-up 2 (Day 5) Email Sent to: ${data.email} (Ref: ${data.referenceNumber})`);
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.error('[ERROR] Failed to send Follow-up 2 email:', err.message || err);
+    throw err;
   }
 }
 
