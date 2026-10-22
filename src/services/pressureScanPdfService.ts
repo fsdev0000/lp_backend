@@ -9,7 +9,7 @@
  * 2. Participant Results Report (for Participating Founder) - Clear-language directional findings and preparation guide.
  */
 
-import { SimplePdfDocument } from './masterclassPdfService';
+import { SimplePdfDocument, getTextWidth, wrapLines, sanitizeText } from './masterclassPdfService';
 
 export interface PressureScanPdfData {
   referenceNumber: string;
@@ -259,8 +259,9 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.currentY += 78;
 
-  // Signal Distinction Analysis Box
-  const distBoxHeight = 100;
+  // Signal Distinction Analysis Box (Dynamic Height)
+  const distLines = wrapLines(analysis.distinctionSummary, usableWidth - 28, 8, false);
+  const distBoxHeight = 44 + distLines.length * 11.5 + 12;
   doc.addRect(leftX, doc.currentY, usableWidth, distBoxHeight, {
     fillColor: [0.988, 0.980, 0.965],
     strokeColor: goldAccent,
@@ -269,11 +270,11 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   doc.addText('SIGNAL DISTINCTION & PRIMARY FOCUS ANALYSIS', leftX + 14, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
   doc.addText(analysis.distinctionBadge, leftX + 14, doc.currentY + 28, { font: 'F2', size: 9.5, color: navyBg });
-  doc.addWrappedText(analysis.distinctionSummary, leftX + 14, doc.currentY + 42, usableWidth - 28, 11, {
-    font: 'F1',
-    size: 8,
-    color: textDark,
-  });
+  let curDistY = doc.currentY + 42;
+  for (const line of distLines) {
+    doc.addText(line, leftX + 14, curDistY, { font: 'F1', size: 8, color: textDark });
+    curDistY += 11.5;
+  }
 
   doc.currentY += distBoxHeight + 12;
 
@@ -283,7 +284,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.currentY += 22;
 
   doc.addRect(leftX, doc.currentY, usableWidth, 20, { fillColor: navyBg });
-  doc.addText('DOMAIN', leftX + 10, doc.currentY + 14, { font: 'F2', size: 8, color: white });
+  doc.addText('DOMAIN', leftX + 12, doc.currentY + 14, { font: 'F2', size: 8, color: white });
   doc.addText('QUESTIONS', leftX + 165, doc.currentY + 14, { font: 'F2', size: 8, color: white });
   doc.addText('RAW MEAN', leftX + 250, doc.currentY + 14, { font: 'F2', size: 8, color: white });
   doc.addText('INTENSITY', leftX + 325, doc.currentY + 14, { font: 'F2', size: 8, color: white });
@@ -304,7 +305,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     const rowBg: [number, number, number] = idx % 2 === 0 ? white : cardBg;
 
     doc.addRect(leftX, doc.currentY, usableWidth, 22, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
-    doc.addText(domName, leftX + 10, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
+    doc.addText(domName, leftX + 12, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
     doc.addText(`Q${idx * 2 + 1} & Q${idx * 2 + 2}`, leftX + 165, doc.currentY + 15, { font: 'F1', size: 8, color: textMuted });
     doc.addText(scoreItem.mean.toFixed(2), leftX + 250, doc.currentY + 15, { font: 'F2', size: 8.5, color: textDark });
     doc.addText(`${scoreItem.normalised.toFixed(0)}%`, leftX + 325, doc.currentY + 15, { font: 'F2', size: 8.5, color: goldAccent });
@@ -358,36 +359,58 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
       dynamicHypothesis = `Contrasting responses recorded (Q${profile.qNums[0]}=${SCALE_LABELS[q1Val]} vs Q${profile.qNums[1]}=${SCALE_LABELS[q2Val]}). The domain mean masks contrasting operational realities. Point to explore: Examine what specific conditions trigger this operational friction rather than assuming a uniform baseline.`;
     }
 
-    const cardHeight = isMixed ? 116 : 96;
-    doc.addRect(leftX, doc.currentY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    const hypoLines = wrapLines(dynamicHypothesis, usableWidth - 28, 7.5, false);
+    const hypoTextHeight = hypoLines.length * 10.5;
 
-    // Domain header & score badge
+    // Calculate exact card height dynamically
+    const cardContentHeight = 24 + (isMixed ? 22 : 0) + 12 + hypoTextHeight + 6 + 11 + 21 + 12;
+    const cardHeight = Math.max(isMixed ? 116 : 96, cardContentHeight);
+
+    const cardTopY = doc.currentY;
+    doc.addRect(leftX, cardTopY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+
+    // Domain header & right-aligned score badge (guaranteed no horizontal overlap)
     const sigStatus = getApprovedSignalBadge(scoreItem.mean);
-    doc.addText(`${domName.toUpperCase()} — ${sigStatus}`, leftX + 12, doc.currentY + 15, { font: 'F2', size: 8.5, color: navyBg });
-    doc.addText(`Mean: ${scoreItem.mean.toFixed(2)}/5.00 (${scoreItem.normalised.toFixed(0)}%)`, leftX + usableWidth - 140, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
+    doc.addText(domName.toUpperCase(), leftX + 14, cardTopY + 15, { font: 'F2', size: 9, color: navyBg });
+
+    const scoreStr = `Mean: ${scoreItem.mean.toFixed(2)}/5.00 (${scoreItem.normalised.toFixed(0)}%)  |  ${sigStatus}`;
+    const scoreW = getTextWidth(scoreStr, 8, true);
+    const sigColor: [number, number, number] = scoreItem.mean >= 3.5 ? goldAccent : textDark;
+    doc.addText(scoreStr, leftX + usableWidth - 14 - scoreW, cardTopY + 15, { font: 'F2', size: 8, color: sigColor });
+
+    let curCardY = cardTopY + 28;
 
     if (isMixed) {
-      doc.addText(`[!] CONFLICTING ANSWERS (DELTA: ${diff} PTS)`, leftX + 220, doc.currentY + 15, { font: 'F2', size: 7.5, color: [0.75, 0.2, 0.1] });
+      // Mixed pattern callout on its OWN line - zero collision with header or score!
+      const pillHeight = 16;
+      doc.addRect(leftX + 14, curCardY, usableWidth - 28, pillHeight, { fillColor: [0.99, 0.94, 0.93], strokeColor: [0.85, 0.30, 0.25], lineWidth: 0.5 });
+      const mixedText = `[!] CONFLICTING RESPONSES: Q${profile.qNums[0]} (${SCALE_LABELS[q1Val]}) vs Q${profile.qNums[1]} (${SCALE_LABELS[q2Val]}) - DELTA: ${diff} POINTS`;
+      doc.addText(mixedText, leftX + 22, curCardY + 11.5, { font: 'F2', size: 7.5, color: [0.75, 0.15, 0.10] });
+      curCardY += 22;
     }
 
     // Operational hypothesis (Framed as point to explore, NOT confirmed fact)
-    doc.addText('OPERATIONAL HYPOTHESIS (POINT TO EXPLORE - NOT A CONFIRMED FACT):', leftX + 12, doc.currentY + 28, { font: 'F2', size: 7, color: goldAccent });
-    doc.addWrappedText(dynamicHypothesis, leftX + 12, doc.currentY + 38, usableWidth - 24, 10, {
-      font: 'F1',
-      size: 7.5,
-      color: textDark,
-    });
+    doc.addText('OPERATIONAL HYPOTHESIS (POINT TO EXPLORE - NOT A CONFIRMED FACT):', leftX + 14, curCardY, { font: 'F2', size: 7.5, color: goldAccent });
+    curCardY += 11;
+    for (const line of hypoLines) {
+      doc.addText(line, leftX + 14, curCardY, { font: 'F1', size: 7.5, color: textDark });
+      curCardY += 10.5;
+    }
+    curCardY += 6;
 
-    // Supporting answers
-    const evidenceStartY = isMixed ? doc.currentY + 70 : doc.currentY + 66;
-    doc.addText('RECORDED FOUNDER RESPONSES (EVIDENCE AUDIT):', leftX + 12, evidenceStartY, { font: 'F2', size: 7, color: textMuted });
-    const q1Text = `Q${profile.qNums[0]}: ${OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q1Val] || q1Val}]`;
-    const q2Text = `Q${profile.qNums[1]}: ${OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text.substring(0, 72)}... -> [${SCALE_LABELS[q2Val] || q2Val}]`;
+    // Supporting answers (Rendered strictly below dynamic hypothesis - zero clipping or overlap!)
+    doc.addText('RECORDED FOUNDER RESPONSES (EVIDENCE AUDIT):', leftX + 14, curCardY, { font: 'F2', size: 7, color: textMuted });
+    curCardY += 11;
+    const q1Full = OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text;
+    const q2Full = OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text;
+    const q1Text = `Q${profile.qNums[0]}: ${q1Full.length > 76 ? q1Full.substring(0, 75) + '...' : q1Full} -> [${SCALE_LABELS[q1Val] || q1Val}]`;
+    const q2Text = `Q${profile.qNums[1]}: ${q2Full.length > 76 ? q2Full.substring(0, 75) + '...' : q2Full} -> [${SCALE_LABELS[q2Val] || q2Val}]`;
 
-    doc.addText(q1Text, leftX + 12, evidenceStartY + 10, { font: 'F1', size: 7, color: textDark });
-    doc.addText(q2Text, leftX + 12, evidenceStartY + 20, { font: 'F1', size: 7, color: textDark });
+    doc.addText(q1Text, leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
+    curCardY += 10;
+    doc.addText(q2Text, leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
 
-    doc.currentY += cardHeight + 8;
+    doc.currentY = cardTopY + cardHeight + 8;
   });
 
   // ─── PAGE 3: STRATEGIC CONVERSATION BLUEPRINT FOR LIONEL ──────────────────
@@ -400,9 +423,6 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.currentY += 44;
 
   // Review Focus & Logical Flow Box (Point 5: describe 5 domains as equally strong signals, interaction framed as possibility to explore)
-  doc.addRect(leftX, doc.currentY, usableWidth, 68, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1 });
-  doc.addText('RECOMMENDED CONVERSATION FLOW & STRATEGIC FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
-  
   let flowFocusText = '';
   if (analysis.isAllTied) {
     flowFocusText = 'Scores are tied across all five domains (5.00 / 5.00 — Emerging Signals). RECOMMENDED REVIEW FLOW: Describe the five domains as equally strong reported signals. Frame any potential interaction or reinforcement between them as a possibility to explore in the review, not as an established finding. Anchor the opening question on immediate acute pain: "Which of these five friction areas caused you the most operational disruption this past week?" to identify the root domino.';
@@ -412,8 +432,17 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     flowFocusText = `Primary standout signal in ${analysis.orderedDomains[0]?.domain} (${analysis.orderedDomains[0]?.mean.toFixed(2)}/5.00 — ${getApprovedSignalBadge(analysis.orderedDomains[0]?.mean)}). RECOMMENDED FLOW: Validate this primary friction point first, explore the conflicting answers in any divergent domains without drawing a firm conclusion, and co-design a directional inquiry with the founder.`;
   }
 
-  doc.addWrappedText(flowFocusText, leftX + 14, doc.currentY + 28, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
-  doc.currentY += 78;
+  const flowLines = wrapLines(flowFocusText, usableWidth - 28, 8, false);
+  const flowBoxHeight = 28 + flowLines.length * 11.5 + 10;
+  doc.addRect(leftX, doc.currentY, usableWidth, flowBoxHeight, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1 });
+  doc.addText('RECOMMENDED CONVERSATION FLOW & STRATEGIC FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
+  
+  let curFlowY = doc.currentY + 28;
+  for (const line of flowLines) {
+    doc.addText(line, leftX + 14, curFlowY, { font: 'F1', size: 8, color: textDark });
+    curFlowY += 11.5;
+  }
+  doc.currentY += flowBoxHeight + 12;
 
   doc.addText('CURATED EXPLORATION QUESTIONS FOR 1-ON-1 REVIEW', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addText('Framed as collaborative exploration rather than confirmed clinical diagnoses:', leftX, doc.currentY + 23, { font: 'F1', size: 8, color: textMuted });
@@ -445,21 +474,27 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   ];
 
   curatedQuestions.forEach((qItem) => {
-    doc.addRect(leftX, doc.currentY, usableWidth, 40, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
-    doc.addText(qItem.theme, leftX + 12, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
-    doc.addWrappedText(`"${qItem.question}"`, leftX + 12, doc.currentY + 25, usableWidth - 24, 10, { font: 'F3', size: 8, color: navyBg });
-    doc.currentY += 46;
+    const qLines = wrapLines(`"${qItem.question}"`, usableWidth - 28, 8, false);
+    const qCardHeight = 25 + qLines.length * 10.5 + 8;
+    doc.addRect(leftX, doc.currentY, usableWidth, qCardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    doc.addText(qItem.theme, leftX + 14, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
+    let curQY = doc.currentY + 25;
+    for (const line of qLines) {
+      doc.addText(line, leftX + 14, curQY, { font: 'F3', size: 8, color: navyBg });
+      curQY += 10.5;
+    }
+    doc.currentY += qCardHeight + 6;
   });
 
-  doc.currentY += 6;
+  doc.currentY += 4;
 
   // Structured Consultation Notes Box
-  doc.addRect(leftX, doc.currentY, usableWidth, 90, { fillColor: white, strokeColor: goldAccent, lineWidth: 1 });
+  doc.addRect(leftX, doc.currentY, usableWidth, 84, { fillColor: white, strokeColor: goldAccent, lineWidth: 1 });
   doc.addText('MR. LIONEL EERSTELING - STRATEGIC SESSION NOTES & ACTION DISCOVERY', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: navyBg });
   doc.addText('Record agreed decoupling actions, decision boundaries, or next roadmap priorities:', leftX + 14, doc.currentY + 27, { font: 'F1', size: 7.5, color: textMuted });
 
   for (let i = 0; i < 3; i++) {
-    const lineY = doc.currentY + 42 + i * 16;
+    const lineY = doc.currentY + 41 + i * 15;
     doc.addLine(leftX + 14, lineY, leftX + usableWidth - 14, lineY, [0.92, 0.90, 0.88], 0.5);
   }
 
@@ -509,10 +544,6 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.currentY += 70;
 
   // Directional Executive Summary Box (Point 3 & 5: Match leading signal directionally & frame tied scores as possibility to explore)
-  const summaryBoxHeight = 84;
-  doc.addRect(leftX, doc.currentY, usableWidth, summaryBoxHeight, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1.2 });
-  doc.addText('DIRECTIONAL SUMMARY & ORGANISATIONAL FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
-  
   let headline = '';
   let explanation = '';
 
@@ -540,19 +571,26 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     }
   }
 
+  const expLines = wrapLines(explanation, usableWidth - 28, 8, false);
+  const summaryBoxHeight = 44 + expLines.length * 11.5 + 12;
+  doc.addRect(leftX, doc.currentY, usableWidth, summaryBoxHeight, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1.2 });
+  doc.addText('DIRECTIONAL SUMMARY & ORGANISATIONAL FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 9.5, color: navyBg });
-  doc.addWrappedText(explanation, leftX + 14, doc.currentY + 44, usableWidth - 28, 11, { font: 'F1', size: 8, color: textDark });
-
+  let curExpY = doc.currentY + 44;
+  for (const line of expLines) {
+    doc.addText(line, leftX + 14, curExpY, { font: 'F1', size: 8, color: textDark });
+    curExpY += 11.5;
+  }
   doc.currentY += summaryBoxHeight + 12;
 
   // Directional Scale Legend (Official V1.0 Two-Tier Specification)
   const legendBoxHeight = 48;
   doc.addRect(leftX, doc.currentY, usableWidth, legendBoxHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('APPROVED V1.0 DIRECTIONAL SCALE (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 10, doc.currentY + 12, { font: 'F2', size: 7.5, color: goldAccent });
-  doc.addText('- Emerging Signal (Score >= 3.50 / 5.00): Active operational friction reported; candidate for exploration in review', leftX + 10, doc.currentY + 24, { font: 'F1', size: 7.5, color: textDark });
-  doc.addText('- Subtle / Balanced (Score < 3.50 / 5.00): Lower reported friction; relative operational autonomy and balance', leftX + 10, doc.currentY + 36, { font: 'F1', size: 7.5, color: textDark });
+  doc.addText('APPROVED V1.0 DIRECTIONAL SCALE (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 14, doc.currentY + 12, { font: 'F2', size: 7.5, color: goldAccent });
+  doc.addText('- Emerging Signal (Score >= 3.50 / 5.00): Active operational friction reported; candidate for exploration in review', leftX + 14, doc.currentY + 24, { font: 'F1', size: 7.5, color: textDark });
+  doc.addText('- Subtle / Balanced (Score < 3.50 / 5.00): Lower reported friction; relative operational autonomy and balance', leftX + 14, doc.currentY + 36, { font: 'F1', size: 7.5, color: textDark });
 
-  doc.currentY += legendBoxHeight + 10;
+  doc.currentY += legendBoxHeight + 12;
 
   // 5 Domains Summary Table
   doc.addText('THE FIVE OPERATIONAL DOMAINS - OBSERVED LEVELS (V1.0 SPECIFICATION)', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
@@ -570,19 +608,22 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   domainExplanations.forEach((item, idx) => {
     const scoreItem = data.domainScores.find(d => d.domain === item.name) || { mean: 0, normalised: 0 };
     const rowBg: [number, number, number] = idx % 2 === 0 ? white : cardBg;
+    const rowH = 34;
 
-    doc.addRect(leftX, doc.currentY, usableWidth, 34, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
-    doc.addText(item.name.toUpperCase(), leftX + 12, doc.currentY + 13, { font: 'F2', size: 8, color: navyBg });
+    doc.addRect(leftX, doc.currentY, usableWidth, rowH, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
+    doc.addText(item.name.toUpperCase(), leftX + 14, doc.currentY + 13, { font: 'F2', size: 8.5, color: navyBg });
 
     const sigLabel = getApprovedSignalBadge(scoreItem.mean);
     const sigColor: [number, number, number] = scoreItem.mean >= 3.5 ? goldAccent : textDark;
-    doc.addText(`${sigLabel} (${scoreItem.mean.toFixed(2)}/5.00)`, leftX + usableWidth - 150, doc.currentY + 13, { font: 'F2', size: 7.5, color: sigColor });
-    doc.addWrappedText(item.desc, leftX + 12, doc.currentY + 24, usableWidth - 24, 9, { font: 'F1', size: 7.5, color: textMuted });
+    const badgeText = `${sigLabel} (${scoreItem.mean.toFixed(2)}/5.00)`;
+    const badgeW = getTextWidth(badgeText, 8, true);
+    doc.addText(badgeText, leftX + usableWidth - 14 - badgeW, doc.currentY + 13, { font: 'F2', size: 8, color: sigColor });
+    doc.addText(item.desc, leftX + 14, doc.currentY + 25, { font: 'F1', size: 7.5, color: textMuted });
 
-    doc.currentY += 38;
+    doc.currentY += rowH + 4;
   });
 
-  doc.currentY += 8;
+  doc.currentY += 6;
 
   // Next Step Box: Review Conversation
   doc.addRect(leftX, doc.currentY, usableWidth, 52, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
@@ -623,25 +664,52 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   ];
 
   guidancePoints.forEach((pt) => {
-    doc.addRect(leftX, doc.currentY, usableWidth, 50, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
-    doc.addText(pt.title, leftX + 14, doc.currentY + 14, { font: 'F2', size: 8, color: navyBg });
-    doc.addWrappedText(pt.text, leftX + 14, doc.currentY + 26, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
-    doc.currentY += 56;
+    const ptLines = wrapLines(pt.text, usableWidth - 28, 7.5, false);
+    const ptCardH = 22 + ptLines.length * 10.5 + 8;
+    doc.addRect(leftX, doc.currentY, usableWidth, ptCardH, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
+    doc.addText(pt.title, leftX + 14, doc.currentY + 13, { font: 'F2', size: 8, color: navyBg });
+    let curPtY = doc.currentY + 25;
+    for (const line of ptLines) {
+      doc.addText(line, leftX + 14, curPtY, { font: 'F1', size: 7.5, color: textDark });
+      curPtY += 10.5;
+    }
+    doc.currentY += ptCardH + 6;
   });
 
-  doc.currentY += 6;
+  doc.currentY += 4;
 
-  // Complete Audit Question Answers Reference for Founder
-  doc.addText('YOUR RECORDED RESPONSES', leftX, doc.currentY + 12, { font: 'F2', size: 9, color: navyBg });
+  // Complete Audit Question Answers Reference for Founder (Clean Tabular Layout)
+  doc.addText('YOUR RECORDED RESPONSES', leftX, doc.currentY + 12, { font: 'F2', size: 9.5, color: navyBg });
   doc.addLine(leftX, doc.currentY + 16, leftX + usableWidth, doc.currentY + 16, goldAccent, 0.75);
   doc.currentY += 22;
 
-  OFFICIAL_QUESTIONS.forEach((q) => {
+  // Header row for responses
+  doc.addRect(leftX, doc.currentY, usableWidth, 18, { fillColor: navyBg });
+  doc.addText('Q#', leftX + 8, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.addText('DOMAIN', leftX + 32, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.addText('ASSESSMENT INQUIRY AUDIT', leftX + 155, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.addText('RECORDED RESPONSE', leftX + usableWidth - 110, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.currentY += 18;
+
+  OFFICIAL_QUESTIONS.forEach((q, qIdx) => {
     const val = getAnswerValue(data.answers, q.qNum);
-    doc.addText(`Q${q.qNum} (${q.domain}):`, leftX + 10, doc.currentY + 11, { font: 'F2', size: 7, color: textDark });
-    doc.addText(SCALE_LABELS[val] || `${val}/5`, leftX + usableWidth - 110, doc.currentY + 11, { font: 'F2', size: 7, color: goldAccent });
-    doc.addText(q.text.substring(0, 78) + '...', leftX + 130, doc.currentY + 11, { font: 'F1', size: 7, color: textMuted });
-    doc.currentY += 16;
+    const rowBg: [number, number, number] = qIdx % 2 === 0 ? white : cardBg;
+    const rowH = 18;
+
+    doc.addRect(leftX, doc.currentY, usableWidth, rowH, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
+    doc.addText(`Q${q.qNum}`, leftX + 8, doc.currentY + 12, { font: 'F2', size: 7.5, color: navyBg });
+    doc.addText(q.domain, leftX + 32, doc.currentY + 12, { font: 'F2', size: 7.5, color: textDark });
+    
+    // Question text neatly fitted with ellipsis if needed
+    const qShort = q.text.length > 56 ? q.text.substring(0, 54) + '...' : q.text;
+    doc.addText(qShort, leftX + 155, doc.currentY + 12, { font: 'F1', size: 7.5, color: textMuted });
+
+    const respStr = `${SCALE_LABELS[val] || val}`;
+    const respW = getTextWidth(respStr, 7.5, true);
+    const respColor: [number, number, number] = val >= 4 ? goldAccent : textDark;
+    doc.addText(respStr, leftX + usableWidth - 10 - respW, doc.currentY + 12, { font: 'F2', size: 7.5, color: respColor });
+
+    doc.currentY += rowH;
   });
 
   doc.currentY += 10;

@@ -23,20 +23,21 @@ export interface WorksheetPdfData {
   personalNotes?: Record<string, any>;
 }
 
-// Approximate widths for Helvetica characters at 1pt font size
-function getCharWidth(char: string, isBold: boolean = false): number {
+// Adobe Helvetica AFM standard character width approximations at 1pt font size
+export function getCharWidth(char: string, isBold: boolean = false): number {
   const code = char.charCodeAt(0);
   if (code === 32) return isBold ? 0.28 : 0.28; // space
-  if ('ijlI.,;:\'|![]()'.includes(char)) return isBold ? 0.32 : 0.28;
-  if ('wmWM@%#'.includes(char)) return isBold ? 0.95 : 0.89;
-  if ('ABCDEFGHJKLNOPQRSTUVXYZ'.includes(char)) return isBold ? 0.72 : 0.67;
-  return isBold ? 0.61 : 0.56; // default lowercase
+  if ('ijlI.,;:\'|![]()`'.includes(char)) return isBold ? 0.29 : 0.23;
+  if ('ftr()-/{}\\'.includes(char)) return isBold ? 0.35 : 0.30;
+  if ('wmWM@%#&'.includes(char)) return isBold ? 0.92 : 0.84;
+  if (code >= 65 && code <= 90) return isBold ? 0.72 : 0.66; // uppercase A-Z
+  if (code >= 48 && code <= 57) return isBold ? 0.58 : 0.55; // digits 0-9
+  return isBold ? 0.58 : 0.53; // default lowercase
 }
 
-function escapePdfText(text: string): string {
+export function sanitizeText(text: string): string {
   if (!text) return '';
-  // Map currencies and symbols cleanly without creating random space gaps
-  const clean = text
+  return text
     .replace(/€/g, 'EUR ')
     .replace(/£/g, 'GBP ')
     .replace(/[\u2018\u2019]/g, "'")
@@ -46,24 +47,31 @@ function escapePdfText(text: string): string {
     .replace(/[\u2026]/g, '...')
     .replace(/[^\x20-\x7E]/g, '')
     .replace(/  +/g, ' ');
+}
 
-  // Escape PDF special syntax: backslash, open paren, close paren
-  return clean
+export function escapePdfSyntax(text: string): string {
+  if (!text) return '';
+  return text
     .replace(/\\/g, '\\\\')
     .replace(/\(/g, '\\(')
     .replace(/\)/g, '\\)');
 }
 
-function getTextWidth(text: string, fontSize: number, isBold: boolean = false): number {
+export function escapePdfText(text: string): string {
+  return escapePdfSyntax(sanitizeText(text));
+}
+
+export function getTextWidth(text: string, fontSize: number, isBold: boolean = false): number {
   if (!text) return 0;
+  const clean = sanitizeText(text);
   let w = 0;
-  for (let i = 0; i < text.length; i++) {
-    w += getCharWidth(text[i], isBold) * fontSize;
+  for (let i = 0; i < clean.length; i++) {
+    w += getCharWidth(clean[i], isBold) * fontSize;
   }
   return w;
 }
 
-function renderFitText(
+export function renderFitText(
   doc: SimplePdfDocument,
   text: string,
   x: number,
@@ -96,9 +104,10 @@ function renderFitText(
   doc.addText(displayText, x, y, { font, size, color });
 }
 
-function wrapLines(text: string, maxWidthPt: number, fontSizePt: number, isBold: boolean = false): string[] {
+export function wrapLines(text: string, maxWidthPt: number, fontSizePt: number, isBold: boolean = false): string[] {
   if (!text) return [];
-  const paragraphs = text.split(/\r?\n/);
+  const clean = sanitizeText(text);
+  const paragraphs = clean.split(/\r?\n/);
   const result: string[] = [];
 
   for (const para of paragraphs) {
