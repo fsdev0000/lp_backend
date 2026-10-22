@@ -82,7 +82,7 @@ export const DOMAIN_ADVISORY_PROFILES: Record<string, {
   'Execution Rhythm': {
     name: 'Execution Rhythm',
     qNums: [5, 6],
-    operationalHypothesis: 'Execution velocity relies on constant founder follow-up rather than self-sustaining cadence. Point to explore: Does delivery momentum depend on your emotional vigilance rather than clear operating milestones and accountability?',
+    operationalHypothesis: 'Responses reflect a moderate, generally functional execution cadence. Point to explore: Does delivery momentum maintain consistent velocity without periodic founder checkpoints?',
     conversationInquiries: [
       'How many times do you find yourself following up on the same priority before it actually reaches completion?',
       'What objective review cadence ensures work progresses when you are not actively checking in?'
@@ -107,6 +107,58 @@ export const DOMAIN_ADVISORY_PROFILES: Record<string, {
     ]
   }
 };
+
+/**
+ * Calibrates operational hypotheses to reflect actual score intensity and exploratory tone.
+ * Ensures moderate scores (< 3.50) do not generate high-intensity assertions.
+ */
+export function getCalibratedOperationalHypothesis(
+  domName: string,
+  mean: number,
+  isMixed: boolean,
+  q1Val: number,
+  q2Val: number
+): string {
+  if (domName === 'Founder Involvement' && isMixed) {
+    return 'Contrasting responses recorded (Q1: Never vs Q2: Consistently). While routine day-to-day operations reportedly proceed independently, operational momentum pauses during founder absence. Point to explore: Rather than daily operations depending on the founder, does momentum pause around specific uncodified decision escalations or critical external commitments?';
+  }
+
+  if (isMixed) {
+    const q1Num = DOMAIN_ADVISORY_PROFILES[domName]?.qNums[0];
+    const q2Num = DOMAIN_ADVISORY_PROFILES[domName]?.qNums[1];
+    return `Contrasting responses recorded (Q${q1Num}=${SCALE_LABELS[q1Val] || q1Val} vs Q${q2Num}=${SCALE_LABELS[q2Val] || q2Val}). The domain average masks two differing operational observations. Point to explore: What specific operational conditions trigger friction in one area while the other remains autonomous?`;
+  }
+
+  switch (domName) {
+    case 'Founder Involvement':
+      return mean >= 3.5
+        ? 'Reported responses indicate notable day-to-day dependency on founder presence. Point to explore: Has organizational scale outgrown informal coordination without delegating true execution authority?'
+        : 'Reported responses reflect general operational autonomy in day-to-day activities (score ' + mean.toFixed(2) + '/5.00). Point to explore: Are there specific high-leverage workflows or key client interactions that still require personal founder involvement?';
+
+    case 'Decision Load':
+      return mean >= 3.5
+        ? 'Reported responses suggest a notable volume of operational decisions escalating to the founder. Point to explore: Are decision thresholds and risk boundaries codified, or does ambiguity lead direct reports to seek confirmation?'
+        : 'Reported responses reflect balanced decision autonomy across the team (score ' + mean.toFixed(2) + '/5.00). Point to explore: Are there specific cross-functional or budget edge cases where direct reports still hesitate to act autonomously?';
+
+    case 'Execution Rhythm':
+      return mean >= 3.5
+        ? 'Reported responses suggest recurring friction in keeping strategic commitments on schedule without founder prompting. Point to explore: Does delivery momentum depend on founder vigilance, or could transparent accountability milestones sustain velocity autonomously?'
+        : 'Responses reflect a moderate, generally functional execution cadence (score ' + mean.toFixed(2) + '/5.00). The evidence does not indicate systemic delay, but invites exploration into whether delivery milestones maintain consistent velocity without periodic founder checkpoints.';
+
+    case 'Leadership Ownership':
+      return mean >= 3.5
+        ? 'Responses indicate an emerging tendency for leaders to seek founder validation under ambiguous conditions. Point to explore: Do direct reports have sufficient clarity and mandate to resolve complex challenges autonomously?'
+        : 'Responses suggest leaders generally demonstrate proactive ownership within their scope (score ' + mean.toFixed(2) + '/5.00). Point to explore: Where could senior leaders assume even greater end-to-end accountability for strategic outcomes?';
+
+    case 'Operational Resilience':
+      return mean >= 3.5
+        ? 'Responses reflect sensitivity during peak demand or unexpected operational friction. Point to explore: How might operational buffers or workflow elasticity be reinforced so delivery remains steady under peak volume?'
+        : 'Responses reflect stable organizational elasticity under current operating conditions (score ' + mean.toFixed(2) + '/5.00). Point to explore: How would the operational structure adapt if business volume increased substantially?';
+
+    default:
+      return 'Operational hypothesis: Point to explore during 1-on-1 strategic review with Lionel Eersteling.';
+  }
+}
 
 /**
  * Analyzes whether scores are tied or if standout areas exist, plus detects intra-domain answer conflicts
@@ -316,21 +368,37 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     doc.currentY += 22;
   });
 
-  doc.currentY += 12;
+  doc.currentY += 8;
 
-  // Scheduled Consultation Coordinates Box (Only shows Zoom link if scheduled!)
+  // Point 4: Concise intensity calculation explanation note (Properly wrapped)
+  const intensityNote =
+    'Intensity Calculation Note: Intensity is normalized from the 1-5 response scale using ((Mean - 1) / 4) * 100. It represents reported operational friction intensity, not a risk probability or clinical assessment.';
+  const noteLines = wrapLines(intensityNote, usableWidth - 20, 7.5, false);
+  const noteBoxH = 16 + noteLines.length * 10;
+  doc.addRect(leftX, doc.currentY, usableWidth, noteBoxH, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
+  let curNoteY = doc.currentY + 11.5;
+  for (const line of noteLines) {
+    doc.addText(line, leftX + 10, curNoteY, { font: 'F1', size: 7.5, color: textMuted });
+    curNoteY += 10;
+  }
+  doc.currentY += noteBoxH + 12;
+
+  // Scheduled Consultation Coordinates Box (Point 6: Only verified booking details, no assumptions)
   if (data.scheduledReviewAt) {
     doc.addRect(leftX, doc.currentY, usableWidth, 54, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
     doc.addText('SCHEDULED 1-ON-1 CONVERSATION COORDINATES', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
-    const zoomUrl = data.zoomMeetingUrl || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
     const dateStr = new Date(data.scheduledReviewAt).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', dateStyle: 'full', timeStyle: 'short' }) + ' (Dubai GST)';
     doc.addText(`Confirmed Slot: ${dateStr}`, leftX + 14, doc.currentY + 30, { font: 'F1', size: 8.5, color: textDark });
-    doc.addText(`Zoom Meeting URL: ${zoomUrl}`, leftX + 14, doc.currentY + 43, { font: 'F2', size: 8.5, color: navyBg });
+    if (data.zoomMeetingUrl) {
+      doc.addText(`Zoom Meeting URL: ${data.zoomMeetingUrl}`, leftX + 14, doc.currentY + 43, { font: 'F2', size: 8.5, color: navyBg });
+    } else {
+      doc.addText('Zoom Meeting URL: Video access link issued upon advisor calendar confirmation.', leftX + 14, doc.currentY + 43, { font: 'F1', size: 8.5, color: textMuted });
+    }
     doc.currentY += 66;
   } else {
     doc.addRect(leftX, doc.currentY, usableWidth, 42, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
     doc.addText('1-ON-1 REVIEW STATUS', leftX + 14, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
-    doc.addText('Status: Pending Founder Scheduling | Slot reservation available via /diagnostics', leftX + 14, doc.currentY + 29, { font: 'F1', size: 8.5, color: textMuted });
+    doc.addText('Status: Pending Founder Scheduling (No appointment confirmed) | Slot reservation available via /diagnostics', leftX + 14, doc.currentY + 29, { font: 'F1', size: 8.5, color: textMuted });
     doc.currentY += 52;
   }
 
@@ -351,20 +419,32 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     const diff = Math.abs(q1Val - q2Val);
     const isMixed = diff >= 2;
 
-    // Point 2: Correct mixed-pattern interpretation without drawing firm conclusion
-    let dynamicHypothesis = profile.operationalHypothesis;
-    if (domName === 'Founder Involvement' && isMixed) {
-      dynamicHypothesis = 'Contrasting responses recorded (Q1: Never vs Q2: Consistently). The founder reports that routine day-to-day operations proceed without constant personal involvement, yet operational momentum reportedly pauses when unavailable. Point to explore: Rather than the founder acting as the daily operational bottleneck, does momentum pause due to specific uncodified decision escalations or key external commitments?';
-    } else if (isMixed) {
-      dynamicHypothesis = `Contrasting responses recorded (Q${profile.qNums[0]}=${SCALE_LABELS[q1Val]} vs Q${profile.qNums[1]}=${SCALE_LABELS[q2Val]}). The domain mean masks contrasting operational realities. Point to explore: Examine what specific conditions trigger this operational friction rather than assuming a uniform baseline.`;
-    }
+    // Point 2: Evidence-based interpretation, exploratory framing, calibrated to score intensity
+    const dynamicHypothesis = getCalibratedOperationalHypothesis(domName, scoreItem.mean, isMixed, q1Val, q2Val);
 
     const hypoLines = wrapLines(dynamicHypothesis, usableWidth - 28, 7.5, false);
     const hypoTextHeight = hypoLines.length * 10.5;
 
-    // Calculate exact card height dynamically
-    const cardContentHeight = 24 + (isMixed ? 30 : 0) + 14 + hypoTextHeight + 8 + 12 + 22 + 14;
-    const cardHeight = Math.max(isMixed ? 128 : 98, cardContentHeight);
+    // Point 1: Full original question wording wrapped dynamically
+    const q1Obj = OFFICIAL_QUESTIONS[profile.qNums[0] - 1];
+    const q2Obj = OFFICIAL_QUESTIONS[profile.qNums[1] - 1];
+
+    const q1Full = `Q${profile.qNums[0]}: ${q1Obj.text}`;
+    const q1Lines = wrapLines(q1Full, usableWidth - 28 - 95, 7, false);
+    const q1AnsText = `[${SCALE_LABELS[q1Val] || q1Val}]`;
+    const q1AnsW = getTextWidth(q1AnsText, 7.5, true);
+
+    const q2Full = `Q${profile.qNums[1]}: ${q2Obj.text}`;
+    const q2Lines = wrapLines(q2Full, usableWidth - 28 - 95, 7, false);
+    const q2AnsText = `[${SCALE_LABELS[q2Val] || q2Val}]`;
+    const q2AnsW = getTextWidth(q2AnsText, 7.5, true);
+
+    const q1Height = q1Lines.length * 9.5;
+    const q2Height = q2Lines.length * 9.5;
+
+    // Calculate exact card height dynamically so zero clipping occurs
+    const cardContentHeight = 24 + (isMixed ? 30 : 0) + 12 + hypoTextHeight + 8 + 11 + q1Height + 3 + q2Height + 10;
+    const cardHeight = Math.max(isMixed ? 135 : 105, cardContentHeight);
 
     const cardTopY = doc.currentY;
     doc.addRect(leftX, cardTopY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
@@ -400,17 +480,26 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     }
     curCardY += 8;
 
-    // Supporting answers (Rendered strictly below dynamic hypothesis - zero clipping or overlap!)
+    // Supporting answers: Full original wording rendered dynamically without truncation
     doc.addText('RECORDED FOUNDER RESPONSES (EVIDENCE AUDIT):', leftX + 14, curCardY, { font: 'F2', size: 7, color: textMuted });
     curCardY += 11;
-    const q1Full = OFFICIAL_QUESTIONS[profile.qNums[0] - 1].text;
-    const q2Full = OFFICIAL_QUESTIONS[profile.qNums[1] - 1].text;
-    const q1Text = `Q${profile.qNums[0]}: ${q1Full.length > 76 ? q1Full.substring(0, 75) + '...' : q1Full} -> [${SCALE_LABELS[q1Val] || q1Val}]`;
-    const q2Text = `Q${profile.qNums[1]}: ${q2Full.length > 76 ? q2Full.substring(0, 75) + '...' : q2Full} -> [${SCALE_LABELS[q2Val] || q2Val}]`;
 
-    doc.addText(q1Text, leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
-    curCardY += 10;
-    doc.addText(q2Text, leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
+    for (let li = 0; li < q1Lines.length; li++) {
+      doc.addText(q1Lines[li], leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
+      if (li === 0) {
+        doc.addText(q1AnsText, leftX + usableWidth - 14 - q1AnsW, curCardY, { font: 'F2', size: 7.5, color: q1Val >= 4 ? goldAccent : textDark });
+      }
+      curCardY += 9.5;
+    }
+    curCardY += 3;
+
+    for (let li = 0; li < q2Lines.length; li++) {
+      doc.addText(q2Lines[li], leftX + 14, curCardY, { font: 'F1', size: 7, color: textDark });
+      if (li === 0) {
+        doc.addText(q2AnsText, leftX + usableWidth - 14 - q2AnsW, curCardY, { font: 'F2', size: 7.5, color: q2Val >= 4 ? goldAccent : textDark });
+      }
+      curCardY += 9.5;
+    }
 
     doc.currentY = cardTopY + cardHeight + 8;
   });
@@ -585,6 +674,29 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   }
   doc.currentY += summaryBoxHeight + 12;
 
+  // Point 3: Neutral observation for conflicting / divergent responses in founder report
+  if (analysis.divergentDomains.length > 0) {
+    const div = analysis.divergentDomains[0];
+    const obsText = div.domain === 'Founder Involvement'
+      ? 'Your responses indicate contrasting patterns within Founder Involvement. While routine activities may proceed independently, operational momentum may still be affected during your absence. This distinction is worth exploring during your Strategic Review.'
+      : `Your responses indicate contrasting patterns within ${div.domain}. While one operational dimension operates with relative autonomy, another aspect reports operational friction. This distinction is worth exploring during your Strategic Review.`;
+
+    const obsLines = wrapLines(obsText, usableWidth - 28, 7.5, false);
+    const obsBoxH = 26 + obsLines.length * 10.5 + 6;
+    doc.addRect(leftX, doc.currentY, usableWidth, obsBoxH, {
+      fillColor: [0.99, 0.985, 0.97],
+      strokeColor: goldAccent,
+      lineWidth: 0.8
+    });
+    doc.addText('OBSERVATION - CONTRASTING RESPONSE PATTERN', leftX + 14, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
+    let curObsY = doc.currentY + 25;
+    for (const line of obsLines) {
+      doc.addText(line, leftX + 14, curObsY, { font: 'F1', size: 7.5, color: textDark });
+      curObsY += 10.5;
+    }
+    doc.currentY += obsBoxH + 10;
+  }
+
   // Directional Scale Legend (Official V1.0 Two-Tier Specification)
   const legendBoxHeight = 48;
   doc.addRect(leftX, doc.currentY, usableWidth, legendBoxHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
@@ -627,12 +739,12 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
 
   doc.currentY += 6;
 
-  // Next Step Box: Review Conversation
+  // Next Step Box: Review Conversation (Point 6: Verified scheduling info)
   doc.addRect(leftX, doc.currentY, usableWidth, 52, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
   doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 15, { font: 'F2', size: 7.5, color: goldAccent });
   const reviewNote = data.scheduledReviewAt
-    ? `Your 30-minute private consultation with Lionel Eersteling is confirmed for ${new Date(data.scheduledReviewAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. Check your inbox for Zoom access coordinates.`
-    : 'You are invited to a private 30-minute Strategic Review Conversation with Lionel Eersteling to translate these signals into clear organizational reflections.';
+    ? `Your 30-minute private consultation with Lionel Eersteling is confirmed for ${new Date(data.scheduledReviewAt).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', dateStyle: 'full', timeStyle: 'short' })} (Dubai GST). ${data.zoomMeetingUrl ? 'Your Zoom access coordinates have been verified and dispatched to your email.' : 'Meeting access coordinates will be issued shortly.'}`
+    : 'Status: Pending Scheduling. You are invited to reserve your private 30-minute Strategic Review with Lionel Eersteling at leadersperformance.ae/diagnostics to translate these signals into clear organizational reflections.';
   doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 27, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
 
   doc.currentY += 62;
@@ -689,40 +801,45 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.addRect(leftX, doc.currentY, usableWidth, 18, { fillColor: navyBg });
   doc.addText('Q#', leftX + 8, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
   doc.addText('DOMAIN', leftX + 32, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
-  doc.addText('ASSESSMENT INQUIRY AUDIT', leftX + 155, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
-  doc.addText('RECORDED RESPONSE', leftX + usableWidth - 110, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.addText('ASSESSMENT INQUIRY AUDIT (COMPLETE WORDING)', leftX + 135, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
+  doc.addText('RECORDED RESPONSE', leftX + usableWidth - 100, doc.currentY + 12, { font: 'F2', size: 7.5, color: white });
   doc.currentY += 18;
 
   OFFICIAL_QUESTIONS.forEach((q, qIdx) => {
     const val = getAnswerValue(data.answers, q.qNum);
     const rowBg: [number, number, number] = qIdx % 2 === 0 ? white : cardBg;
-    const rowH = 18;
+    
+    // Point 1: Complete question wording with dynamic multi-line wrapping
+    const qLines = wrapLines(q.text, 275, 7, false);
+    const rowH = Math.max(18, 7 + qLines.length * 9.5 + 4);
 
     doc.addRect(leftX, doc.currentY, usableWidth, rowH, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
-    doc.addText(`Q${q.qNum}`, leftX + 8, doc.currentY + 12, { font: 'F2', size: 7.5, color: navyBg });
-    doc.addText(q.domain, leftX + 32, doc.currentY + 12, { font: 'F2', size: 7.5, color: textDark });
+    doc.addText(`Q${q.qNum}`, leftX + 8, doc.currentY + 11.5, { font: 'F2', size: 7.5, color: navyBg });
+    doc.addText(q.domain, leftX + 32, doc.currentY + 11.5, { font: 'F2', size: 7.2, color: textDark });
     
-    // Question text neatly fitted with ellipsis if needed
-    const qShort = q.text.length > 56 ? q.text.substring(0, 54) + '...' : q.text;
-    doc.addText(qShort, leftX + 155, doc.currentY + 12, { font: 'F1', size: 7.5, color: textMuted });
+    let curLineY = doc.currentY + 11.5;
+    for (const line of qLines) {
+      doc.addText(line, leftX + 135, curLineY, { font: 'F1', size: 7, color: textDark });
+      curLineY += 9.5;
+    }
 
     const respStr = `${SCALE_LABELS[val] || val}`;
     const respW = getTextWidth(respStr, 7.5, true);
     const respColor: [number, number, number] = val >= 4 ? goldAccent : textDark;
-    doc.addText(respStr, leftX + usableWidth - 10 - respW, doc.currentY + 12, { font: 'F2', size: 7.5, color: respColor });
+    doc.addText(respStr, leftX + usableWidth - 10 - respW, doc.currentY + 11.5, { font: 'F2', size: 7.5, color: respColor });
 
     doc.currentY += rowH;
   });
 
   doc.currentY += 10;
 
-  // Regulatory Governance Notice
+  // Regulatory Governance Notice (Point 5: Neutral legal and data protection wording)
   doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: [0.95, 0.95, 0.95], strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & LEGAL COMPLIANCE', leftX + 10, doc.currentY + 13, { font: 'F2', size: 7, color: textMuted });
+  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & PRIVACY', leftX + 10, doc.currentY + 13, { font: 'F2', size: 7, color: textMuted });
   doc.addWrappedText(
-    'This directional report is non-clinical and intended solely for organizational performance analysis. Data is handled under strict UAE PDPL and GDPR compliance. Leaders Performance LLC, Dubai, UAE.',
+    'This directional report is non-clinical and intended solely for organizational performance analysis. Personal and organizational information is processed in accordance with the applicable Leaders Performance Privacy Policy and relevant data protection requirements. Leaders Performance Management Consultancies L.L.C., Dubai, UAE.',
     leftX + 10,
-    doc.currentY + 24,
+    doc.currentY + 23,
     usableWidth - 20,
     9,
     { font: 'F1', size: 6.5, color: textMuted }
