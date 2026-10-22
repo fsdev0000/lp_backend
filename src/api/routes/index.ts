@@ -872,6 +872,99 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
   }
 });
 
+/**
+ * GET /api/v1/scan/lookup?email=...
+ * Resumption Logic: Checks if an email has already completed a scan or booked a review.
+ */
+apiRoutes.get('/scan/lookup', async (req, res) => {
+  try {
+    const rawEmail = (typeof req.query.email === 'string' ? req.query.email : '').trim().toLowerCase();
+    if (!rawEmail || !rawEmail.includes('@')) {
+      return res.status(400).json({ error: 'Valid business email is required.' });
+    }
+
+    // 1. Check if there is an active confirmed scheduled review for this email first
+    const scheduledSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        email: rawEmail,
+        scheduledReviewAt: { not: null },
+      },
+      orderBy: { scheduledReviewAt: 'desc' },
+    });
+
+    if (scheduledSubmission && scheduledSubmission.scheduledReviewAt) {
+      const primarySignal = Array.isArray(scheduledSubmission.primarySignalAreas) && scheduledSubmission.primarySignalAreas.length > 0
+        ? scheduledSubmission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = scheduledSubmission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+
+      return res.json({
+        found: true,
+        status: 'ALREADY_SCHEDULED',
+        submission: {
+          id: scheduledSubmission.id,
+          referenceNumber: scheduledSubmission.referenceNumber,
+          fullName: scheduledSubmission.fullName,
+          companyName: scheduledSubmission.companyName,
+          email: scheduledSubmission.email,
+          primarySignal,
+          scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+          zoomJoinUrl: zoomUrl,
+          submittedAt: scheduledSubmission.createdAt,
+        },
+        referenceNumber: scheduledSubmission.referenceNumber,
+        fullName: scheduledSubmission.fullName,
+        companyName: scheduledSubmission.companyName,
+        scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+        zoomMeetingUrl: zoomUrl,
+        primarySignalArea: primarySignal,
+        signalClassification: scheduledSubmission.signalClassification,
+        submittedAt: scheduledSubmission.createdAt,
+      });
+    }
+
+    // 2. Otherwise find the latest scan submission awaiting review scheduling
+    const latestSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: { email: rawEmail },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestSubmission) {
+      return res.json({ found: false, status: 'NOT_FOUND' });
+    }
+
+    const primarySignalLatest = Array.isArray(latestSubmission.primarySignalAreas) && latestSubmission.primarySignalAreas.length > 0
+      ? latestSubmission.primarySignalAreas[0]
+      : 'Operational Resilience';
+
+    return res.json({
+      found: true,
+      status: 'AWAITING_SCHEDULE',
+      submission: {
+        id: latestSubmission.id,
+        referenceNumber: latestSubmission.referenceNumber,
+        fullName: latestSubmission.fullName,
+        companyName: latestSubmission.companyName,
+        email: latestSubmission.email,
+        primarySignal: primarySignalLatest,
+        submittedAt: latestSubmission.createdAt,
+        scheduledReviewAt: null,
+        zoomJoinUrl: null,
+      },
+      referenceNumber: latestSubmission.referenceNumber,
+      fullName: latestSubmission.fullName,
+      companyName: latestSubmission.companyName,
+      primarySignalArea: primarySignalLatest,
+      signalClassification: latestSubmission.signalClassification,
+      submittedAt: latestSubmission.createdAt,
+      overallNormalised: latestSubmission.overallNormalised,
+    });
+  } catch (error) {
+    console.error('[Scan Lookup] Error checking email status:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // ─── Sub-Task 6: Secure Human Review Dossier APIs ─────────────────────────────
 
 /**
