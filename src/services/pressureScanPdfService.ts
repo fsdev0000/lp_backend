@@ -363,8 +363,8 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     const hypoTextHeight = hypoLines.length * 10.5;
 
     // Calculate exact card height dynamically
-    const cardContentHeight = 24 + (isMixed ? 22 : 0) + 12 + hypoTextHeight + 6 + 11 + 21 + 12;
-    const cardHeight = Math.max(isMixed ? 116 : 96, cardContentHeight);
+    const cardContentHeight = 24 + (isMixed ? 30 : 0) + 14 + hypoTextHeight + 8 + 12 + 22 + 14;
+    const cardHeight = Math.max(isMixed ? 128 : 98, cardContentHeight);
 
     const cardTopY = doc.currentY;
     doc.addRect(leftX, cardTopY, usableWidth, cardHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
@@ -378,25 +378,27 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
     const sigColor: [number, number, number] = scoreItem.mean >= 3.5 ? goldAccent : textDark;
     doc.addText(scoreStr, leftX + usableWidth - 14 - scoreW, cardTopY + 15, { font: 'F2', size: 8, color: sigColor });
 
-    let curCardY = cardTopY + 28;
+    let curCardY = cardTopY + 24;
 
     if (isMixed) {
-      // Mixed pattern callout on its OWN line - zero collision with header or score!
+      // Mixed pattern callout on its OWN line with ample margin - zero collision!
       const pillHeight = 16;
       doc.addRect(leftX + 14, curCardY, usableWidth - 28, pillHeight, { fillColor: [0.99, 0.94, 0.93], strokeColor: [0.85, 0.30, 0.25], lineWidth: 0.5 });
       const mixedText = `[!] CONFLICTING RESPONSES: Q${profile.qNums[0]} (${SCALE_LABELS[q1Val]}) vs Q${profile.qNums[1]} (${SCALE_LABELS[q2Val]}) - DELTA: ${diff} POINTS`;
       doc.addText(mixedText, leftX + 22, curCardY + 11.5, { font: 'F2', size: 7.5, color: [0.75, 0.15, 0.10] });
-      curCardY += 22;
+      curCardY += pillHeight + 14; // Generous 14pt gap before hypothesis heading
+    } else {
+      curCardY += 6;
     }
 
     // Operational hypothesis (Framed as point to explore, NOT confirmed fact)
     doc.addText('OPERATIONAL HYPOTHESIS (POINT TO EXPLORE - NOT A CONFIRMED FACT):', leftX + 14, curCardY, { font: 'F2', size: 7.5, color: goldAccent });
-    curCardY += 11;
+    curCardY += 12;
     for (const line of hypoLines) {
       doc.addText(line, leftX + 14, curCardY, { font: 'F1', size: 7.5, color: textDark });
       curCardY += 10.5;
     }
-    curCardY += 6;
+    curCardY += 8;
 
     // Supporting answers (Rendered strictly below dynamic hypothesis - zero clipping or overlap!)
     doc.addText('RECORDED FOUNDER RESPONSES (EVIDENCE AUDIT):', leftX + 14, curCardY, { font: 'F2', size: 7, color: textMuted });
