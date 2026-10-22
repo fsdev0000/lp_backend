@@ -873,8 +873,58 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
 });
 
 /**
- * GET /api/v1/scan/lookup?email=...
- * Resumption Logic: Checks if an email has already completed a scan or booked a review.
+ * @openapi
+ * /scan/lookup:
+ *   get:
+ *     summary: Lookup Previous Scan Submission
+ *     description: Checks if a business email has already completed a scan or booked a review session (Resumption logic).
+ *     tags:
+ *       - Assessment
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Participant business email to lookup
+ *     responses:
+ *       200:
+ *         description: Scan lookup result (ALREADY_SCHEDULED, AWAITING_SCHEDULE, or NOT_FOUND)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 found:
+ *                   type: boolean
+ *                   example: true
+ *                 status:
+ *                   type: string
+ *                   enum: [ALREADY_SCHEDULED, AWAITING_SCHEDULE, NOT_FOUND]
+ *                   example: ALREADY_SCHEDULED
+ *                 referenceNumber:
+ *                   type: string
+ *                   example: LP-FPS-2026-1042
+ *                 fullName:
+ *                   type: string
+ *                   example: David Kim
+ *                 companyName:
+ *                   type: string
+ *                   example: Kim Logistics
+ *                 scheduledReviewAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                 zoomMeetingUrl:
+ *                   type: string
+ *                   nullable: true
+ *                 primarySignalArea:
+ *                   type: string
+ *                   example: Operational Resilience
+ *       400:
+ *         description: Valid business email is required
+ *       500:
+ *         description: Internal Server Error
  */
 apiRoutes.get('/scan/lookup', async (req, res) => {
   try {
@@ -1407,7 +1457,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
           if (!finalCompany && existingSub.companyName) finalCompany = existingSub.companyName;
           if (!finalPhone && existingSub.phone) finalPhone = existingSub.phone;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Cancel pending follow-ups (Day 2 & Day 5) because participant booked a call
@@ -1611,45 +1661,9 @@ apiRoutes.post('/booking/cancel', async (req, res) => {
  * /cron/process-scheduled-emails:
  *   post:
  *     summary: Process Scheduled Email Queue
- *     description: Triggers on-demand batch processing of due emails in scheduled_emails ledger (Follow-ups Day 2/5, 24h & 1h reminders, transient error retries).
+ *     description: Triggers on-demand processing of due emails in scheduled_emails ledger.
  *     tags:
  *       - Email
- *     responses:
- *       200:
- *         description: Scheduled emails batch processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 result:
- *                   type: object
- *                   properties:
- *                     processed:
- *                       type: integer
- *                       example: 2
- *                     sent:
- *                       type: integer
- *                       example: 2
- *                     failed:
- *                       type: integer
- *                       example: 0
- *                     cancelled:
- *                       type: integer
- *                       example: 0
- *       500:
- *         description: Queue processing failed
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   example: Processing failed
  */
 apiRoutes.post('/cron/process-scheduled-emails', async (_req, res) => {
   try {
