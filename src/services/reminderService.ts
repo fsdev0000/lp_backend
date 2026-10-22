@@ -97,6 +97,15 @@ export async function checkAndSendReminders(): Promise<{ checked: number; sent24
 export function initAppointmentReminderWorker() {
   if (reminderInterval) {
     clearInterval(reminderInterval);
+    reminderInterval = null;
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  const enableAutoReminders = process.env.ENABLE_AUTO_REMINDERS === 'true';
+
+  if (!isProduction && !enableAutoReminders) {
+    console.log('[Reminder Service] Automated appointment reminder worker is DISABLED in development/test mode (to protect Lionel and staff inboxes). Set ENABLE_AUTO_REMINDERS=true to test.');
+    return;
   }
 
   console.log('[Reminder Service] Initializing Automated Appointment Reminder Background Worker (Interval: 5m)...');

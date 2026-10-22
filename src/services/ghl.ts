@@ -98,6 +98,22 @@ export async function sendEmail(
   emailHeaders?: Record<string, string>,
   attachments?: string[]
 ) {
+  // ─── IRONCLAD DEV/TEST SAFEGUARD ───────────────────────────────────────────
+  // Strictly prevent automated test emails from spamming Lionel or real inboxes
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowOutbound = process.env.ENABLE_OUTBOUND_EMAILS === 'true';
+  const isManualTest = emailHeaders?.['X-Manual-Test'] === 'true';
+
+  if (!isProduction && !allowOutbound && !isManualTest) {
+    console.log(`[SAFEGUARD - AUTO EMAIL SUPPRESSED IN DEV/TEST]
+  Contact ID:  ${contactId}
+  Subject:     "${subject}"
+  Attachments: ${attachments?.length || 0}
+  Status:      Blocked safely to prevent spamming staff inboxes during development.
+  (Set ENABLE_OUTBOUND_EMAILS=true in .env only when doing deliberate manual test)`);
+    return { success: true, mocked: true, message: 'Email suppressed in development/test environment' };
+  }
+
   const headers = await ghlHeaders();
   const payload: any = {
     type: 'Email',
