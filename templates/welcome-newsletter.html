@@ -20,8 +20,9 @@
   center { width: 100%; background-color: #f6f2ea; }
   @media screen and (max-width: 620px) {
     .email-container { width: 100% !important; max-width: 100% !important; }
-    .email-card-td { padding: 28px 20px !important; }
-    .cta-button { width: 100% !important; text-align: center !important; }
+    .email-card-td { padding: 28px 18px !important; }
+    .issue-card-td { padding: 22px 18px !important; }
+    .cta-button { display: block !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; -webkit-box-sizing: border-box !important; padding: 13px 12px !important; text-align: center !important; font-size: 11.5px !important; }
   }
 </style>
 </head>
@@ -60,7 +61,7 @@
           <!-- Greeting & Opening Paragraph -->
           <tr>
             <td style="font-family:Arial,sans-serif;font-size:15px;font-weight:bold;color:#051225;padding:8px 0 12px;text-align:left;">
-              Welcome, {{first_name}},
+              Welcome {{first_name}},
             </td>
           </tr>
           <tr>
@@ -109,7 +110,7 @@
 
           <!-- "YOUR FIRST ISSUE" Section -->
           <tr>
-            <td style="background:#051225;border-radius:6px;padding:26px 28px;margin-bottom:28px;text-align:left;color:#f6f2ea;">
+            <td class="issue-card-td" style="background:#051225;border-radius:6px;padding:26px 28px;margin-bottom:28px;text-align:left;color:#f6f2ea;">
               <div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:2px;color:#d7b978;text-transform:uppercase;padding-bottom:8px;font-weight:700;">YOUR FIRST ISSUE</div>
               <div style="font-family:Georgia,serif;font-size:19px;color:#ffffff;padding-bottom:10px;font-weight:600;">THE OCTOBER EDITION: HOTSTEPPER × LIONEL X</div>
               <p style="font-family:Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#d3cbd0;margin:0 0 10px 0;">
@@ -122,7 +123,7 @@
                 Hotstepper is being developed as the movement component within the Lionel X founder-performance ecosystem.
               </p>
               <div>
-                <a href="{{october_issue_url}}" target="_blank" class="cta-button" style="display:inline-block;background:#d7b978;color:#051225;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:13px 26px;text-decoration:none;border-radius:4px;">
+                <a href="{{october_issue_url}}" target="_blank" class="cta-button" style="display:inline-block;box-sizing:border-box;-webkit-box-sizing:border-box;max-width:100%;background:#d7b978;color:#051225;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:13px 26px;text-decoration:none;border-radius:4px;text-align:center;">
                   READ THE OCTOBER ISSUE &rarr;
                 </a>
               </div>

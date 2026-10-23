@@ -712,7 +712,9 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
             where: { email: cleanEmail },
           });
           let token: string = randomUUID();
+          let shouldSendWelcome = false;
           if (!existingSub) {
+            shouldSendWelcome = true;
             await prisma.newsletterSubscriber.create({
               data: {
                 email: cleanEmail,
@@ -730,6 +732,7 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
               },
             });
           } else if (!existingSub.subscribed) {
+            shouldSendWelcome = true;
             token = existingSub.unsubscribeToken || token;
             await prisma.newsletterSubscriber.update({
               where: { email: cleanEmail },
@@ -742,12 +745,16 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
               },
             });
           } else {
+            // Already an active subscriber (e.g. enrolled during calibrate step or prior) - do NOT re-send welcome email!
             token = existingSub.unsubscribeToken || token;
+            shouldSendWelcome = false;
           }
 
-          sendNewsletterWelcomeEmail(cleanEmail, contactId, token, participantName).catch((nlErr) =>
-            console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr)
-          );
+          if (shouldSendWelcome) {
+            sendNewsletterWelcomeEmail(cleanEmail, contactId, token, participantName).catch((nlErr) =>
+              console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr)
+            );
+          }
         } catch (nlErr) {
           console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr);
         }

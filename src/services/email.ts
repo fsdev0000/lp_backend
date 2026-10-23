@@ -311,15 +311,77 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(subject)}</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  </style>
+  <![endif]-->
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;500&display=swap');
+    body, table, td, p, a, li, blockquote {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; background-color: #f2ede3; }
+
+    /* Mobile Responsive Rules */
+    @media only screen and (max-width: 599px) {
+      .email-container {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .header-padding {
+        padding: 24px 20px !important;
+      }
+      .content-padding {
+        padding: 28px 18px !important;
+      }
+      .headline-text {
+        font-size: 24px !important;
+        line-height: 30px !important;
+      }
+      /* Metadata rows stack vertically on mobile so labels and values never collide */
+      .meta-cell-label {
+        display: block !important;
+        width: 100% !important;
+        padding-top: 12px !important;
+        padding-bottom: 4px !important;
+        padding-right: 0 !important;
+        font-size: 11px !important;
+        letter-spacing: 1.2px !important;
+      }
+      .meta-cell-value {
+        display: block !important;
+        width: 100% !important;
+        padding-top: 0 !important;
+        padding-bottom: 12px !important;
+        padding-left: 0 !important;
+        font-size: 14.5px !important;
+        line-height: 20px !important;
+      }
+      .cta-btn {
+        display: block !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        -webkit-box-sizing: border-box !important;
+        text-align: center !important;
+        padding: 14px 16px !important;
+      }
+      .footer-padding {
+        padding: 20px 18px !important;
+      }
+    }
+  </style>
 </head>
 <body style="margin:0;padding:0;background-color:#f2ede3;font-family:'Inter',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2ede3;width:100%;margin:0;padding:32px 0;">
     <tr>
       <td align="center" style="padding:0 12px;">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
+        <table role="presentation" class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fbf8f2;border:1px solid #ebe4db;border-collapse:separate;margin:0 auto;text-align:left;">
           <!-- Header Banner -->
           <tr>
-            <td style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
+            <td class="header-padding" style="background-color:#021329;border-bottom:1px solid #d0a35a;padding:34px 40px;">
               <a href="https://leadersperformance.ae" target="_blank" style="text-decoration:none;display:inline-block;">
                 <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" width="146" style="display:block;width:146px;height:auto;max-width:146px;border:0;outline:none;" />
               </a>
@@ -328,7 +390,7 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
 
           <!-- Content Body -->
           <tr>
-            <td style="padding:40px;">
+            <td class="content-padding" style="padding:40px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
@@ -336,7 +398,7 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
                   </td>
                 </tr>
                 <tr>
-                  <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
+                  <td class="headline-text" style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
                     Your Executive Results Report is ready
                   </td>
                 </tr>
@@ -350,43 +412,43 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
               <!-- Metadata Section -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ebe4db;border-collapse:collapse;margin-bottom:28px;">
                 <tr style="border-bottom:1px solid #ebe4db;">
-                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
                     PARTICIPANT
                   </td>
-                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
                     ${escapeHtml(data.participantName)}
                   </td>
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
-                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
                     ORGANISATION
                   </td>
-                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
                     ${escapeHtml(data.companyName || 'Confidential')}
                   </td>
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
-                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
                     SCAN REFERENCE
                   </td>
-                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;word-break:break-word;">
                     ${escapeHtml(data.referenceNumber)}
                   </td>
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
-                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
                     PRIMARY SIGNAL AREA
                   </td>
-                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
+                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
                     ${escapeHtml(data.primarySignalArea || 'Operational Resilience')}
                   </td>
                 </tr>
                 ${data.signalClassification ? `
                 <tr style="border-bottom:1px solid #ebe4db;">
-                  <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
+                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
                     SIGNAL LEVEL
                   </td>
-                  <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
+                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
                     ${escapeHtml(data.signalClassification)}
                   </td>
                 </tr>
@@ -416,8 +478,8 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
                 </tr>
                 <tr>
                   <td align="center">
-                    <a href="${escapeHtml(scheduleUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
-                      Schedule Your 1-on-1 Review Session &rarr;
+                    <a href="${escapeHtml(scheduleUrl)}" target="_blank" class="cta-btn" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
+                      Schedule Your Private Review Session &rarr;
                     </a>
                   </td>
                 </tr>
@@ -427,7 +489,7 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
 
           <!-- Footer -->
           <tr>
-            <td style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
+            <td class="footer-padding" style="background-color:#010d20;border-top:1px solid #d0a35a;padding:22px 40px;color:#fbf8f2;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:18px;text-align:left;">
               Leaders Performance &middot; Executive Advisory &middot; Dubai, UAE
             </td>
           </tr>
@@ -1386,7 +1448,7 @@ export function buildScanFollowup1Email(data: FollowupEmailData): { subject: str
                 <tr>
                   <td align="center">
                     <a href="${escapeHtml(scheduleUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
-                      Schedule Your 1-on-1 Review Session &rarr;
+                      Schedule Your Private Review Session &rarr;
                     </a>
                   </td>
                 </tr>
@@ -1545,7 +1607,7 @@ export function buildScanFollowup2Email(data: FollowupEmailData): { subject: str
                 <tr>
                   <td align="center">
                     <a href="${escapeHtml(scheduleUrl)}" target="_blank" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
-                      Schedule Your 1-on-1 Review Session &rarr;
+                      Schedule Your Private Review Session &rarr;
                     </a>
                   </td>
                 </tr>
