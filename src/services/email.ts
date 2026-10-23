@@ -301,7 +301,7 @@ export interface ParticipantScanResultsEmailData {
 export async function sendParticipantScanResultsEmail(data: ParticipantScanResultsEmailData) {
   try {
     const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
-    const scheduleUrl = `${frontendUrl}/diagnostics?id=${encodeURIComponent(data.referenceNumber)}`;
+    const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
     const subject = `[Founder Pressure Scan] Your Executive Results Report (Ref: ${data.referenceNumber})`;
 
     const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -1355,7 +1355,7 @@ export interface FollowupEmailData {
  */
 export function buildScanFollowup1Email(data: FollowupEmailData): { subject: string; html: string } {
   const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
-  const scheduleUrl = `${frontendUrl}/diagnostics?id=${encodeURIComponent(data.referenceNumber)}`;
+  const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
   const primarySignal = data.primarySignalArea || 'Operational Resilience';
   const subject = `[Founder Pressure Scan] Reviewing your scan results & next steps (Ref: ${data.referenceNumber})`;
 
@@ -1514,7 +1514,7 @@ export async function sendScanFollowup1Email(data: FollowupEmailData): Promise<b
  */
 export function buildScanFollowup2Email(data: FollowupEmailData): { subject: string; html: string } {
   const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
-  const scheduleUrl = `${frontendUrl}/diagnostics?id=${encodeURIComponent(data.referenceNumber)}`;
+  const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
   const primarySignal = data.primarySignalArea || 'Operational Resilience';
   const subject = `[Founder Pressure Scan] Final note regarding your strategic review (Ref: ${data.referenceNumber})`;
 

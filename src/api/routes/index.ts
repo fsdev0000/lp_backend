@@ -936,8 +936,53 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
 apiRoutes.get('/scan/lookup', async (req, res) => {
   try {
     const rawEmail = (typeof req.query.email === 'string' ? req.query.email : '').trim().toLowerCase();
-    if (!rawEmail || !rawEmail.includes('@')) {
-      return res.status(400).json({ error: 'Valid business email is required.' });
+    const rawRef = (typeof req.query.ref === 'string' ? req.query.ref : typeof req.query.id === 'string' ? req.query.id : '').trim();
+
+    if (!rawEmail && !rawRef) {
+      return res.status(400).json({ error: 'Valid business email or reference number is required.' });
+    }
+
+    // Direct lookup by reference number or ID
+    if (rawRef) {
+      const submission = await prisma.pressureScanSubmission.findFirst({
+        where: {
+          OR: [{ referenceNumber: rawRef }, { id: rawRef }],
+        },
+      });
+
+      if (!submission) {
+        return res.json({ found: false, status: 'NOT_FOUND' });
+      }
+
+      const primarySignal = Array.isArray(submission.primarySignalAreas) && submission.primarySignalAreas.length > 0
+        ? submission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = submission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+      const isScheduled = Boolean(submission.scheduledReviewAt);
+
+      return res.json({
+        found: true,
+        status: isScheduled ? 'ALREADY_SCHEDULED' : 'AWAITING_SCHEDULE',
+        submission: {
+          id: submission.id,
+          referenceNumber: submission.referenceNumber,
+          fullName: submission.fullName,
+          companyName: submission.companyName,
+          email: submission.email,
+          primarySignal,
+          scheduledReviewAt: submission.scheduledReviewAt,
+          zoomJoinUrl: isScheduled ? zoomUrl : null,
+          submittedAt: submission.createdAt,
+        },
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        companyName: submission.companyName,
+        scheduledReviewAt: submission.scheduledReviewAt,
+        zoomMeetingUrl: isScheduled ? zoomUrl : null,
+        primarySignalArea: primarySignal,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
+      });
     }
 
     // 1. Check if there is an active confirmed scheduled review for this email first
