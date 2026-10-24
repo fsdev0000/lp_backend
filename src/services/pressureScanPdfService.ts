@@ -312,8 +312,8 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.currentY += 78;
 
   // Signal Distinction Analysis Box (Dynamic Height)
-  const distLines = wrapLines(analysis.distinctionSummary, usableWidth - 28, 8, false);
-  const distBoxHeight = 44 + distLines.length * 11.5 + 12;
+  const distLines = wrapLines(analysis.distinctionSummary, usableWidth - 28, 8.5, false);
+  const distBoxHeight = 44 + distLines.length * 12 + 12;
   doc.addRect(leftX, doc.currentY, usableWidth, distBoxHeight, {
     fillColor: [0.988, 0.980, 0.965],
     strokeColor: goldAccent,
@@ -324,8 +324,8 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   doc.addText(analysis.distinctionBadge, leftX + 14, doc.currentY + 28, { font: 'F2', size: 9.5, color: navyBg });
   let curDistY = doc.currentY + 42;
   for (const line of distLines) {
-    doc.addText(line, leftX + 14, curDistY, { font: 'F1', size: 8, color: textDark });
-    curDistY += 11.5;
+    doc.addText(line, leftX + 14, curDistY, { font: 'F1', size: 8.5, color: textDark });
+    curDistY += 12;
   }
 
   doc.currentY += distBoxHeight + 12;
@@ -373,13 +373,13 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
   // Point 4: Concise intensity calculation explanation note (Properly wrapped)
   const intensityNote =
     'Intensity Calculation Note: Intensity is normalized from the 1-5 response scale using ((Mean - 1) / 4) * 100. It represents reported operational friction intensity, not a risk probability or clinical assessment.';
-  const noteLines = wrapLines(intensityNote, usableWidth - 20, 7.5, false);
-  const noteBoxH = 16 + noteLines.length * 10;
+  const noteLines = wrapLines(intensityNote, usableWidth - 20, 8, false);
+  const noteBoxH = 16 + noteLines.length * 11;
   doc.addRect(leftX, doc.currentY, usableWidth, noteBoxH, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
-  let curNoteY = doc.currentY + 11.5;
+  let curNoteY = doc.currentY + 12;
   for (const line of noteLines) {
-    doc.addText(line, leftX + 10, curNoteY, { font: 'F1', size: 7.5, color: textMuted });
-    curNoteY += 10;
+    doc.addText(line, leftX + 10, curNoteY, { font: 'F1', size: 8, color: textMuted });
+    curNoteY += 11;
   }
   doc.currentY += noteBoxH + 12;
 
@@ -543,7 +543,7 @@ export function generateAdvisorBriefingPdf(data: PressureScanPdfData): Buffer {
 
   const curatedQuestions = [
     {
-      theme: '1. UNHOOKING THE FOUNDER AS THE OPERATIONAL BOTTLE NECK',
+      theme: '1. UNHOOKING THE FOUNDER AS THE OPERATIONAL BOTTLENECK',
       question: 'If you stepped away completely for 14 consecutive days with zero phone or message connectivity, which deliverable or customer commitment would fail first?'
     },
     {
@@ -662,15 +662,15 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     }
   }
 
-  const expLines = wrapLines(explanation, usableWidth - 28, 8, false);
-  const summaryBoxHeight = 44 + expLines.length * 11.5 + 12;
+  const expLines = wrapLines(explanation, usableWidth - 28, 8.5, false);
+  const summaryBoxHeight = 44 + expLines.length * 12 + 12;
   doc.addRect(leftX, doc.currentY, usableWidth, summaryBoxHeight, { fillColor: [0.988, 0.980, 0.965], strokeColor: goldAccent, lineWidth: 1.2 });
   doc.addText('DIRECTIONAL SUMMARY & ORGANISATIONAL FOCUS', leftX + 14, doc.currentY + 16, { font: 'F2', size: 8, color: goldAccent });
   doc.addText(headline, leftX + 14, doc.currentY + 30, { font: 'F2', size: 9.5, color: navyBg });
   let curExpY = doc.currentY + 44;
   for (const line of expLines) {
-    doc.addText(line, leftX + 14, curExpY, { font: 'F1', size: 8, color: textDark });
-    curExpY += 11.5;
+    doc.addText(line, leftX + 14, curExpY, { font: 'F1', size: 8.5, color: textDark });
+    curExpY += 12;
   }
   doc.currentY += summaryBoxHeight + 12;
 
@@ -681,18 +681,18 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
       ? 'Your responses indicate contrasting patterns within Founder Involvement. While routine activities may proceed independently, operational momentum may still be affected during your absence. This distinction is worth exploring during your Strategic Review.'
       : `Your responses indicate contrasting patterns within ${div.domain}. While one operational dimension operates with relative autonomy, another aspect reports operational friction. This distinction is worth exploring during your Strategic Review.`;
 
-    const obsLines = wrapLines(obsText, usableWidth - 28, 7.5, false);
-    const obsBoxH = 26 + obsLines.length * 10.5 + 6;
+    const obsLines = wrapLines(obsText, usableWidth - 28, 8, false);
+    const obsBoxH = 26 + obsLines.length * 11 + 6;
     doc.addRect(leftX, doc.currentY, usableWidth, obsBoxH, {
       fillColor: [0.99, 0.985, 0.97],
       strokeColor: goldAccent,
       lineWidth: 0.8
     });
-    doc.addText('OBSERVATION - CONTRASTING RESPONSE PATTERN', leftX + 14, doc.currentY + 13, { font: 'F2', size: 7.5, color: goldAccent });
+    doc.addText('OBSERVATION - CONTRASTING RESPONSE PATTERN', leftX + 14, doc.currentY + 13, { font: 'F2', size: 8, color: goldAccent });
     let curObsY = doc.currentY + 25;
     for (const line of obsLines) {
-      doc.addText(line, leftX + 14, curObsY, { font: 'F1', size: 7.5, color: textDark });
-      curObsY += 10.5;
+      doc.addText(line, leftX + 14, curObsY, { font: 'F1', size: 8, color: textDark });
+      curObsY += 11;
     }
     doc.currentY += obsBoxH + 10;
   }
@@ -700,9 +700,9 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   // Directional Scale Legend (Official V1.0 Two-Tier Specification)
   const legendBoxHeight = 48;
   doc.addRect(leftX, doc.currentY, usableWidth, legendBoxHeight, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('APPROVED V1.0 DIRECTIONAL SCALE (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 14, doc.currentY + 12, { font: 'F2', size: 7.5, color: goldAccent });
-  doc.addText('- Emerging Signal (Score >= 3.50 / 5.00): Active operational friction reported; candidate for exploration in review', leftX + 14, doc.currentY + 24, { font: 'F1', size: 7.5, color: textDark });
-  doc.addText('- Subtle / Balanced (Score < 3.50 / 5.00): Lower reported friction; relative operational autonomy and balance', leftX + 14, doc.currentY + 36, { font: 'F1', size: 7.5, color: textDark });
+  doc.addText('APPROVED V1.0 DIRECTIONAL SCALE (OPERATIONAL DRAG INDICATOR, NOT A RISK PERCENTAGE):', leftX + 14, doc.currentY + 12, { font: 'F2', size: 8, color: goldAccent });
+  doc.addText('- Emerging Signal (Score >= 3.50 / 5.00): Active operational friction reported; candidate for exploration in review', leftX + 14, doc.currentY + 24, { font: 'F1', size: 8, color: textDark });
+  doc.addText('- Subtle / Balanced (Score < 3.50 / 5.00): Lower reported friction; relative operational autonomy and balance', leftX + 14, doc.currentY + 36, { font: 'F1', size: 8, color: textDark });
 
   doc.currentY += legendBoxHeight + 12;
 
@@ -732,7 +732,7 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     const badgeText = `${sigLabel} (${scoreItem.mean.toFixed(2)}/5.00)`;
     const badgeW = getTextWidth(badgeText, 8, true);
     doc.addText(badgeText, leftX + usableWidth - 14 - badgeW, doc.currentY + 13, { font: 'F2', size: 8, color: sigColor });
-    doc.addText(item.desc, leftX + 14, doc.currentY + 25, { font: 'F1', size: 7.5, color: textMuted });
+    doc.addText(item.desc, leftX + 14, doc.currentY + 25, { font: 'F1', size: 8, color: textMuted });
 
     doc.currentY += rowH + 4;
   });
@@ -741,11 +741,11 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
 
   // Next Step Box: Review Conversation (Point 6: Verified scheduling info)
   doc.addRect(leftX, doc.currentY, usableWidth, 52, { fillColor: cardBg, strokeColor: goldAccent, lineWidth: 1 });
-  doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 15, { font: 'F2', size: 7.5, color: goldAccent });
+  doc.addText('YOUR 1-ON-1 STRATEGIC REVIEW CONVERSATION', leftX + 14, doc.currentY + 15, { font: 'F2', size: 8, color: goldAccent });
   const reviewNote = data.scheduledReviewAt
     ? `Your 30-minute private consultation with Lionel Eersteling is confirmed for ${new Date(data.scheduledReviewAt).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', dateStyle: 'full', timeStyle: 'short' })} (Dubai GST). ${data.zoomMeetingUrl ? 'Your Zoom access coordinates have been verified and dispatched to your email.' : 'Meeting access coordinates will be issued shortly.'}`
     : 'Status: Pending Scheduling. You are invited to reserve your private 30-minute Strategic Review with Lionel Eersteling at leadersperformance.ae/diagnostics to translate these signals into clear organizational reflections.';
-  doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 27, usableWidth - 28, 10, { font: 'F1', size: 7.5, color: textDark });
+  doc.addWrappedText(reviewNote, leftX + 14, doc.currentY + 27, usableWidth - 28, 10.5, { font: 'F1', size: 8, color: textDark });
 
   doc.currentY += 62;
 
@@ -778,14 +778,14 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   ];
 
   guidancePoints.forEach((pt) => {
-    const ptLines = wrapLines(pt.text, usableWidth - 28, 7.5, false);
-    const ptCardH = 22 + ptLines.length * 10.5 + 8;
+    const ptLines = wrapLines(pt.text, usableWidth - 28, 8, false);
+    const ptCardH = 22 + ptLines.length * 11 + 8;
     doc.addRect(leftX, doc.currentY, usableWidth, ptCardH, { fillColor: cardBg, strokeColor: lineBorder, lineWidth: 0.75 });
-    doc.addText(pt.title, leftX + 14, doc.currentY + 13, { font: 'F2', size: 8, color: navyBg });
+    doc.addText(pt.title, leftX + 14, doc.currentY + 13, { font: 'F2', size: 8.5, color: navyBg });
     let curPtY = doc.currentY + 25;
     for (const line of ptLines) {
-      doc.addText(line, leftX + 14, curPtY, { font: 'F1', size: 7.5, color: textDark });
-      curPtY += 10.5;
+      doc.addText(line, leftX + 14, curPtY, { font: 'F1', size: 8, color: textDark });
+      curPtY += 11;
     }
     doc.currentY += ptCardH + 6;
   });
@@ -810,23 +810,23 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
     const rowBg: [number, number, number] = qIdx % 2 === 0 ? white : cardBg;
     
     // Point 1: Complete question wording with dynamic multi-line wrapping
-    const qLines = wrapLines(q.text, 275, 7, false);
-    const rowH = Math.max(18, 7 + qLines.length * 9.5 + 4);
+    const qLines = wrapLines(q.text, 275, 7.5, false);
+    const rowH = Math.max(18, 7 + qLines.length * 10 + 4);
 
     doc.addRect(leftX, doc.currentY, usableWidth, rowH, { fillColor: rowBg, strokeColor: lineBorder, lineWidth: 0.5 });
     doc.addText(`Q${q.qNum}`, leftX + 8, doc.currentY + 11.5, { font: 'F2', size: 7.5, color: navyBg });
-    doc.addText(q.domain, leftX + 32, doc.currentY + 11.5, { font: 'F2', size: 7.2, color: textDark });
+    doc.addText(q.domain, leftX + 32, doc.currentY + 11.5, { font: 'F2', size: 7.5, color: textDark });
     
     let curLineY = doc.currentY + 11.5;
     for (const line of qLines) {
-      doc.addText(line, leftX + 135, curLineY, { font: 'F1', size: 7, color: textDark });
-      curLineY += 9.5;
+      doc.addText(line, leftX + 135, curLineY, { font: 'F1', size: 7.5, color: textDark });
+      curLineY += 10;
     }
 
     const respStr = `${SCALE_LABELS[val] || val}`;
-    const respW = getTextWidth(respStr, 7.5, true);
+    const respW = getTextWidth(respStr, 8, true);
     const respColor: [number, number, number] = val >= 4 ? goldAccent : textDark;
-    doc.addText(respStr, leftX + usableWidth - 10 - respW, doc.currentY + 11.5, { font: 'F2', size: 7.5, color: respColor });
+    doc.addText(respStr, leftX + usableWidth - 10 - respW, doc.currentY + 11.5, { font: 'F2', size: 8, color: respColor });
 
     doc.currentY += rowH;
   });
@@ -834,15 +834,15 @@ export function generateParticipantResultsPdf(data: PressureScanPdfData): Buffer
   doc.currentY += 10;
 
   // Regulatory Governance Notice (Point 5: Neutral legal and data protection wording)
-  doc.addRect(leftX, doc.currentY, usableWidth, 38, { fillColor: [0.95, 0.95, 0.95], strokeColor: lineBorder, lineWidth: 0.5 });
-  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & PRIVACY', leftX + 10, doc.currentY + 13, { font: 'F2', size: 7, color: textMuted });
+  doc.addRect(leftX, doc.currentY, usableWidth, 46, { fillColor: [0.95, 0.95, 0.95], strokeColor: lineBorder, lineWidth: 0.5 });
+  doc.addText('LEADERS PERFORMANCE - GOVERNANCE & PRIVACY', leftX + 10, doc.currentY + 12, { font: 'F2', size: 7.5, color: textMuted });
   doc.addWrappedText(
     'This directional report is non-clinical and intended solely for organizational performance analysis. Personal and organizational information is processed in accordance with the applicable Leaders Performance Privacy Policy and relevant data protection requirements. Leaders Performance Management Consultancies L.L.C., Dubai, UAE.',
     leftX + 10,
-    doc.currentY + 23,
+    doc.currentY + 22,
     usableWidth - 20,
-    9,
-    { font: 'F1', size: 6.5, color: textMuted }
+    9.5,
+    { font: 'F1', size: 7, color: textMuted }
   );
 
   return doc.compileBuffer();

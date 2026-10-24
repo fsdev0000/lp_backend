@@ -18,9 +18,9 @@ if (!fs.existsSync(outputDir)) {
 const scenario1Data: PressureScanPdfData = {
   referenceNumber: 'LP-FPS-2026-9482',
   fullName: 'Dr. Tariq Al-Hashimi',
-  email: 'tariq@apexlogistics.ae',
+  email: 'tariq.hashimi@example.com',
   companyName: 'Apex Logistics Middle East',
-  phone: '+971 50 839 2104',
+  phone: '+971 50 000 0000',
   submittedContext: {
     revenue: '€5M–€20M',
     companyStage: 'Scale-stage',
@@ -53,7 +53,7 @@ const scenario1Data: PressureScanPdfData = {
   submittedAt: new Date('2026-10-21T09:30:00Z'),
   reviewStatus: 'SCHEDULED',
   scheduledReviewAt: new Date('2026-10-24T14:00:00Z'),
-  zoomMeetingUrl: 'https://zoom.us/j/7114427991?pwd=leadersperformance'
+  zoomMeetingUrl: 'https://zoom.us/j/0000000000?pwd=samplepasscode'
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,9 +67,9 @@ const scenario1Data: PressureScanPdfData = {
 const scenario2Data: PressureScanPdfData = {
   referenceNumber: 'LP-FPS-2026-5120',
   fullName: 'Alexander Wright',
-  email: 'alex@vanguardfintech.com',
+  email: 'alex.wright@example.com',
   companyName: 'Vanguard FinTech Group',
-  phone: '+44 20 7946 0912',
+  phone: '+44 20 7000 0000',
   submittedContext: {
     revenue: '€1M–€5M',
     companyStage: 'Scale-stage',
