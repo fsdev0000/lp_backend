@@ -395,14 +395,12 @@ export class SimplePdfDocument {
     offsets.push(0); // placeholder
     objects.push(''); // placeholder
 
-    // Standard Built-in Fonts with exact character advance Widths for universal spacing fidelity
-    const f1Widths = HELVETICA_WIDTHS.join(' ');
-    const f2Widths = HELVETICA_BOLD_WIDTHS.join(' ');
-    const f3Widths = HELVETICA_OBLIQUE_WIDTHS.join(' ');
-
-    const f1Obj = addObj(`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 255 /Widths [${f1Widths}] >>`);
-    const f2Obj = addObj(`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 255 /Widths [${f2Widths}] >>`);
-    const f3Obj = addObj(`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 255 /Widths [${f3Widths}] >>`);
+    // Standard Built-in 14 Fonts (PDF 1.4 / ISO 32000-1 specification)
+    // Conforming PDF readers (Adobe Acrobat, Chrome, macOS, Windows) have built-in Adobe Font Metrics.
+    // Declaring /FirstChar and /Widths without a FontDescriptor violates PDF spec and corrupts character spacing in Acrobat.
+    const f1Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    const f2Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+    const f3Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>');
 
     const pageObjNumbers: number[] = [];
 
