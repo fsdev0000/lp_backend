@@ -254,16 +254,23 @@ export async function getMonthAvailability(year: number, month: number) {
   return availabilityMap;
 }
 
-export async function bookAppointment(contactId: string, dateTime: string, title: string) {
+export async function bookAppointment(
+  contactId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes?: number
+) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   const locationId = await getSecret('GHL_LOCATION_ID');
   
-  let duration = 30;
-  try {
-    const calInfo = await getCalendarInfo();
-    if (calInfo.duration) duration = calInfo.duration;
-  } catch (e) {
-    console.warn('Could not fetch calendar duration, defaulting to 30 min');
+  let duration = durationMinutes || 30;
+  if (!durationMinutes) {
+    try {
+      const calInfo = await getCalendarInfo();
+      if (calInfo.duration) duration = calInfo.duration;
+    } catch (e) {
+      console.warn('Could not fetch calendar duration, defaulting to 30 min');
+    }
   }
 
   const startTime = `${dateTime}+04:00`;
@@ -310,6 +317,38 @@ export async function bookAppointment(contactId: string, dateTime: string, title
     console.error('Failed to move opportunity to booked stage:', e);
   }
 
+  return data;
+}
+
+export async function updateAppointment(
+  appointmentId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes: number = 45
+) {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  const startTime = `${dateTime}+04:00`;
+  const startDate = new Date(startTime);
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+
+  const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+  const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
+
+  const headers = await ghlHeaders();
+  const res = await fetch(`${GHL_BASE}/calendars/events/appointments/${appointmentId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      calendarId,
+      startTime,
+      endTime,
+      title,
+      appointmentStatus: 'confirmed',
+    }),
+  });
+
+  const data: any = await res.json();
+  if (!res.ok) throw new Error(`Appointment update failed: ${JSON.stringify(data)}`);
   return data;
 }
 
