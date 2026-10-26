@@ -427,6 +427,7 @@ model ScheduledEmail {
   @@map("scheduled_emails")
 }
 
+
 // ============================================================================
 // ANALYTICS & PERFORMANCE MODULE
 // ============================================================================
@@ -499,4 +500,5 @@ model CampaignUtmYield {
   @@index([source])
   @@map("campaign_utm_yields")
 }
+
 

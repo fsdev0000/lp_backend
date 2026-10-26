@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
 import { promises as dnsPromises } from 'dns';
-import { upsertContact, sendEmail, getFreeSlots, getMonthAvailability, getCalendarInfo, bookAppointment } from './ghl';
+import { upsertContact, sendEmail, getFreeSlots, getMonthAvailability, getCalendarInfo, bookAppointment, updateAppointment } from './ghl';
 import { escapeHtml, formatOperationalSubmissionDate, renderTemplate } from './email';
 import { getMasterclassBucketFiles, createMasterclassSignedUrl } from './supabaseStorageService';
 import { generateIcsContent, generateGoogleCalendarUrl, generateOutlookCalendarUrl, CalendarEventDetails } from './calendarInvite';
@@ -1618,11 +1618,18 @@ export async function bookReviewSlot(payload: MasterclassBookingPayload) {
     });
 
     if (contactId) {
-      await bookAppointment(
+      const ghlAppt: any = await bookAppointment(
         contactId,
         dateStr + 'T' + matchedSlot.startDubai,
-        `Strategic Review: ${normalizedName} (${normalizedCompany})`
+        `Strategic Review: ${normalizedName} (${normalizedCompany})`,
+        matchedSlot.durationMinutes || 45
       );
+      if (ghlAppt?.id || ghlAppt?.calendarEvent?.id) {
+        await prisma.masterclassBooking.update({
+          where: { id: booking.id },
+          data: { ghlAppointmentId: ghlAppt?.id || ghlAppt?.calendarEvent?.id },
+        });
+      }
     }
   } catch (err: any) {
     console.warn('[GHL] Calendar booking sync notice:', err.message);
@@ -1759,6 +1766,19 @@ export async function rescheduleReviewSlot(payload: MasterclassReschedulePayload
       notes: payload.reason ? `Rescheduled. Reason: ${payload.reason}` : booking.notes,
     },
   });
+
+  if (booking.ghlAppointmentId) {
+    try {
+      await updateAppointment(
+        booking.ghlAppointmentId,
+        dateStr + 'T' + matchedSlot.startDubai,
+        `Strategic Review: ${booking.fullName} (${booking.company})`,
+        matchedSlot.durationMinutes || 45
+      );
+    } catch (err: any) {
+      console.warn('[GHL] Calendar reschedule sync notice:', err.message);
+    }
+  }
 
   const frontendUrl = process.env.FRONTEND_URL || 'https://leadersperformance.ae';
   const meetingAccessUrl = updatedBooking.meetingLink || booking.meetingLink || LIONEL_MEETING_ROOM.url;

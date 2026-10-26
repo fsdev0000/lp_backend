@@ -23,43 +23,105 @@ export interface WorksheetPdfData {
   personalNotes?: Record<string, any>;
 }
 
-// Approximate widths for Helvetica characters at 1pt font size
-function getCharWidth(char: string, isBold: boolean = false): number {
+// Official Adobe Helvetica AFM standard character widths for character codes 32..255 (scaled to 1000 units)
+export const HELVETICA_WIDTHS: number[] = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+  400, 549, 333, 333, 333, 576, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+  667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+  722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+  556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 549, 611, 556, 556, 556, 556, 500, 556, 500
+];
+
+export const HELVETICA_BOLD_WIDTHS: number[] = [
+  278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+  975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+  333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+  611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  278, 333, 556, 556, 556, 556, 280, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+  400, 549, 333, 333, 333, 576, 556, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+  722, 722, 722, 722, 722, 722, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+  722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+  556, 556, 556, 556, 556, 556, 889, 556, 556, 556, 556, 556, 278, 278, 278, 278,
+  611, 611, 611, 611, 611, 611, 611, 549, 611, 611, 611, 611, 611, 556, 611, 556
+];
+
+export const HELVETICA_OBLIQUE_WIDTHS: number[] = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+  400, 549, 333, 333, 333, 576, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+  667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+  722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+  556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 549, 611, 556, 556, 556, 556, 500, 556, 500
+];
+
+// Adobe Helvetica AFM exact character width lookup at 1pt font size
+export function getCharWidth(char: string, isBold: boolean = false): number {
   const code = char.charCodeAt(0);
-  if (code === 32) return isBold ? 0.28 : 0.28; // space
-  if ('ijlI.,;:\'|![]()'.includes(char)) return isBold ? 0.32 : 0.28;
-  if ('wmWM@%#'.includes(char)) return isBold ? 0.95 : 0.89;
-  if ('ABCDEFGHJKLNOPQRSTUVXYZ'.includes(char)) return isBold ? 0.72 : 0.67;
-  return isBold ? 0.61 : 0.56; // default lowercase
+  if (code >= 32 && code <= 255) {
+    const arr = isBold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS;
+    return arr[code - 32] / 1000.0;
+  }
+  return isBold ? 0.60 : 0.55;
 }
 
-function escapePdfText(text: string): string {
-  // Replace smart quotes, en/em dashes, bullets with clean ASCII equivalents
-  const clean = text
+export function sanitizeText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/€/g, 'EUR ')
+    .replace(/£/g, 'GBP ')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')
-    .replace(/[\u2022\u2023\u25E6]/g, '*')
+    .replace(/[\u2022\u2023\u25E6·\u00B7]/g, '|')
     .replace(/[\u2026]/g, '...')
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ');
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/  +/g, ' ');
+}
 
-  // Escape PDF special syntax: backslash, open paren, close paren
-  return clean
+export function escapePdfSyntax(text: string): string {
+  if (!text) return '';
+  return text
     .replace(/\\/g, '\\\\')
     .replace(/\(/g, '\\(')
     .replace(/\)/g, '\\)');
 }
 
-function getTextWidth(text: string, fontSize: number, isBold: boolean = false): number {
+export function escapePdfText(text: string): string {
+  return escapePdfSyntax(sanitizeText(text));
+}
+
+export function getTextWidth(text: string, fontSize: number, isBold: boolean = false): number {
   if (!text) return 0;
+  const clean = sanitizeText(text);
   let w = 0;
-  for (let i = 0; i < text.length; i++) {
-    w += getCharWidth(text[i], isBold) * fontSize;
+  for (let i = 0; i < clean.length; i++) {
+    w += getCharWidth(clean[i], isBold) * fontSize;
   }
   return w;
 }
 
-function renderFitText(
+export function renderFitText(
   doc: SimplePdfDocument,
   text: string,
   x: number,
@@ -92,9 +154,10 @@ function renderFitText(
   doc.addText(displayText, x, y, { font, size, color });
 }
 
-function wrapLines(text: string, maxWidthPt: number, fontSizePt: number, isBold: boolean = false): string[] {
+export function wrapLines(text: string, maxWidthPt: number, fontSizePt: number, isBold: boolean = false): string[] {
   if (!text) return [];
-  const paragraphs = text.split(/\r?\n/);
+  const clean = sanitizeText(text);
+  const paragraphs = clean.split(/\r?\n/);
   const result: string[] = [];
 
   for (const para of paragraphs) {
@@ -147,6 +210,7 @@ export class SimplePdfDocument {
   private pages: string[] = [];
   private currentPageContent: string[] = [];
   public currentY: number;
+  public footerLabel: string = "The Founder's Next Move";
 
   constructor() {
     this.currentY = this.topMargin;
@@ -331,7 +395,9 @@ export class SimplePdfDocument {
     offsets.push(0); // placeholder
     objects.push(''); // placeholder
 
-    // Standard Built-in Fonts
+    // Standard Built-in 14 Fonts (PDF 1.4 / ISO 32000-1 specification)
+    // Conforming PDF readers (Adobe Acrobat, Chrome, macOS, Windows) have built-in Adobe Font Metrics.
+    // Declaring /FirstChar and /Widths without a FontDescriptor violates PDF spec and corrupts character spacing in Acrobat.
     const f1Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
     const f2Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
     const f3Obj = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>');
@@ -341,7 +407,7 @@ export class SimplePdfDocument {
     // For each page, render contents and inject running footer with total page count
     for (let p = 0; p < totalPages; p++) {
       const pageIndex = p + 1;
-      const footerText = `Page ${pageIndex} of ${totalPages}  |  Strictly Confidential  |  The Founder's Next Move  |  Leaders Performance`;
+      const footerText = `Page ${pageIndex} of ${totalPages}  |  Strictly Confidential  |  ${this.footerLabel}  |  Leaders Performance`;
       const escapedFooter = escapePdfText(footerText);
       const footerOps = `BT /F1 8.5 Tf 0.5 0.5 0.5 rg 40.00 25.00 Td (${escapedFooter}) Tj ET`;
       const fullPageStream = this.pages[p] + '\n' + footerOps;
