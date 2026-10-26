@@ -45,6 +45,10 @@ const swaggerOptions = {
         name: 'Masterclass',
         description: 'The Founder’s Next Move — Executive Masterclass, Interactive Workbook, Stripe Enrollment & 1-on-1 Strategic Review Scheduling',
       },
+      {
+        name: 'Analytics & Performance',
+        description: 'Decoupled Business Intelligence, GA4/GSC/Clarity telemetry cache, multi-channel social matrix, and SSE realtime streaming',
+      },
     ],
     paths: {
       '/health': {
@@ -430,6 +434,210 @@ const swaggerOptions = {
           },
         },
       },
+
+      '/analytics/overview': {
+        get: {
+          summary: 'Consolidated Business Intelligence & Web Vitals Overview',
+          description: 'Returns top executive KPIs, 30-day session trend lines from GA4, UTM campaign yield table, and recent qualified founder inbound leads with sub-150ms cached response SLA.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '30d' },
+              description: 'Historical date filter range',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Aggregated analytics metrics, traffic history, and campaign yield',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          metrics: {
+                            type: 'object',
+                            properties: {
+                              totalAudience: { type: 'number', example: 148520 },
+                              audienceGrowth: { type: 'number', example: 18.4 },
+                              highIntentLeads: { type: 'number', example: 342 },
+                              leadsGrowth: { type: 'number', example: 26.2 },
+                              avgConversionRate: { type: 'number', example: 8.42 },
+                              conversionGrowth: { type: 'number', example: 2.1 },
+                              pipelineValueEur: { type: 'number', example: 4250000 },
+                              pipelineGrowth: { type: 'number', example: 34.0 },
+                              realtimeActiveVisitors: { type: 'number', example: 128 },
+                              ingestionLatencyMs: { type: 'number', example: 24 },
+                            },
+                          },
+                          trafficHistory: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                date: { type: 'string', example: '10/01' },
+                                visitors: { type: 'number', example: 1120 },
+                                leads: { type: 'number', example: 9 },
+                                pageviews: { type: 'number', example: 3410 },
+                              },
+                            },
+                          },
+                          topCampaigns: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                campaign: { type: 'string', example: 'q4_founder_scaling_masterclass' },
+                                source: { type: 'string', example: 'linkedin_direct' },
+                                impressions: { type: 'number', example: 48200 },
+                                clicks: { type: 'number', example: 3280 },
+                                leads: { type: 'number', example: 142 },
+                                convRate: { type: 'string', example: '4.3%' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            502: {
+              description: 'Upstream telemetry or database communication failure',
+            },
+          },
+        },
+      },
+
+      '/analytics/channels': {
+        get: {
+          summary: 'Cross-Platform Social Intelligence Matrix',
+          description: 'Returns audience, engagement ratios, leads captured, and pipeline yield across LinkedIn, YouTube, Instagram, and TikTok.',
+          tags: ['Analytics & Performance'],
+          responses: {
+            200: {
+              description: 'Array of platform metrics',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string', example: 'linkedin' },
+                            name: { type: 'string', example: 'LinkedIn (Executive)' },
+                            followers: { type: 'number', example: 48920 },
+                            engagementRate: { type: 'number', example: 6.84 },
+                            postsMonth: { type: 'number', example: 24 },
+                            leadsGenerated: { type: 'number', example: 184 },
+                            pipelineValueEur: { type: 'number', example: 2840000 },
+                            color: { type: 'string', example: '#0A66C2' },
+                            trend: { type: 'string', example: '+24.5%' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/analytics/keywords': {
+        get: {
+          summary: 'Google Search Console Top Organic Queries',
+          description: 'Retrieves top search queries, impressions, clicks, click-through rates (CTR), and SERP positions for leadersperformance.ae.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', default: 20 },
+              description: 'Maximum number of keywords to return',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Top keyword rankings',
+            },
+          },
+        },
+      },
+
+      '/analytics/telemetry': {
+        get: {
+          summary: 'Microsoft Clarity UX & Session Signals',
+          description: 'Returns executive dwell time, rage click ratio, dead clicks, and active telemetry streams.',
+          tags: ['Analytics & Performance'],
+          responses: {
+            200: {
+              description: 'Clarity UX telemetry signals',
+            },
+          },
+        },
+      },
+
+      '/analytics/integrations/status': {
+        get: {
+          summary: 'External Integrations Health Check',
+          description: 'Evaluates live connectivity, round-trip latency, and sync status for GA4, Google Search Console, Microsoft Clarity, and GoHighLevel.',
+          tags: ['Analytics & Performance'],
+          responses: {
+            200: {
+              description: 'Array of provider health statuses',
+            },
+          },
+        },
+      },
+
+      '/analytics/integrations/ping/{id}': {
+        post: {
+          summary: 'Immediate Provider Health Probe',
+          description: 'Executes an immediate live probe against a specified provider (ga4, gsc, clarity, ghl) and returns round-trip latency in milliseconds.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string', enum: ['ga4', 'gsc', 'clarity', 'ghl'] },
+              description: 'Provider identifier',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Ping latency and status',
+            },
+          },
+        },
+      },
+
+      '/analytics/realtime/stream': {
+        get: {
+          summary: 'Server-Sent Events (SSE) Live Telemetry Stream',
+          description: 'Unidirectional persistent HTTP/2 event stream transmitting realtime active visitor counts and inbound lead alerts with automatic 15s heartbeat.',
+          tags: ['Analytics & Performance'],
+          responses: {
+            200: {
+              description: 'text/event-stream active stream',
+            },
+          },
+        },
+      },
     },
     servers: [
       {
@@ -476,8 +684,8 @@ const swaggerOptions = {
   },
   apis:
     process.env.NODE_ENV === 'production'
-      ? ['./dist/api/routes/*.js']
-      : ['./src/api/routes/*.ts'], // Scan src in dev, dist only in production
+      ? ['./dist/api/routes/*.js', './dist/modules/**/*.js']
+      : ['./src/api/routes/*.ts', './src/modules/**/*.ts'], // Scan src in dev, dist only in production
 };
 
 export const swaggerSpec = swaggerJSDoc(swaggerOptions);

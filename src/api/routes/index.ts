@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';

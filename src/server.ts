@@ -170,6 +170,12 @@ app.use('/books', booksRouter);
 app.use('/api/books', booksRouter);
 app.use('/api/v1/books', booksRouter);
 
+import { analyticsRoutes } from './modules/analytics/analytics.routes';
+import { RealtimePollingJob } from './modules/analytics/jobs/realtimePollingJob';
+
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
+
 // Stripe Webhook Endpoint (Universal)
 app.post('/api/v1/webhooks/stripe', handleStripeWebhook);
 app.post('/api/webhooks/stripe', handleStripeWebhook);
@@ -222,6 +228,7 @@ import { ensureAudiobookFromSupabase } from './services/audiobookService';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  RealtimePollingJob.start();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
 });

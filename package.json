@@ -16,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google-analytics/data": "^7.3.0",
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.117.0",
     "cors": "^2.8.6",
@@ -23,6 +24,7 @@
     "elevenlabs": "^1.59.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.2",
+    "googleapis": "^188.0.0",
     "multer": "^2.2.0",
     "openai": "^6.47.0",
     "socket.io": "^4.8.3",

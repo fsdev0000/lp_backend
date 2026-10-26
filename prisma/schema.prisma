@@ -400,3 +400,103 @@ model PressureScanSubmission {
   @@map("pressure_scan_submissions")
 }
 
+model ScheduledEmail {
+  id              String    @id @default(uuid())
+  contactId       String    @map("contact_id")
+  contactEmail    String    @map("contact_email")
+  emailType       String    @map("email_type")
+  subject         String
+  htmlBody        String    @db.Text @map("html_body")
+  sendAt          DateTime  @map("send_at")
+  status          String    @default("pending") @map("status")
+  scanType        String    @default("founder_pressure_scan") @map("scan_type")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  sentAt          DateTime? @map("sent_at")
+  errorMessage    String?   @db.Text @map("error_message")
+
+  appointmentId   String?   @map("appointment_id")
+  referenceNumber String?   @map("reference_number")
+  retryCount      Int       @default(0) @map("retry_count")
+  maxRetries      Int       @default(3) @map("max_retries")
+  idempotencyKey  String?   @unique @map("idempotency_key")
+
+  @@index([status, sendAt])
+  @@index([contactEmail])
+  @@index([referenceNumber])
+  @@index([appointmentId])
+  @@map("scheduled_emails")
+}
+
+// ============================================================================
+// ANALYTICS & PERFORMANCE MODULE
+// ============================================================================
+
+model AnalyticsDailyMetric {
+  id                String   @id @default(uuid())
+  date              DateTime @unique
+  totalVisitors     Int      @default(0) @map("total_visitors")
+  totalPageviews    Int      @default(0) @map("total_pageviews")
+  uniqueSessions    Int      @default(0) @map("unique_sessions")
+  highIntentLeads   Int      @default(0) @map("high_intent_leads")
+  pipelineValueEur  Float    @default(0.0) @map("pipeline_value_eur")
+  avgConversionRate Float    @default(0.0) @map("avg_conversion_rate")
+  sourceBreakdown   Json?    @map("source_breakdown")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([date])
+  @@map("analytics_daily_metrics")
+}
+
+model SearchConsoleKeyword {
+  id           String   @id @default(uuid())
+  query        String
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+  ctr          Float    @default(0.0)
+  position     Float    @default(0.0)
+  targetPage   String?  @map("target_page")
+  country      String   @default("GLOBAL")
+  snapshotDate DateTime @default(now()) @map("snapshot_date")
+
+  @@unique([query, snapshotDate, country], map: "uq_gsc_keyword_date_country")
+  @@index([query])
+  @@index([snapshotDate])
+  @@map("search_console_keywords")
+}
+
+model ClarityTelemetrySnapshot {
+  id              String   @id @default(uuid())
+  timestamp       DateTime @default(now())
+  totalSessions   Int      @default(0) @map("total_sessions")
+  avgDwellSeconds Int      @default(0) @map("avg_dwell_seconds")
+  rageClickCount  Int      @default(0) @map("rage_click_count")
+  rageClickRate   Float    @default(0.0) @map("rage_click_rate")
+  deadClickCount  Int      @default(0) @map("dead_click_count")
+  deadClickRate   Float    @default(0.0) @map("dead_click_rate")
+  quickBackRate   Float    @default(0.0) @map("quick_back_rate")
+  deviceBreakdown Json?    @map("device_breakdown")
+
+  @@index([timestamp])
+  @@map("clarity_telemetry_snapshots")
+}
+
+model CampaignUtmYield {
+  id                    String   @id @default(uuid())
+  campaign              String
+  source                String
+  medium                String?
+  impressions           Int      @default(0)
+  clicks                Int      @default(0)
+  leadsCaptured         Int      @default(0) @map("leads_captured")
+  convRate              Float    @default(0.0) @map("conv_rate")
+  attributedPipelineEur Float    @default(0.0) @map("attributed_pipeline_eur")
+  dateRange             String   @default("30d") @map("date_range")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([campaign, source, dateRange], map: "uq_campaign_source_range")
+  @@index([campaign])
+  @@index([source])
+  @@map("campaign_utm_yields")
+}
+
