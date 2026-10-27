@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 export interface ProviderCredentials {
   ga4: {
     propertyId: string | null;
@@ -35,18 +37,21 @@ export function validateAnalyticsCredentials(): ProviderCredentials {
   const ghlApiKey = process.env.GHL_API_KEY || null;
   const ghlLocationId = process.env.GHL_LOCATION_ID || null;
 
+  const adcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './private/application_default_credentials.json';
+  const hasGoogleAuth = Boolean((googleEmail && googleKey) || (fs.existsSync(adcPath)));
+
   return {
     ga4: {
       propertyId: ga4PropertyId,
       serviceAccountEmail: googleEmail,
       privateKey: googleKey,
-      isConfigured: Boolean(ga4PropertyId && googleEmail && googleKey),
+      isConfigured: Boolean(ga4PropertyId && hasGoogleAuth),
     },
     gsc: {
       siteUrl: gscSiteUrl,
       serviceAccountEmail: googleEmail,
       privateKey: googleKey,
-      isConfigured: Boolean(gscSiteUrl && googleEmail && googleKey),
+      isConfigured: Boolean(gscSiteUrl && hasGoogleAuth),
     },
     clarity: {
       projectId: clarityProjectId,

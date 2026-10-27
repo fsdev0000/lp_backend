@@ -22,6 +22,13 @@ export class Ga4Adapter implements IGa4Adapter {
       } catch (err) {
         console.warn('[Ga4Adapter] Failed to initialize Google Analytics client:', err);
       }
+    } else {
+      // Automatic fallback to Google Application Default Credentials (ADC)
+      try {
+        this.client = new BetaAnalyticsDataClient();
+      } catch (err) {
+        console.warn('[Ga4Adapter] Google ADC client fallback notice:', err);
+      }
     }
   }
 

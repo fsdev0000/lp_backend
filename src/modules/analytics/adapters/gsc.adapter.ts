@@ -22,6 +22,16 @@ export class GscAdapter implements IGscAdapter {
       } catch (err) {
         console.warn('[GscAdapter] Failed to initialize Google Search Console client:', err);
       }
+    } else {
+      // Automatic fallback to Google Application Default Credentials (ADC)
+      try {
+        const auth = new google.auth.GoogleAuth({
+          scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+        });
+        this.searchconsole = google.searchconsole({ version: 'v1', auth });
+      } catch (err) {
+        console.warn('[GscAdapter] Google ADC Search Console fallback notice:', err);
+      }
     }
   }
 
