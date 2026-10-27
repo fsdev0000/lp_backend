@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
-import { sendAdminBriefing, sendCalendarBookingEmails } from '../../services/email';
+import { sendAdminBriefing, sendParticipantScanResultsEmail, sendCalendarBookingEmails } from '../../services/email';
 import { syncLeadAttribution } from '../../services/attributionService';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
@@ -17,6 +17,14 @@ import { getMasterclassMonthAvailability } from '../../services/masterclassServi
 import { sendNewsletterWelcomeEmail } from './newsletter';
 import { validateEmailBasic } from '../../services/emailValidation';
 import { generatePressureScanPdf } from '../../services/pressureScanPdfService';
+import { scheduleScanFollowups, cancelPendingScanFollowups } from '../../services/scanFollowupService';
+import {
+  scheduleAppointmentReminders,
+  updateRescheduledAppointmentReminders,
+  cancelAppointmentReminders,
+  processScheduledEmails,
+  formatDubaiDateTime,
+} from '../../services/reminderService';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -426,8 +434,8 @@ function domainToSlug(d: string): string {
 async function generateUniqueScanRef(): Promise<string> {
   const year = new Date().getFullYear();
   for (let attempt = 0; attempt < 25; attempt++) {
-    const seq = Math.floor(1000 + Math.random() * 9000);
-    const candidate = `FPS-${year}-${seq}`;
+    const seq = Math.floor(100000 + Math.random() * 900000);
+    const candidate = `LP-FPS-${year}-${seq}`;
     const exists = await prisma.pressureScanSubmission.findUnique({
       where: { referenceNumber: candidate },
     });
@@ -435,7 +443,7 @@ async function generateUniqueScanRef(): Promise<string> {
       return candidate;
     }
   }
-  return `FPS-${year}-${Date.now().toString().slice(-4)}`;
+  return `LP-FPS-${year}-${Date.now().toString().slice(-6)}`;
 }
 
 apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) => {
@@ -478,16 +486,22 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
       validatedScores.push(val);
     }
 
-    // 2.2 Mandatory Consent & Disclosures
+    // 2.2 Mandatory Consent & Disclosures (supporting both backend and frontend property conventions)
     const methodologyAcknowledged = Boolean(
       req.body.methodologyAcknowledged ??
       founder.methodologyAcknowledged ??
-      req.body.consent?.methodologyAcknowledged
+      req.body.consent?.methodologyAcknowledged ??
+      req.body.consent?.acknowledgedHowItWorks ??
+      founder.understandsScan ??
+      founder.acknowledgedHowItWorks
     );
     const privacyAcknowledged = Boolean(
       req.body.privacyAcknowledged ??
       founder.privacyAcknowledged ??
-      req.body.consent?.privacyAcknowledged
+      req.body.consent?.privacyAcknowledged ??
+      req.body.consent?.privacyAccepted ??
+      founder.agreedToPolicy ??
+      founder.privacyAccepted
     );
 
     if (!methodologyAcknowledged) {
@@ -583,7 +597,15 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
     const primaryInsight = insights[firstPrimary] || insights['Founder Involvement'];
 
     // ─── Sub-Task 4: Reference Generation & PostgreSQL Persistence ───────────
-    const referenceNumber = await generateUniqueScanRef();
+    const incomingRef = (
+      req.body.founder?.reference_number ||
+      req.body.founder?.reference ||
+      req.body.reference_number ||
+      req.body.referenceNumber
+    );
+    const referenceNumber = (incomingRef && typeof incomingRef === 'string' && incomingRef.startsWith('LP-FPS-'))
+      ? incomingRef
+      : await generateUniqueScanRef();
 
     const structuredAnswers = validatedScores.map((score, i) => ({
       questionNumber: i + 1,
@@ -690,7 +712,9 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
             where: { email: cleanEmail },
           });
           let token: string = randomUUID();
+          let shouldSendWelcome = false;
           if (!existingSub) {
+            shouldSendWelcome = true;
             await prisma.newsletterSubscriber.create({
               data: {
                 email: cleanEmail,
@@ -708,6 +732,7 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
               },
             });
           } else if (!existingSub.subscribed) {
+            shouldSendWelcome = true;
             token = existingSub.unsubscribeToken || token;
             await prisma.newsletterSubscriber.update({
               where: { email: cleanEmail },
@@ -720,12 +745,16 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
               },
             });
           } else {
+            // Already an active subscriber (e.g. enrolled during calibrate step or prior) - do NOT re-send welcome email!
             token = existingSub.unsubscribeToken || token;
+            shouldSendWelcome = false;
           }
 
-          sendNewsletterWelcomeEmail(cleanEmail, contactId, token, participantName).catch((nlErr) =>
-            console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr)
-          );
+          if (shouldSendWelcome) {
+            sendNewsletterWelcomeEmail(cleanEmail, contactId, token, participantName).catch((nlErr) =>
+              console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr)
+            );
+          }
         } catch (nlErr) {
           console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr);
         }
@@ -757,6 +786,8 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
         });
 
         const adminRecipients = [lionelContactId, infoContactId].filter(Boolean);
+
+        // 1. Send Internal Advisor Briefing (Executive Dossier PDF) to Lionel & Staff
         await sendAdminBriefing(
           {
             name: participantName,
@@ -775,6 +806,51 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
           },
           adminRecipients
         );
+
+        // 2. Send Participant-Facing Results Report (Results PDF) to Founder
+        await sendParticipantScanResultsEmail({
+          participantName,
+          email: cleanEmail,
+          companyName,
+          referenceNumber,
+          primarySignalArea: primaryJoined,
+          signalClassification,
+          contactId,
+        });
+
+        // 3. Record Immediate Results Email in scheduled_emails ledger
+        const resultsSubject = `[Founder Pressure Scan] Your Executive Results Report (Ref: ${referenceNumber})`;
+        await prisma.scheduledEmail.upsert({
+          where: { idempotencyKey: `results:${referenceNumber}` },
+          create: {
+            contactId: contactId || '',
+            contactEmail: cleanEmail,
+            emailType: 'results',
+            subject: resultsSubject,
+            htmlBody: '',
+            sendAt: submission.createdAt || new Date(),
+            status: 'sent',
+            sentAt: new Date(),
+            scanType: 'founder_pressure_scan',
+            referenceNumber,
+            idempotencyKey: `results:${referenceNumber}`,
+          },
+          update: {
+            status: 'sent',
+            sentAt: new Date(),
+          },
+        }).catch((e: any) => console.warn('[Pressure Scan] Notice recording results email:', e.message || e));
+
+        // 4. Schedule First Follow-up (Day 2) and Final Follow-up (Day 5)
+        await scheduleScanFollowups({
+          contactId: contactId || '',
+          email: cleanEmail,
+          participantName,
+          companyName,
+          referenceNumber,
+          primarySignalArea: primaryJoined,
+          submittedAt: submission.createdAt || new Date(),
+        });
       }
     } catch (ghlError) {
       console.error('[Pressure Scan] GHL/Email integration non-fatal error:', ghlError);
@@ -800,6 +876,194 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
   } catch (error) {
     console.error('Error submitting assessment:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * @openapi
+ * /scan/lookup:
+ *   get:
+ *     summary: Lookup Previous Scan Submission
+ *     description: Checks if a business email has already completed a scan or booked a review session (Resumption logic).
+ *     tags:
+ *       - Assessment
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Participant business email to lookup
+ *     responses:
+ *       200:
+ *         description: Scan lookup result (ALREADY_SCHEDULED, AWAITING_SCHEDULE, or NOT_FOUND)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 found:
+ *                   type: boolean
+ *                   example: true
+ *                 status:
+ *                   type: string
+ *                   enum: [ALREADY_SCHEDULED, AWAITING_SCHEDULE, NOT_FOUND]
+ *                   example: ALREADY_SCHEDULED
+ *                 referenceNumber:
+ *                   type: string
+ *                   example: LP-FPS-2026-1042
+ *                 fullName:
+ *                   type: string
+ *                   example: David Kim
+ *                 companyName:
+ *                   type: string
+ *                   example: Kim Logistics
+ *                 scheduledReviewAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                 zoomMeetingUrl:
+ *                   type: string
+ *                   nullable: true
+ *                 primarySignalArea:
+ *                   type: string
+ *                   example: Operational Resilience
+ *       400:
+ *         description: Valid business email is required
+ *       500:
+ *         description: Internal Server Error
+ */
+apiRoutes.get('/scan/lookup', async (req, res) => {
+  try {
+    const rawEmail = (typeof req.query.email === 'string' ? req.query.email : '').trim().toLowerCase();
+    const rawRef = (typeof req.query.ref === 'string' ? req.query.ref : typeof req.query.id === 'string' ? req.query.id : '').trim();
+
+    if (!rawEmail && !rawRef) {
+      return res.status(400).json({ error: 'Valid business email or reference number is required.' });
+    }
+
+    // Direct lookup by reference number or ID
+    if (rawRef) {
+      const submission = await prisma.pressureScanSubmission.findFirst({
+        where: {
+          OR: [{ referenceNumber: rawRef }, { id: rawRef }],
+        },
+      });
+
+      if (!submission) {
+        return res.json({ found: false, status: 'NOT_FOUND' });
+      }
+
+      const primarySignal = Array.isArray(submission.primarySignalAreas) && submission.primarySignalAreas.length > 0
+        ? submission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = submission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+      const isScheduled = Boolean(submission.scheduledReviewAt);
+
+      return res.json({
+        found: true,
+        status: isScheduled ? 'ALREADY_SCHEDULED' : 'AWAITING_SCHEDULE',
+        submission: {
+          id: submission.id,
+          referenceNumber: submission.referenceNumber,
+          fullName: submission.fullName,
+          companyName: submission.companyName,
+          email: submission.email,
+          primarySignal,
+          scheduledReviewAt: submission.scheduledReviewAt,
+          zoomJoinUrl: isScheduled ? zoomUrl : null,
+          submittedAt: submission.createdAt,
+        },
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        companyName: submission.companyName,
+        scheduledReviewAt: submission.scheduledReviewAt,
+        zoomMeetingUrl: isScheduled ? zoomUrl : null,
+        primarySignalArea: primarySignal,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
+      });
+    }
+
+    // 1. Check if there is an active confirmed scheduled review for this email first
+    const scheduledSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        email: rawEmail,
+        scheduledReviewAt: { not: null },
+      },
+      orderBy: { scheduledReviewAt: 'desc' },
+    });
+
+    if (scheduledSubmission && scheduledSubmission.scheduledReviewAt) {
+      const primarySignal = Array.isArray(scheduledSubmission.primarySignalAreas) && scheduledSubmission.primarySignalAreas.length > 0
+        ? scheduledSubmission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = scheduledSubmission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+
+      return res.json({
+        found: true,
+        status: 'ALREADY_SCHEDULED',
+        submission: {
+          id: scheduledSubmission.id,
+          referenceNumber: scheduledSubmission.referenceNumber,
+          fullName: scheduledSubmission.fullName,
+          companyName: scheduledSubmission.companyName,
+          email: scheduledSubmission.email,
+          primarySignal,
+          scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+          zoomJoinUrl: zoomUrl,
+          submittedAt: scheduledSubmission.createdAt,
+        },
+        referenceNumber: scheduledSubmission.referenceNumber,
+        fullName: scheduledSubmission.fullName,
+        companyName: scheduledSubmission.companyName,
+        scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+        zoomMeetingUrl: zoomUrl,
+        primarySignalArea: primarySignal,
+        signalClassification: scheduledSubmission.signalClassification,
+        submittedAt: scheduledSubmission.createdAt,
+      });
+    }
+
+    // 2. Otherwise find the latest scan submission awaiting review scheduling
+    const latestSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: { email: rawEmail },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestSubmission) {
+      return res.json({ found: false, status: 'NOT_FOUND' });
+    }
+
+    const primarySignalLatest = Array.isArray(latestSubmission.primarySignalAreas) && latestSubmission.primarySignalAreas.length > 0
+      ? latestSubmission.primarySignalAreas[0]
+      : 'Operational Resilience';
+
+    return res.json({
+      found: true,
+      status: 'AWAITING_SCHEDULE',
+      submission: {
+        id: latestSubmission.id,
+        referenceNumber: latestSubmission.referenceNumber,
+        fullName: latestSubmission.fullName,
+        companyName: latestSubmission.companyName,
+        email: latestSubmission.email,
+        primarySignal: primarySignalLatest,
+        submittedAt: latestSubmission.createdAt,
+        scheduledReviewAt: null,
+        zoomJoinUrl: null,
+      },
+      referenceNumber: latestSubmission.referenceNumber,
+      fullName: latestSubmission.fullName,
+      companyName: latestSubmission.companyName,
+      primarySignalArea: primarySignalLatest,
+      signalClassification: latestSubmission.signalClassification,
+      submittedAt: latestSubmission.createdAt,
+      overallNormalised: latestSubmission.overallNormalised,
+    });
+  } catch (error) {
+    console.error('[Scan Lookup] Error checking email status:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -910,33 +1174,39 @@ apiRoutes.get('/scan/review/:referenceNumber/pdf', async (req, res) => {
     const answersList = Array.isArray(submission.answers) ? (submission.answers as any[]) : [];
     const domainScoresList = Array.isArray(submission.domainScores) ? (submission.domainScores as any[]) : [];
 
-    const pdfBuffer = generatePressureScanPdf({
-      referenceNumber: submission.referenceNumber,
-      fullName: submission.fullName,
-      email: submission.email,
-      companyName: submission.companyName,
-      phone: submission.phone,
-      submittedContext: submission.submittedContext as any,
-      answers: answersList,
-      overallRawMean: submission.overallRawMean,
-      overallNormalised: submission.overallNormalised,
-      domainScores: domainScoresList,
-      primarySignalAreas: submission.primarySignalAreas,
-      signalClassification: submission.signalClassification,
-      submittedAt: submission.createdAt,
-      reviewStatus: submission.reviewStatus,
-      reviewerNotes: submission.reviewerNotes,
-      reviewerDecision: submission.reviewerDecision,
-      reviewedAt: submission.reviewedAt,
-      reviewedBy: submission.reviewedBy,
-      zoomMeetingUrl: submission.zoomMeetingUrl,
-      scheduledReviewAt: submission.scheduledReviewAt,
-    });
+    const audience = (req.query.audience === 'participant' ? 'participant' : 'internal') as 'internal' | 'participant';
 
+    const pdfBuffer = generatePressureScanPdf(
+      {
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        email: submission.email,
+        companyName: submission.companyName,
+        phone: submission.phone,
+        submittedContext: submission.submittedContext as any,
+        answers: answersList,
+        overallRawMean: submission.overallRawMean,
+        overallNormalised: submission.overallNormalised,
+        domainScores: domainScoresList,
+        primarySignalAreas: submission.primarySignalAreas,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
+        reviewStatus: submission.reviewStatus,
+        reviewerNotes: submission.reviewerNotes,
+        reviewerDecision: submission.reviewerDecision,
+        reviewedAt: submission.reviewedAt,
+        reviewedBy: submission.reviewedBy,
+        zoomMeetingUrl: submission.zoomMeetingUrl,
+        scheduledReviewAt: submission.scheduledReviewAt,
+      },
+      audience
+    );
+
+    const suffix = audience === 'participant' ? '_Results' : '_Executive_Dossier';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="Founder_Pressure_Scan_${submission.referenceNumber}.pdf"`
+      `attachment; filename="Founder_Pressure_Scan_${submission.referenceNumber}${suffix}.pdf"`
     );
     res.setHeader('Content-Length', pdfBuffer.length);
     return res.end(pdfBuffer);
@@ -1201,7 +1471,8 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
 
     const dateTimeStr = `${date}T${formattedTime}:00`;
     const appointmentTitle = `Personal Review Conversation - ${name || email}${reference ? ` (${reference})` : ''}`;
-    await bookAppointment(contactId, dateTimeStr, appointmentTitle);
+    const appointmentData: any = await bookAppointment(contactId, dateTimeStr, appointmentTitle);
+    const appointmentId = appointmentData?.id || appointmentData?.calendarEvent?.id || undefined;
 
     console.log(`[Booking Scheduled] Successfully booked for ${email} (${name || 'Founder'}) at ${dateTimeStr} [Ref: ${reference || 'N/A'}]`);
 
@@ -1217,7 +1488,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
           scheduledReviewAt: new Date(dateTimeStr),
           zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
         },
-      }).catch((e) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
+      }).catch((e: unknown) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
     }
 
     // Resolve founder name/company from scan submission if not directly provided in booking body
@@ -1238,8 +1509,49 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
           if (!finalCompany && existingSub.companyName) finalCompany = existingSub.companyName;
           if (!finalPhone && existingSub.phone) finalPhone = existingSub.phone;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
+
+    // Cancel pending follow-ups (Day 2 & Day 5) because participant booked a call
+    await cancelPendingScanFollowups(email, reference);
+
+    // Record Immediate Booking Confirmation Email in scheduled_emails
+    const bookingConfSubject = `[Confirmed] 1-on-1 Strategic Review with Lionel Eersteling (Ref: ${reference || 'FPS-2026-N/A'})`;
+    const bookingConfKey = `booking_confirmation:${reference || email}:${new Date(dateTimeStr).getTime()}`;
+    await prisma.scheduledEmail.upsert({
+      where: { idempotencyKey: bookingConfKey },
+      create: {
+        contactId,
+        contactEmail: email.toLowerCase().trim(),
+        emailType: 'booking_confirmation',
+        subject: bookingConfSubject,
+        htmlBody: '',
+        sendAt: new Date(),
+        status: 'sent',
+        sentAt: new Date(),
+        scanType: 'founder_pressure_scan',
+        appointmentId: appointmentId || undefined,
+        referenceNumber: reference || undefined,
+        idempotencyKey: bookingConfKey,
+      },
+      update: {
+        status: 'sent',
+        sentAt: new Date(),
+      },
+    }).catch((e: any) => console.warn('[Pressure Scan] Notice recording booking confirmation:', e.message || e));
+
+    // Schedule 24-hour and 1-hour appointment reminders
+    await scheduleAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      contactId,
+      email: email.toLowerCase().trim(),
+      participantName: finalName || 'Founder',
+      companyName: finalCompany,
+      phone: finalPhone,
+      appointmentDate: new Date(dateTimeStr),
+      zoomUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    });
 
     // Dispatch Calendar Booking Emails:
     // 1) Founder receives calendar confirmation with confirmed time & Zoom meeting link
@@ -1269,6 +1581,151 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
   } catch (error) {
     console.error('Error scheduling booking:', error);
     res.status(500).json({ error: 'Failed to schedule booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /booking/reschedule:
+ *   post:
+ *     summary: Reschedule Consultation Slot
+ *     description: Reschedules an existing consultation, updates reminder schedule, and sends notification.
+ *     tags:
+ *       - Booking
+ */
+apiRoutes.post('/booking/reschedule', async (req, res) => {
+  const { email, reference, appointmentId, date, time, reason } = req.body;
+  if (!email || !date || !time) {
+    return res.status(400).json({ error: 'Missing required fields (email, date, time)' });
+  }
+
+  try {
+    let formattedTime = time;
+    const timeMatch = time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1], 10);
+      const minutes = timeMatch[2];
+      const modifier = timeMatch[3].toUpperCase();
+      if (modifier === 'PM' && hours < 12) hours += 12;
+      if (modifier === 'AM' && hours === 12) hours = 0;
+      formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+
+    const dateTimeStr = `${date}T${formattedTime}:00`;
+    const newAppointmentDate = new Date(dateTimeStr);
+
+    // Update PressureScanSubmission
+    if (reference || email) {
+      await prisma.pressureScanSubmission.updateMany({
+        where: {
+          OR: [
+            ...(reference ? [{ referenceNumber: reference }, { id: reference }] : []),
+            { email: email.toLowerCase().trim() },
+          ],
+        },
+        data: {
+          scheduledReviewAt: newAppointmentDate,
+        },
+      });
+    }
+
+    // Update pending reminders in scheduled_emails
+    const reminderUpdate = await updateRescheduledAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      email: email.toLowerCase().trim(),
+      newAppointmentDate,
+    });
+
+    // Send rescheduled booking confirmation
+    sendCalendarBookingEmails({
+      participantName: req.body.name || 'Founder',
+      email: email.toLowerCase().trim(),
+      phone: req.body.phone,
+      companyName: req.body.company,
+      dateTimeStr,
+      referenceNumber: reference || 'FPS-2026-N/A',
+      zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    }).catch((e) => console.error('[Booking Reschedule] Error sending confirmation:', e));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Appointment successfully rescheduled',
+      scheduledReviewAt: dateTimeStr,
+      reminderUpdate,
+    });
+  } catch (err: any) {
+    console.error('Error rescheduling booking:', err);
+    return res.status(500).json({ error: 'Failed to reschedule booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /booking/cancel:
+ *   post:
+ *     summary: Cancel Consultation Slot
+ *     description: Cancels an existing consultation and cancels all pending appointment reminders.
+ *     tags:
+ *       - Booking
+ */
+apiRoutes.post('/booking/cancel', async (req, res) => {
+  const { email, reference, appointmentId, reason } = req.body;
+  if (!email && !reference && !appointmentId) {
+    return res.status(400).json({ error: 'Missing identifying field (email, reference, or appointmentId)' });
+  }
+
+  try {
+    if (reference || email) {
+      await prisma.pressureScanSubmission.updateMany({
+        where: {
+          OR: [
+            ...(reference ? [{ referenceNumber: reference }, { id: reference }] : []),
+            ...(email ? [{ email: email.toLowerCase().trim() }] : []),
+          ],
+        },
+        data: {
+          scheduledReviewAt: null,
+        },
+      });
+    }
+
+    const cancelledCount = await cancelAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      email: email?.toLowerCase().trim(),
+      reason: reason || 'Appointment cancelled by user request.',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Appointment successfully cancelled',
+      cancelledReminders: cancelledCount,
+    });
+  } catch (err: any) {
+    console.error('Error cancelling booking:', err);
+    return res.status(500).json({ error: 'Failed to cancel booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /cron/process-scheduled-emails:
+ *   post:
+ *     summary: Process Scheduled Email Queue
+ *     description: Triggers on-demand processing of due emails in scheduled_emails ledger.
+ *     tags:
+ *       - Email
+ */
+apiRoutes.post('/cron/process-scheduled-emails', async (_req, res) => {
+  try {
+    const result = await processScheduledEmails();
+    return res.status(200).json({
+      success: true,
+      result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Processing failed' });
   }
 });
 

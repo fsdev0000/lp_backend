@@ -66,6 +66,7 @@ export async function upsertContact(payload: {
     firstName: payload.firstName,
     lastName: payload.lastName,
     phone: payload.phone,
+    companyName: payload.companyName,
     source: payload.source || 'Leaders Performance Website',
     tags: payload.tags || ['Scan Lead'],
   };
@@ -97,6 +98,22 @@ export async function sendEmail(
   emailHeaders?: Record<string, string>,
   attachments?: string[]
 ) {
+  // ─── IRONCLAD DEV/TEST SAFEGUARD ───────────────────────────────────────────
+  // Strictly prevent automated test emails from spamming Lionel or real inboxes
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowOutbound = process.env.ENABLE_OUTBOUND_EMAILS === 'true';
+  const isManualTest = emailHeaders?.['X-Manual-Test'] === 'true';
+
+  if (!isProduction && !allowOutbound && !isManualTest) {
+    console.log(`[SAFEGUARD - AUTO EMAIL SUPPRESSED IN DEV/TEST]
+  Contact ID:  ${contactId}
+  Subject:     "${subject}"
+  Attachments: ${attachments?.length || 0}
+  Status:      Blocked safely to prevent spamming staff inboxes during development.
+  (Set ENABLE_OUTBOUND_EMAILS=true in .env only when doing deliberate manual test)`);
+    return { success: true, mocked: true, message: 'Email suppressed in development/test environment' };
+  }
+
   const headers = await ghlHeaders();
   const payload: any = {
     type: 'Email',
@@ -237,16 +254,23 @@ export async function getMonthAvailability(year: number, month: number) {
   return availabilityMap;
 }
 
-export async function bookAppointment(contactId: string, dateTime: string, title: string) {
+export async function bookAppointment(
+  contactId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes?: number
+) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   const locationId = await getSecret('GHL_LOCATION_ID');
   
-  let duration = 30;
-  try {
-    const calInfo = await getCalendarInfo();
-    if (calInfo.duration) duration = calInfo.duration;
-  } catch (e) {
-    console.warn('Could not fetch calendar duration, defaulting to 30 min');
+  let duration = durationMinutes || 30;
+  if (!durationMinutes) {
+    try {
+      const calInfo = await getCalendarInfo();
+      if (calInfo.duration) duration = calInfo.duration;
+    } catch (e) {
+      console.warn('Could not fetch calendar duration, defaulting to 30 min');
+    }
   }
 
   const startTime = `${dateTime}+04:00`;
@@ -296,9 +320,42 @@ export async function bookAppointment(contactId: string, dateTime: string, title
   return data;
 }
 
+export async function updateAppointment(
+  appointmentId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes: number = 45
+) {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  const startTime = `${dateTime}+04:00`;
+  const startDate = new Date(startTime);
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+
+  const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+  const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
+
+  const headers = await ghlHeaders();
+  const res = await fetch(`${GHL_BASE}/calendars/events/appointments/${appointmentId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      calendarId,
+      startTime,
+      endTime,
+      title,
+      appointmentStatus: 'confirmed',
+    }),
+  });
+
+  const data: any = await res.json();
+  if (!res.ok) throw new Error(`Appointment update failed: ${JSON.stringify(data)}`);
+  return data;
+}
+
 export async function getOpenOpportunitiesForContact(contactId: string): Promise<any[]> {
     try {
         const locationId = await getSecret('GHL_LOCATION_ID');
+        if (!locationId) return [];
         const headers = await ghlHeaders();
         const res = await fetch(`${GHL_BASE}/opportunities/search?contact_id=${encodeURIComponent(contactId)}&location_id=${encodeURIComponent(locationId || '')}&status=open`, {
             method: 'GET',

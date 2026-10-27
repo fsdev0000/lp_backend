@@ -27,6 +27,7 @@
     "googleapis": "^188.0.0",
     "multer": "^2.2.0",
     "openai": "^6.47.0",
+    "pdf-lib": "^1.17.1",
     "socket.io": "^4.8.3",
     "stripe": "^22.6.2",
     "swagger-jsdoc": "^6.3.0",

@@ -119,7 +119,8 @@ export async function sendNewsletterWelcomeEmail(email: string, contactId?: stri
 
   const frontendBase = (process.env.FRONTEND_URL || 'https://leadersperformance.ae').replace(/\/$/, '');
   const privacyUrl = `${frontendBase}/privacy`;
-  const octoberIssueUrl = `${frontendBase}/knowledge?issue=2026-10`;
+  const pdfUrl = await getNewsletterPdfAttachmentUrl('2026/10/NEWSLETTER_DESKTOP_FINAL_REVISED.pdf');
+  const octoberIssueUrl = pdfUrl || `${frontendBase}/knowledge`;
 
   const firstName = (sub?.firstName || firstNameInput || '').trim();
   const displayName = firstName ? firstName : 'Founder';
