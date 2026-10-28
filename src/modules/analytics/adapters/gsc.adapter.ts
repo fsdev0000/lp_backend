@@ -3,6 +3,9 @@ import { IGscAdapter, GscQueryRow } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
 
+import path from 'path';
+import fs from 'fs';
+
 export class GscAdapter implements IGscAdapter {
   private searchconsole: any = null;
   private siteUrl: string;
@@ -11,7 +14,19 @@ export class GscAdapter implements IGscAdapter {
     const creds = validateAnalyticsCredentials().gsc;
     this.siteUrl = creds.siteUrl || 'https://leadersperformance.ae/';
 
-    if (creds.isConfigured && creds.serviceAccountEmail && creds.privateKey) {
+    const keyPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS || './private/service_account.json');
+
+    if (fs.existsSync(keyPath)) {
+      try {
+        const auth = new google.auth.GoogleAuth({
+          keyFilename: keyPath,
+          scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+        });
+        this.searchconsole = google.searchconsole({ version: 'v1', auth });
+      } catch (err) {
+        console.warn('[GscAdapter] Failed to initialize Google Search Console client with keyfile:', err);
+      }
+    } else if (creds.isConfigured && creds.serviceAccountEmail && creds.privateKey) {
       try {
         const auth = new google.auth.JWT({
           email: creds.serviceAccountEmail,
@@ -23,7 +38,6 @@ export class GscAdapter implements IGscAdapter {
         console.warn('[GscAdapter] Failed to initialize Google Search Console client:', err);
       }
     } else {
-      // Automatic fallback to Google Application Default Credentials (ADC)
       try {
         const auth = new google.auth.GoogleAuth({
           scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],

@@ -46,3 +46,10 @@ analyticsRoutes.post('/integrations/ping/:id', controller.pingIntegration);
  * @desc Persistent Server-Sent Events (SSE) stream for live active visitor ticker
  */
 analyticsRoutes.get('/realtime/stream', controller.streamRealtime);
+
+/**
+ * @route GET /api/v1/analytics/reports-snapshot
+ * @desc Get Google Analytics 4 Reports Snapshot (Active Users, Top Pages, Sources, Cities)
+ */
+analyticsRoutes.get('/reports-snapshot', controller.getReportsSnapshot);
+

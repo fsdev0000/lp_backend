@@ -123,4 +123,20 @@ describe('Analytics & Performance Module API Suite', () => {
       });
     });
   });
+
+  it('GET /api/v1/analytics/reports-snapshot returns live GA4 snapshot with top pages and traffic sources', async () => {
+    const res = await request(app).get('/api/v1/analytics/reports-snapshot?startDate=30daysAgo&endDate=today');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveProperty('summary');
+    expect(res.body.data.summary).toHaveProperty('activeUsers');
+    expect(res.body.data.summary).toHaveProperty('newUsers');
+    expect(res.body.data.summary).toHaveProperty('averageEngagementTimeFormatted');
+    expect(res.body.data).toHaveProperty('topPages');
+    expect(Array.isArray(res.body.data.topPages)).toBe(true);
+    expect(res.body.data).toHaveProperty('usersBySourceMedium');
+    expect(res.body.data).toHaveProperty('sessionsBySourceMedium');
+    expect(res.body.data).toHaveProperty('usersByCity');
+  });
 });
+

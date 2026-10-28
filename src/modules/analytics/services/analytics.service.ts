@@ -218,4 +218,9 @@ export class AnalyticsService {
         throw new Error(`Unknown provider ID: ${providerId}`);
     }
   }
+
+  public async getReportsSnapshot(startDate = '30daysAgo', endDate = 'today', limit = 10) {
+    return this.ga4.getReportsSnapshot(startDate, endDate, limit);
+  }
 }
+

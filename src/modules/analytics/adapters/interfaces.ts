@@ -66,10 +66,42 @@ export interface IntegrationHealthStatus {
   message?: string;
 }
 
+export interface PageScreenRow {
+  pageTitle: string;
+  views: number;
+  activeUsers: number;
+  eventCount: number;
+  bounceRate: string;
+}
+
+export interface DimensionMetricRow {
+  name: string;
+  value: number;
+}
+
+export interface ReportsSnapshotData {
+  summary: {
+    activeUsers: number;
+    newUsers: number;
+    averageEngagementTimeSeconds: number;
+    averageEngagementTimeFormatted: string;
+    eventCount: number;
+  };
+  topPages: PageScreenRow[];
+  usersBySourceMedium: DimensionMetricRow[];
+  sessionsBySourceMedium: DimensionMetricRow[];
+  usersByCity: DimensionMetricRow[];
+  reportingPeriod: {
+    startDate: string;
+    endDate: string;
+  };
+}
+
 export interface IGa4Adapter {
   getRealtimeActiveUsers(): Promise<{ activeUsers: number; byCountry: Record<string, number> }>;
   getTrafficReport(startDate: string, endDate: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string): Promise<CampaignYieldRow[]>;
+  getReportsSnapshot(startDate?: string, endDate?: string, limit?: number): Promise<ReportsSnapshotData>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
 

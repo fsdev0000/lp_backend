@@ -89,4 +89,22 @@ export class AnalyticsController {
   public streamRealtime = (req: Request, res: Response): void => {
     SseStreamManager.getInstance().registerClient(req, res);
   };
+
+  public getReportsSnapshot = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : '30daysAgo';
+      const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : 'today';
+      const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 10;
+
+      const data = await this.service.getReportsSnapshot(startDate, endDate, limit);
+      res.status(200).json({ success: true, data });
+    } catch (error: any) {
+      console.error('[AnalyticsController] getReportsSnapshot failed:', error);
+      res.status(502).json({
+        success: false,
+        error: error?.message || 'Failed to generate GA4 reports snapshot',
+      });
+    }
+  };
 }
+
