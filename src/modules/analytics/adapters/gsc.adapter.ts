@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { IGscAdapter, GscQueryRow } from './interfaces';
+import { IGscAdapter, GscQueryRow, GscTotals, GscKeywordsResponse } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
 
@@ -8,11 +8,11 @@ import fs from 'fs';
 
 export class GscAdapter implements IGscAdapter {
   private searchconsole: any = null;
-  private siteUrl: string;
+  private defaultSiteUrl: string;
 
   constructor() {
     const creds = validateAnalyticsCredentials().gsc;
-    this.siteUrl = creds.siteUrl || 'https://leadersperformance.ae/';
+    this.defaultSiteUrl = creds.siteUrl || 'https://leadersperformance.ae/';
 
     const keyPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS || './private/service_account.json');
 
@@ -49,40 +49,153 @@ export class GscAdapter implements IGscAdapter {
     }
   }
 
-  public async getTopSearchQueries(days = 30, limit = 20): Promise<GscQueryRow[]> {
+  /**
+   * Resolves target siteUrl based on requested domain or fallback default
+   */
+  public resolveSiteUrl(domain?: string): string {
+    if (!domain) {
+      return this.defaultSiteUrl;
+    }
+    const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (clean === 'leadersperformance.ae' || clean.includes('leadersperformance')) {
+      return 'https://leadersperformance.ae/';
+    }
+    if (clean === 'lioneleersteling.com' || clean.includes('lioneleersteling')) {
+      return 'https://lioneleersteling.com/';
+    }
+    return `https://${clean}/`;
+  }
+
+  /**
+   * Resolves dates honoring Google Search Console's 2-day finalization lag
+   */
+  public resolveDateRange(days = 30, customStartDate?: string, customEndDate?: string) {
+    if (customStartDate && customEndDate) {
+      return {
+        startDate: customStartDate,
+        endDate: customEndDate,
+        rangeLabel: `${customStartDate}..${customEndDate}`,
+      };
+    }
+
+    // Google Search Console finalize lag is typically 2 full days behind local today
+    const endObj = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const startObj = new Date(endObj.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+
+    const endDate = endObj.toISOString().split('T')[0];
+    const startDate = startObj.toISOString().split('T')[0];
+
+    return {
+      startDate,
+      endDate,
+      rangeLabel: `${days}d`,
+    };
+  }
+
+  /**
+   * Retrieves Google Search Console top queries alongside true aggregate site totals
+   * (including hidden / low-volume queries)
+   */
+  public async getTopSearchQueries(
+    days = 30,
+    limit = 100,
+    domain?: string,
+    customStartDate?: string,
+    customEndDate?: string
+  ): Promise<GscKeywordsResponse> {
+    const siteUrl = this.resolveSiteUrl(domain);
+    const { startDate, endDate, rangeLabel } = this.resolveDateRange(days, customStartDate, customEndDate);
+
+    const emptyTotals: GscTotals = {
+      clicks: 0,
+      impressions: 0,
+      ctr: '0.0%',
+      ctrValue: 0,
+      position: 0,
+    };
+
     if (!this.searchconsole) {
-      return this.getFallbackKeywords();
+      console.warn('[GscAdapter] Search Console client not initialized');
+      return {
+        totals: emptyTotals,
+        queries: [],
+        range: rangeLabel,
+        domain: siteUrl,
+        startDate,
+        endDate,
+        totalQueries: 0,
+      };
     }
 
     try {
-      const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const endDate = new Date().toISOString().split('T')[0];
+      // 1. Query real totals without dimensions (includes hidden and anonymized queries)
+      // 2. Query individual query rows with dimensions: ['query']
+      const [totalRes, queryRes] = await Promise.all([
+        this.searchconsole.searchanalytics.query({
+          siteUrl,
+          requestBody: {
+            startDate,
+            endDate,
+          },
+        }).catch((err: any) => {
+          console.warn('[GscAdapter] Failed to query totals:', err.message);
+          return { data: { rows: [] } };
+        }),
+        this.searchconsole.searchanalytics.query({
+          siteUrl,
+          requestBody: {
+            startDate,
+            endDate,
+            dimensions: ['query'],
+            rowLimit: limit,
+          },
+        }).catch((err: any) => {
+          console.warn('[GscAdapter] Failed to query search queries:', err.message);
+          return { data: { rows: [] } };
+        }),
+      ]);
 
-      const res = await this.searchconsole.searchanalytics.query({
-        siteUrl: this.siteUrl,
-        requestBody: {
-          startDate,
-          endDate,
-          dimensions: ['query'],
-          rowLimit: limit,
-        },
-      });
+      const totalRow = totalRes.data?.rows?.[0];
+      const totals: GscTotals = totalRow
+        ? {
+            clicks: totalRow.clicks ?? 0,
+            impressions: totalRow.impressions ?? 0,
+            ctr: `${((totalRow.ctr ?? 0) * 100).toFixed(1)}%`,
+            ctrValue: totalRow.ctr ?? 0,
+            position: Number((totalRow.position ?? 0).toFixed(1)),
+          }
+        : emptyTotals;
 
-      const rows = res.data.rows;
-      if (!rows || rows.length === 0) {
-        return this.getFallbackKeywords();
-      }
-
-      return rows.map((r: any) => ({
+      const rows = queryRes.data?.rows || [];
+      const queries: GscQueryRow[] = rows.map((r: any) => ({
         query: r.keys?.[0] || 'Unknown Query',
         impressions: r.impressions || 0,
         clicks: r.clicks || 0,
         ctr: `${((r.ctr || 0) * 100).toFixed(1)}%`,
         position: Number((r.position || 0).toFixed(1)),
       }));
+
+      return {
+        totals,
+        queries,
+        range: rangeLabel,
+        domain: siteUrl,
+        startDate,
+        endDate,
+        totalQueries: queries.length,
+      };
     } catch (error: any) {
       await LiveErrorBoundary.logUpstreamError('GSC', 'searchanalytics.query', error);
-      return this.getFallbackKeywords();
+      // Clean zeroed state - NEVER return fabricated/fake fallback queries!
+      return {
+        totals: emptyTotals,
+        queries: [],
+        range: rangeLabel,
+        domain: siteUrl,
+        startDate,
+        endDate,
+        totalQueries: 0,
+      };
     }
   }
 
@@ -92,23 +205,10 @@ export class GscAdapter implements IGscAdapter {
       return { status: 'DEGRADED', latencyMs: Date.now() - start };
     }
     try {
-      await this.searchconsole.sites.get({ siteUrl: this.siteUrl });
+      await this.searchconsole.sites.get({ siteUrl: this.defaultSiteUrl });
       return { status: 'HEALTHY', latencyMs: Date.now() - start };
     } catch {
       return { status: 'DOWN', latencyMs: Date.now() - start };
     }
-  }
-
-  private getFallbackKeywords(): GscQueryRow[] {
-    return [
-      { query: 'executive performance coaching dubai', impressions: 14800, clicks: 1240, ctr: '8.4%', position: 1.8 },
-      { query: 'founder burnout recovery protocol', impressions: 22400, clicks: 1680, ctr: '7.5%', position: 2.1 },
-      { query: 'ceo bio governance masterclass', impressions: 9800, clicks: 920, ctr: '9.4%', position: 1.2 },
-      { query: 'high performance leadership lionel', impressions: 6400, clicks: 810, ctr: '12.6%', position: 1.0 },
-      { query: 'peak cognitive decision making executive', impressions: 11200, clicks: 740, ctr: '6.6%', position: 3.4 },
-      { query: 'founder bottleneck strategy audit', impressions: 8300, clicks: 620, ctr: '7.4%', position: 2.4 },
-      { query: 'executive energy management protocol', impressions: 7900, clicks: 540, ctr: '6.8%', position: 3.1 },
-      { query: 'unmasked high performance intensive', impressions: 5200, clicks: 480, ctr: '9.2%', position: 1.5 },
-    ];
   }
 }

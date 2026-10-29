@@ -171,10 +171,13 @@ app.use('/api/books', booksRouter);
 app.use('/api/v1/books', booksRouter);
 
 import { analyticsRoutes } from './modules/analytics/analytics.routes';
+import { clarityRoutes } from './modules/analytics/clarity.routes';
 import { RealtimePollingJob } from './modules/analytics/jobs/realtimePollingJob';
 
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/clarity', clarityRoutes);
+app.use('/api/v1/clarity', clarityRoutes);
 
 // Stripe Webhook Endpoint (Universal)
 app.post('/api/v1/webhooks/stripe', handleStripeWebhook);

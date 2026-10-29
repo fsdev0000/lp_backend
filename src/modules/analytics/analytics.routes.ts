@@ -53,3 +53,20 @@ analyticsRoutes.get('/realtime/stream', controller.streamRealtime);
  */
 analyticsRoutes.get('/reports-snapshot', controller.getReportsSnapshot);
 
+/**
+ * @route GET /api/v1/analytics/clarity/sessions
+ * @desc Get Clarity recorded sessions with direct playback URLs, dwell times, and lead attribution for frontend embed
+ */
+analyticsRoutes.get('/clarity/sessions', controller.getClaritySessions);
+analyticsRoutes.get('/clarity/recordings', controller.getClarityRecordings);
+analyticsRoutes.get('/clarity/analytics', controller.getClarityAnalytics);
+analyticsRoutes.post('/clarity/refresh', controller.refreshClarityAnalytics);
+analyticsRoutes.get('/clarity/status', controller.getClarityStatus);
+
+/**
+ * @route POST /api/v1/analytics/clarity/webhook
+ * @desc Ingest Clarity session events, calculate UX friction, link leads, and trigger anomaly alerts
+ */
+analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
+
+

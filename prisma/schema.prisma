@@ -468,6 +468,7 @@ model SearchConsoleKeyword {
 
 model ClarityTelemetrySnapshot {
   id              String   @id @default(uuid())
+  websiteKey      String   @default("leaders_performance") @map("website_key")
   timestamp       DateTime @default(now())
   totalSessions   Int      @default(0) @map("total_sessions")
   avgDwellSeconds Int      @default(0) @map("avg_dwell_seconds")
@@ -477,7 +478,9 @@ model ClarityTelemetrySnapshot {
   deadClickRate   Float    @default(0.0) @map("dead_click_rate")
   quickBackRate   Float    @default(0.0) @map("quick_back_rate")
   deviceBreakdown Json?    @map("device_breakdown")
+  rawInsights     Json?    @map("raw_insights")
 
+  @@index([websiteKey])
   @@index([timestamp])
   @@map("clarity_telemetry_snapshots")
 }

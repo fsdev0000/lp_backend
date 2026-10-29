@@ -118,8 +118,38 @@ export class AnalyticsService {
     ];
   }
 
-  public async getKeywords(limit = 20) {
-    return await this.gsc.getTopSearchQueries(30, limit);
+  public async getKeywords(
+    paramsOrLimit:
+      | {
+          limit?: number;
+          range?: string;
+          domain?: string;
+          startDate?: string;
+          endDate?: string;
+        }
+      | number = 100
+  ) {
+    if (typeof paramsOrLimit === 'number') {
+      return await this.gsc.getTopSearchQueries(30, paramsOrLimit);
+    }
+
+    const { limit = 100, range = '30d', domain, startDate, endDate } = paramsOrLimit;
+    const days = this.parseRangeToDays(range);
+    return await this.gsc.getTopSearchQueries(days, limit, domain, startDate, endDate);
+  }
+
+  private parseRangeToDays(range: string): number {
+    const normalized = (range || '').toString().trim().toLowerCase();
+    if (normalized === '7d' || normalized === '7') return 7;
+    if (normalized === '14d' || normalized === '14') return 14;
+    if (normalized === '28d' || normalized === '28') return 28;
+    if (normalized === '30d' || normalized === '30') return 30;
+    if (normalized === '90d' || normalized === '90') return 90;
+    if (normalized === '180d' || normalized === '6m') return 180;
+    if (normalized === '365d' || normalized === '12m' || normalized === 'all') return 365;
+
+    const parsed = parseInt(normalized.replace(/\D/g, ''), 10);
+    return !isNaN(parsed) && parsed > 0 ? parsed : 30;
   }
 
   public async getTelemetry() {
@@ -221,6 +251,33 @@ export class AnalyticsService {
 
   public async getReportsSnapshot(startDate = '30daysAgo', endDate = 'today', limit = 10) {
     return this.ga4.getReportsSnapshot(startDate, endDate, limit);
+  }
+
+  public async getClaritySessions(limit = 20, websiteKey = 'leaders_performance') {
+    return this.clarity.getSessions(limit, websiteKey);
+  }
+
+  public async getClarityAnalytics(websiteKey = 'leaders_performance', forceRefresh = false, numOfDays = 1) {
+    return this.clarity.getLiveAnalytics(websiteKey, forceRefresh, numOfDays);
+  }
+
+  public async refreshClarityAnalytics(websiteKey = 'leaders_performance') {
+    return this.clarity.getLiveAnalytics(websiteKey, true);
+  }
+
+  public async getClarityRecordings(websiteKey = 'leaders_performance', limit = 20) {
+    return this.clarity.getRecordings(websiteKey, limit);
+  }
+
+  public async getClarityStatus(websiteKey?: string) {
+    if (websiteKey) {
+      return this.clarity.getWebsiteStatus(websiteKey);
+    }
+    return this.clarity.getAllWebsitesStatus();
+  }
+
+  public async ingestClarityWebhook(payload: any, websiteKey = 'leaders_performance') {
+    return this.clarity.ingestWebhookPayload(payload, websiteKey);
   }
 }
 

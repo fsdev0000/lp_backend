@@ -166,7 +166,7 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     try {
-      const [summaryRes, pagesRes, usersSourceRes, sessionsSourceRes, citiesRes] = await Promise.all([
+      const [summaryRes, pagesRes, usersSourceRes, sessionsSourceRes, countriesRes, citiesRes] = await Promise.all([
         this.client.runReport({
           property: `properties/${this.propertyId}`,
           dateRanges: [{ startDate, endDate }],
@@ -209,6 +209,14 @@ export class Ga4Adapter implements IGa4Adapter {
         this.client.runReport({
           property: `properties/${this.propertyId}`,
           dateRanges: [{ startDate, endDate }],
+          dimensions: [{ name: 'country' }],
+          metrics: [{ name: 'activeUsers' }],
+          orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+          limit,
+        }),
+        this.client.runReport({
+          property: `properties/${this.propertyId}`,
+          dateRanges: [{ startDate, endDate }],
           dimensions: [{ name: 'city' }],
           metrics: [{ name: 'activeUsers' }],
           orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
@@ -241,6 +249,11 @@ export class Ga4Adapter implements IGa4Adapter {
         value: parseInt(r.metricValues?.[0]?.value || '0', 10),
       }));
 
+      const usersByCountry: DimensionMetricRow[] = (countriesRes[0].rows || []).map((r) => ({
+        name: r.dimensionValues?.[0]?.value || 'Unknown',
+        value: parseInt(r.metricValues?.[0]?.value || '0', 10),
+      }));
+
       const usersByCity: DimensionMetricRow[] = (citiesRes[0].rows || []).map((r) => ({
         name: r.dimensionValues?.[0]?.value || 'Unknown',
         value: parseInt(r.metricValues?.[0]?.value || '0', 10),
@@ -257,6 +270,7 @@ export class Ga4Adapter implements IGa4Adapter {
         topPages,
         usersBySourceMedium,
         sessionsBySourceMedium,
+        usersByCountry,
         usersByCity,
         reportingPeriod: {
           startDate,
@@ -296,6 +310,13 @@ export class Ga4Adapter implements IGa4Adapter {
         { name: 'google / organic', value: 27 },
         { name: 'm.facebook.com / referral', value: 15 },
         { name: 'ig / social', value: 5 },
+      ],
+      usersByCountry: [
+        { name: 'Pakistan', value: 88 },
+        { name: 'United Arab Emirates', value: 24 },
+        { name: 'United States', value: 22 },
+        { name: 'Netherlands', value: 16 },
+        { name: 'United Kingdom', value: 12 },
       ],
       usersByCity: [
         { name: 'Lahore', value: 82 },

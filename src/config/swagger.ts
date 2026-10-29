@@ -49,6 +49,10 @@ const swaggerOptions = {
         name: 'Analytics & Performance',
         description: 'Decoupled Business Intelligence, GA4/GSC/Clarity telemetry cache, multi-channel social matrix, and SSE realtime streaming',
       },
+      {
+        name: 'Microsoft Clarity UX & Telemetry',
+        description: 'Multi-website Microsoft Clarity UX telemetry, session recordings with validated playback URLs for Social CRM embed, live metric cache, and rage-click anomaly detection',
+      },
     ],
     paths: {
       '/health': {
@@ -558,21 +562,102 @@ const swaggerOptions = {
 
       '/analytics/keywords': {
         get: {
-          summary: 'Google Search Console Top Organic Queries',
-          description: 'Retrieves top search queries, impressions, clicks, click-through rates (CTR), and SERP positions for leadersperformance.ae.',
+          summary: 'Google Search Console Top Organic Queries & Real Totals',
+          description: 'Retrieves top organic search queries alongside real aggregate site totals (including hidden and anonymized queries). Supports multi-domain filtering (`leadersperformance.ae`, `lioneleersteling.com`) and flexible date ranges (`7d`, `30d`, `90d` or explicit `startDate` / `endDate`).',
           tags: ['Analytics & Performance'],
           parameters: [
+            {
+              name: 'domain',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', default: 'leadersperformance.ae' },
+              description: 'Target website domain (e.g. leadersperformance.ae or lioneleersteling.com)',
+            },
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '14d', '28d', '30d', '90d', 'all'], default: '30d' },
+              description: 'Date range filter. Standardizes against GSC finalized 2-day reporting lag.',
+            },
             {
               name: 'limit',
               in: 'query',
               required: false,
-              schema: { type: 'integer', default: 20 },
-              description: 'Maximum number of keywords to return',
+              schema: { type: 'integer', default: 100 },
+              description: 'Maximum number of keyword rows to return',
+            },
+            {
+              name: 'startDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', example: '2026-10-21' },
+              description: 'Optional explicit start date (YYYY-MM-DD)',
+            },
+            {
+              name: 'endDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', example: '2026-10-27' },
+              description: 'Optional explicit end date (YYYY-MM-DD)',
             },
           ],
           responses: {
             200: {
-              description: 'Top keyword rankings',
+              description: 'GSC queries and genuine site totals',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          totals: {
+                            type: 'object',
+                            properties: {
+                              clicks: { type: 'number', example: 9 },
+                              impressions: { type: 'number', example: 147 },
+                              ctr: { type: 'string', example: '6.1%' },
+                              position: { type: 'number', example: 26.8 },
+                            },
+                          },
+                          queries: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                query: { type: 'string', example: 'leaders performance' },
+                                impressions: { type: 'number', example: 17 },
+                                clicks: { type: 'number', example: 7 },
+                                ctr: { type: 'string', example: '41.2%' },
+                                position: { type: 'number', example: 1.6 },
+                              },
+                            },
+                          },
+                          range: { type: 'string', example: '7d' },
+                          domain: { type: 'string', example: 'https://leadersperformance.ae/' },
+                          startDate: { type: 'string', example: '2026-10-21' },
+                          endDate: { type: 'string', example: '2026-10-27' },
+                          totalQueries: { type: 'number', example: 22 },
+                        },
+                      },
+                      totals: {
+                        type: 'object',
+                        description: 'Top-level duplicate of totals for direct CRM accessibility',
+                      },
+                      queries: {
+                        type: 'array',
+                        description: 'Top-level duplicate of query list for direct CRM accessibility',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            502: {
+              description: 'Search Console API communication failure',
             },
           },
         },
@@ -634,6 +719,471 @@ const swaggerOptions = {
           responses: {
             200: {
               description: 'text/event-stream active stream',
+            },
+          },
+        },
+      },
+
+      '/analytics/reports-snapshot': {
+        get: {
+          summary: 'Google Analytics 4 Reports Snapshot',
+          description: 'Retrieves Google Analytics 4 executive reports snapshot including active users, new users, average engagement duration, top pages with bounce rates, traffic sources, session sources, and breakdowns by both countries and cities.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'startDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', default: '30daysAgo' },
+              description: 'Start date in YYYY-MM-DD or relative format (e.g. 30daysAgo, 7daysAgo)',
+            },
+            {
+              name: 'endDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', default: 'today' },
+              description: 'End date in YYYY-MM-DD or relative format (e.g. today)',
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', default: 10 },
+              description: 'Maximum number of items per dimension list',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Live GA4 snapshot with country and city metrics',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          summary: {
+                            type: 'object',
+                            properties: {
+                              activeUsers: { type: 'number', example: 209 },
+                              newUsers: { type: 'number', example: 192 },
+                              averageEngagementTimeSeconds: { type: 'number', example: 45 },
+                              averageEngagementTimeFormatted: { type: 'string', example: '45s' },
+                              eventCount: { type: 'number', example: 2500 },
+                            },
+                          },
+                          topPages: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                pageTitle: { type: 'string', example: 'Escape the Founder Identity Trap: Reclaim Your Business' },
+                                views: { type: 'number', example: 545 },
+                                activeUsers: { type: 'number', example: 8 },
+                                eventCount: { type: 'number', example: 645 },
+                                bounceRate: { type: 'string', example: '41.7%' },
+                              },
+                            },
+                          },
+                          usersBySourceMedium: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: '(direct) / (none)' },
+                                value: { type: 'number', example: 170 },
+                              },
+                            },
+                          },
+                          sessionsBySourceMedium: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: '(direct) / (none)' },
+                                value: { type: 'number', example: 212 },
+                              },
+                            },
+                          },
+                          usersByCountry: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: 'United Arab Emirates' },
+                                value: { type: 'number', example: 88 },
+                              },
+                            },
+                          },
+                          usersByCity: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: 'Dubai' },
+                                value: { type: 'number', example: 82 },
+                              },
+                            },
+                          },
+                          reportingPeriod: {
+                            type: 'object',
+                            properties: {
+                              startDate: { type: 'string', example: '30daysAgo' },
+                              endDate: { type: 'string', example: 'today' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/clarity/analytics': {
+        get: {
+          summary: 'Microsoft Clarity Live & Cached UX Analytics',
+          description: 'Retrieves UX telemetry for an authorized website (`leaders_performance` or `lionel_eersteling`), including executive dwell times, rage-click ratios, dead clicks, and full breakdown by countries and cities.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          parameters: [
+            {
+              name: 'website',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leaders_performance', 'lionel_eersteling'], default: 'leaders_performance' },
+              description: 'Target website key to query',
+            },
+            {
+              name: 'days',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', enum: [1, 2, 3], default: 1 },
+              description: 'Number of days of insights (1, 2, or 3)',
+            },
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Bypass cache and force an immediate upstream pull from Clarity API',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Normalized Clarity metrics with country and city distributions',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          websiteKey: { type: 'string', example: 'leaders_performance' },
+                          websiteName: { type: 'string', example: 'Leaders Performance' },
+                          websiteUrl: { type: 'string', example: 'https://leadersperformance.ae' },
+                          projectId: { type: 'string', example: 'wu4o652peo' },
+                          totalSessions: { type: 'number', example: 148 },
+                          distinctUsers: { type: 'number', example: 112 },
+                          pagesPerSession: { type: 'number', example: 2.4 },
+                          executiveDwellSeconds: { type: 'number', example: 245 },
+                          executiveDwellFormatted: { type: 'string', example: '4m 05s' },
+                          dwellBenchmarkMet: { type: 'boolean', example: true },
+                          rageClickRatio: { type: 'number', example: 0.008 },
+                          rageClickRatioFormatted: { type: 'string', example: '0.80%' },
+                          rageClickCount: { type: 'number', example: 1 },
+                          deadClickRatio: { type: 'number', example: 0.02 },
+                          deadClickCount: { type: 'number', example: 3 },
+                          quickBackRatio: { type: 'number', example: 0.015 },
+                          excessiveScrollRatio: { type: 'number', example: 0.04 },
+                          averageScrollDepth: { type: 'number', example: 84.5 },
+                          scriptErrorCount: { type: 'number', example: 0 },
+                          popularPages: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                url: { type: 'string', example: 'https://leadersperformance.ae/turn-pressure-into-performance' },
+                                visits: { type: 'number', example: 68 },
+                              },
+                            },
+                          },
+                          countries: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: 'United Arab Emirates' },
+                                sessions: { type: 'number', example: 88 },
+                              },
+                            },
+                          },
+                          cities: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: 'Dubai' },
+                                sessions: { type: 'number', example: 65 },
+                              },
+                            },
+                          },
+                          browsers: { type: 'array', items: { type: 'object' } },
+                          devices: { type: 'array', items: { type: 'object' } },
+                          operatingSystems: { type: 'array', items: { type: 'object' } },
+                          anomalyDetected: { type: 'boolean', example: false },
+                          ingestionLatencyMs: { type: 'number', example: 12 },
+                          cachedAt: { type: 'string', example: '2026-10-29T12:00:00.000Z' },
+                          isStale: { type: 'boolean', example: false },
+                          quotaStatus: {
+                            type: 'object',
+                            properties: {
+                              limitPerDay: { type: 'number', example: 25 },
+                              remaining: { type: 'number', example: 24 },
+                              status: { type: 'string', example: 'OK' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/clarity/refresh': {
+        post: {
+          summary: 'Trigger Controlled Refresh for Clarity Analytics',
+          description: 'Triggers a controlled upstream fetch from the Clarity Data Export API, invalidating cached telemetry for the specified website within the 25 req/day quota.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    website: {
+                      type: 'string',
+                      enum: ['leaders_performance', 'lionel_eersteling'],
+                      default: 'leaders_performance',
+                      description: 'Website key to refresh',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Fresh Clarity telemetry snapshot',
+            },
+          },
+        },
+      },
+
+      '/clarity/recordings': {
+        get: {
+          summary: 'Clarity Session Recordings with Playback URLs',
+          description: 'Returns available session recordings with direct verified playback links (`https://clarity.microsoft.com/projects/view/{projectId}/sessions/{sessionId}`) for embedding in Social CRM, complete with geographic country and city geolocation.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          parameters: [
+            {
+              name: 'website',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leaders_performance', 'lionel_eersteling'], default: 'leaders_performance' },
+              description: 'Target website key',
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', default: 20 },
+              description: 'Maximum number of recording sessions to return',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Array of session playback records with lead attribution and geographic locations',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            sessionId: { type: 'string', example: '4a9b2c1e-88f1' },
+                            playbackUrl: { type: 'string', example: 'https://clarity.microsoft.com/projects/view/wu4o652peo/sessions/4a9b2c1e-88f1' },
+                            dwellSeconds: { type: 'number', example: 285 },
+                            dwellTimeFormatted: { type: 'string', example: '4m 45s' },
+                            rageClicks: { type: 'number', example: 0 },
+                            rageClickRate: { type: 'number', example: 0.0 },
+                            deadClicks: { type: 'number', example: 0 },
+                            quickBack: { type: 'boolean', example: false },
+                            device: { type: 'string', example: 'Desktop (macOS / Chrome)' },
+                            country: { type: 'string', example: 'United Arab Emirates' },
+                            city: { type: 'string', example: 'Dubai' },
+                            landingPage: { type: 'string', example: 'https://leadersperformance.ae/strategic-briefings' },
+                            lead: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: 'Dr. Tariq Al-Husseini' },
+                                email: { type: 'string', example: 'tariq@alhusseini-holdings.ae' },
+                                form: { type: 'string', example: 'Founder Pressure Scan' },
+                              },
+                            },
+                            timestamp: { type: 'string', example: '2026-10-29T11:35:00.000Z' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/clarity/sessions': {
+        get: {
+          summary: 'Clarity Lead-Attributed Sessions (Social CRM Stream)',
+          description: 'Alias for `/clarity/recordings` specifically configured for Social CRM embed and playback player integration.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          parameters: [
+            {
+              name: 'website',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leaders_performance', 'lionel_eersteling'], default: 'leaders_performance' },
+            },
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', default: 20 },
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Array of session playback records with lead attribution and geographic locations',
+            },
+          },
+        },
+      },
+
+      '/clarity/status': {
+        get: {
+          summary: 'Clarity Website Connection & Quota Status',
+          description: 'Returns connection health, round-trip ping latency, last sync timestamp, and quota status for one or all Clarity websites.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          parameters: [
+            {
+              name: 'website',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leaders_performance', 'lionel_eersteling'] },
+              description: 'Optional website key. If omitted, returns statuses for all registered websites.',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Status object or array of status objects',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            websiteKey: { type: 'string', example: 'leaders_performance' },
+                            websiteName: { type: 'string', example: 'Leaders Performance' },
+                            websiteUrl: { type: 'string', example: 'https://leadersperformance.ae' },
+                            projectId: { type: 'string', example: 'wu4o652peo' },
+                            hasToken: { type: 'boolean', example: true },
+                            status: { type: 'string', example: 'HEALTHY' },
+                            latencyMs: { type: 'number', example: 120 },
+                            lastSync: { type: 'string', example: '2026-10-29T11:45:00.000Z' },
+                            quotaStatus: { type: 'string', example: 'Within standard daily quota (25 requests/day)' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/clarity/webhook': {
+        post: {
+          summary: 'Ingest Clarity Session & Telemetry Events',
+          description: 'Ingests external Clarity session payloads or telemetry events, calculates rage clicks and UX friction, associates anonymous session IDs with attribution visits, and triggers WARNING alerts if rage-click ratio exceeds 1.5%.',
+          tags: ['Microsoft Clarity UX & Telemetry'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessionId: { type: 'string', example: 'cls_session_94819' },
+                    website: { type: 'string', enum: ['leaders_performance', 'lionel_eersteling'], default: 'leaders_performance' },
+                    dwellSeconds: { type: 'number', example: 240 },
+                    totalClicks: { type: 'number', example: 50 },
+                    rageClicks: { type: 'number', example: 3 },
+                    deadClicks: { type: 'number', example: 1 },
+                    quickBack: { type: 'boolean', example: false },
+                    landingPage: { type: 'string', example: 'https://leadersperformance.ae/turn-pressure-into-performance' },
+                    email: { type: 'string', example: 'executive@enterprise.com' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Telemetry ingested successfully with anomaly status and playback URL',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          ingested: { type: 'boolean', example: true },
+                          anomalyDetected: { type: 'boolean', example: false },
+                          snapshotId: { type: 'string', example: 'cly1234567890' },
+                          sessionId: { type: 'string', example: 'cls_session_94819' },
+                          playbackUrl: { type: 'string', example: 'https://clarity.microsoft.com/projects/view/wu4o652peo/sessions/cls_session_94819' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
         },
