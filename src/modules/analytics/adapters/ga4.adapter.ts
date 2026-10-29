@@ -6,6 +6,8 @@ import {
   ReportsSnapshotData,
   PageScreenRow,
   DimensionMetricRow,
+  CityMetricRow,
+  CountryHierarchyRow,
 } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
@@ -166,7 +168,7 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     try {
-      const [summaryRes, pagesRes, usersSourceRes, sessionsSourceRes, countriesRes, citiesRes] = await Promise.all([
+      const [summaryRes, pagesRes, usersSourceRes, sessionsSourceRes, countriesRes, citiesRes, countryCityRes] = await Promise.all([
         this.client.runReport({
           property: `properties/${this.propertyId}`,
           dateRanges: [{ startDate, endDate }],
@@ -222,6 +224,14 @@ export class Ga4Adapter implements IGa4Adapter {
           orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
           limit,
         }),
+        this.client.runReport({
+          property: `properties/${this.propertyId}`,
+          dateRanges: [{ startDate, endDate }],
+          dimensions: [{ name: 'country' }, { name: 'city' }],
+          metrics: [{ name: 'activeUsers' }],
+          orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+          limit: 100,
+        }),
       ]);
 
       const summaryRow = summaryRes[0].rows?.[0];
@@ -259,6 +269,28 @@ export class Ga4Adapter implements IGa4Adapter {
         value: parseInt(r.metricValues?.[0]?.value || '0', 10),
       }));
 
+      // Build hierarchical countries -> cities structure
+      const countryMap = new Map<string, { country: string; activeUsers: number; cities: CityMetricRow[] }>();
+      (countryCityRes[0].rows || []).forEach((r) => {
+        const country = r.dimensionValues?.[0]?.value || 'Unknown';
+        const city = r.dimensionValues?.[1]?.value || '(not set)';
+        const count = parseInt(r.metricValues?.[0]?.value || '0', 10);
+
+        if (!countryMap.has(country)) {
+          countryMap.set(country, { country, activeUsers: 0, cities: [] });
+        }
+        const cEntry = countryMap.get(country)!;
+        cEntry.activeUsers += count;
+        cEntry.cities.push({ city, activeUsers: count });
+      });
+
+      const geographicHierarchy: CountryHierarchyRow[] = Array.from(countryMap.values())
+        .map((c) => {
+          c.cities.sort((a, b) => b.activeUsers - a.activeUsers);
+          return c;
+        })
+        .sort((a, b) => b.activeUsers - a.activeUsers);
+
       return {
         summary: {
           activeUsers,
@@ -272,6 +304,7 @@ export class Ga4Adapter implements IGa4Adapter {
         sessionsBySourceMedium,
         usersByCountry,
         usersByCity,
+        geographicHierarchy,
         reportingPeriod: {
           startDate,
           endDate,
@@ -325,6 +358,52 @@ export class Ga4Adapter implements IGa4Adapter {
         { name: 'Des Moines', value: 7 },
         { name: 'Rotterdam', value: 5 },
         { name: 'Abu Dhabi', value: 3 },
+      ],
+      geographicHierarchy: [
+        {
+          country: 'Pakistan',
+          activeUsers: 67,
+          cities: [
+            { city: 'Lahore', activeUsers: 63 },
+            { city: '(not set)', activeUsers: 4 },
+          ],
+        },
+        {
+          country: 'United States',
+          activeUsers: 31,
+          cities: [
+            { city: '(not set)', activeUsers: 9 },
+            { city: 'Des Moines', activeUsers: 7 },
+            { city: 'Springfield', activeUsers: 5 },
+            { city: 'Flint Hill', activeUsers: 3 },
+            { city: 'Fort Worth', activeUsers: 3 },
+          ],
+        },
+        {
+          country: 'United Arab Emirates',
+          activeUsers: 15,
+          cities: [
+            { city: 'Dubai', activeUsers: 12 },
+            { city: 'Abu Dhabi', activeUsers: 3 },
+          ],
+        },
+        {
+          country: 'Netherlands',
+          activeUsers: 10,
+          cities: [
+            { city: 'Rotterdam', activeUsers: 5 },
+            { city: 'Amsterdam', activeUsers: 3 },
+            { city: '(not set)', activeUsers: 2 },
+          ],
+        },
+        {
+          country: 'Egypt',
+          activeUsers: 5,
+          cities: [
+            { city: 'Cairo', activeUsers: 3 },
+            { city: '(not set)', activeUsers: 2 },
+          ],
+        },
       ],
       reportingPeriod: {
         startDate,

@@ -827,6 +827,27 @@ const swaggerOptions = {
                               },
                             },
                           },
+                          geographicHierarchy: {
+                            type: 'array',
+                            description: 'Nested location hierarchy (Country -> Cities) with active user breakdowns',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                country: { type: 'string', example: 'Pakistan' },
+                                activeUsers: { type: 'number', example: 67 },
+                                cities: {
+                                  type: 'array',
+                                  items: {
+                                    type: 'object',
+                                    properties: {
+                                      city: { type: 'string', example: 'Lahore' },
+                                      activeUsers: { type: 'number', example: 63 },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
                           reportingPeriod: {
                             type: 'object',
                             properties: {

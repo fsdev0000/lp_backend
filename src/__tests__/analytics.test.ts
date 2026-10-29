@@ -164,6 +164,19 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(Array.isArray(res.body.data.usersByCountry)).toBe(true);
     expect(res.body.data).toHaveProperty('usersByCity');
     expect(Array.isArray(res.body.data.usersByCity)).toBe(true);
+    expect(res.body.data).toHaveProperty('geographicHierarchy');
+    expect(Array.isArray(res.body.data.geographicHierarchy)).toBe(true);
+    if (res.body.data.geographicHierarchy.length > 0) {
+      const topGeo = res.body.data.geographicHierarchy[0];
+      expect(topGeo).toHaveProperty('country');
+      expect(topGeo).toHaveProperty('activeUsers');
+      expect(topGeo).toHaveProperty('cities');
+      expect(Array.isArray(topGeo.cities)).toBe(true);
+      if (topGeo.cities.length > 0) {
+        expect(topGeo.cities[0]).toHaveProperty('city');
+        expect(topGeo.cities[0]).toHaveProperty('activeUsers');
+      }
+    }
   });
 
   it('GET /api/v1/analytics/clarity/sessions returns session recordings with direct playback URLs for Social CRM', async () => {

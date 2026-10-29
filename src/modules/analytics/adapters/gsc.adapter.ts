@@ -6,6 +6,12 @@ import { LiveErrorBoundary } from './liveErrorBoundary';
 import path from 'path';
 import fs from 'fs';
 
+// Polyfill global.window with globalThis so Gaxios uses Node's native fetch
+// rather than attempting an experimental-vm dynamic import of node-fetch in Jest/Node environments.
+if (typeof (global as any).window === 'undefined') {
+  (global as any).window = globalThis;
+}
+
 export class GscAdapter implements IGscAdapter {
   private searchconsole: any = null;
   private defaultSiteUrl: string;
@@ -138,7 +144,7 @@ export class GscAdapter implements IGscAdapter {
             endDate,
           },
         }).catch((err: any) => {
-          console.warn('[GscAdapter] Failed to query totals:', err.message);
+          console.warn('[GscAdapter] Failed to query totals:', err.message || err);
           return { data: { rows: [] } };
         }),
         this.searchconsole.searchanalytics.query({
@@ -150,7 +156,7 @@ export class GscAdapter implements IGscAdapter {
             rowLimit: limit,
           },
         }).catch((err: any) => {
-          console.warn('[GscAdapter] Failed to query search queries:', err.message);
+          console.warn('[GscAdapter] Failed to query search queries:', err.message || err);
           return { data: { rows: [] } };
         }),
       ]);

@@ -97,6 +97,17 @@ export interface DimensionMetricRow {
   value: number;
 }
 
+export interface CityMetricRow {
+  city: string;
+  activeUsers: number;
+}
+
+export interface CountryHierarchyRow {
+  country: string;
+  activeUsers: number;
+  cities: CityMetricRow[];
+}
+
 export interface ReportsSnapshotData {
   summary: {
     activeUsers: number;
@@ -110,6 +121,7 @@ export interface ReportsSnapshotData {
   sessionsBySourceMedium: DimensionMetricRow[];
   usersByCountry: DimensionMetricRow[];
   usersByCity: DimensionMetricRow[];
+  geographicHierarchy: CountryHierarchyRow[];
   reportingPeriod: {
     startDate: string;
     endDate: string;
