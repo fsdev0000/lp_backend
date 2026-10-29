@@ -866,6 +866,28 @@ const swaggerOptions = {
         },
       },
 
+      '/analytics/social/youtube': {
+        get: {
+          summary: 'Live YouTube Channel & Video Analytics',
+          description: 'Fetches live YouTube channel telemetry (subscribers, views, video count), calculates engagement rate, and retrieves recent uploads from the official YouTube Data API v3.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Force cache bypass and fetch fresh data from YouTube Data API v3',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Live YouTube channel statistics and recent video uploads',
+            },
+          },
+        },
+      },
+
       '/clarity/analytics': {
         get: {
           summary: 'Microsoft Clarity Live & Cached UX Analytics',

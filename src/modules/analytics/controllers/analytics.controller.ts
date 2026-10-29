@@ -210,5 +210,19 @@ export class AnalyticsController {
       });
     }
   };
+
+  public getYouTubeAnalytics = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const refresh = req.query.refresh === 'true';
+      const data = await this.service.getYouTubeAnalytics(refresh);
+      res.status(200).json({ success: true, data });
+    } catch (error: any) {
+      console.error('[AnalyticsController] getYouTubeAnalytics failed:', error);
+      res.status(502).json({
+        success: false,
+        error: error?.message || 'Failed to retrieve YouTube analytics',
+      });
+    }
+  };
 }
 

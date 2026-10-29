@@ -247,3 +247,36 @@ export interface ISovereignAdapter {
   getAttributedPipelineValue(dateRange: string): Promise<number>;
   getRecentFounderInbound(limit?: number): Promise<any[]>;
 }
+
+export interface YouTubeVideoRow {
+  videoId: string;
+  title: string;
+  description: string;
+  thumbnail: string;
+  publishedAt: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  watchUrl: string;
+}
+
+export interface YouTubeAnalyticsData {
+  channelId: string;
+  title: string;
+  customUrl: string;
+  description: string;
+  thumbnail: string;
+  subscriberCount: number;
+  viewCount: number;
+  videoCount: number;
+  engagementRate: number;
+  engagementRateFormatted: string;
+  recentVideos: YouTubeVideoRow[];
+  cachedAt: string;
+  isCached: boolean;
+}
+
+export interface IYouTubeAdapter {
+  getChannelAnalytics(forceRefresh?: boolean): Promise<YouTubeAnalyticsData>;
+  ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
+}

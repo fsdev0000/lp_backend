@@ -69,4 +69,11 @@ analyticsRoutes.get('/clarity/status', controller.getClarityStatus);
  */
 analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
 
+/**
+ * @route GET /api/v1/analytics/social/youtube
+ * @desc Retrieve live YouTube Data API channel metrics, subscribers, engagement rate, and recent videos
+ */
+analyticsRoutes.get('/social/youtube', controller.getYouTubeAnalytics);
+analyticsRoutes.get('/youtube', controller.getYouTubeAnalytics);
+
 

@@ -57,6 +57,20 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(linkedin).toHaveProperty('pipelineValueEur');
   });
 
+  it('GET /api/v1/analytics/social/youtube returns live YouTube channel stats and recent videos', async () => {
+    const res = await request(app).get('/api/v1/analytics/social/youtube');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveProperty('channelId');
+    expect(res.body.data).toHaveProperty('title');
+    expect(res.body.data).toHaveProperty('subscriberCount');
+    expect(res.body.data).toHaveProperty('viewCount');
+    expect(res.body.data).toHaveProperty('videoCount');
+    expect(res.body.data).toHaveProperty('engagementRate');
+    expect(res.body.data).toHaveProperty('recentVideos');
+    expect(Array.isArray(res.body.data.recentVideos)).toBe(true);
+  });
+
   it('GET /api/v1/analytics/keywords returns top search queries with SERP rank and genuine totals', async () => {
     const res = await request(app).get('/api/v1/analytics/keywords?domain=leadersperformance.ae&range=7d&limit=100');
     expect(res.status).toBe(200);
