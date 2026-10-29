@@ -5,3 +5,6 @@ dist/
 *.log
 private/*.json
 private/*.key
+
+# macOS Finder metadata
+.DS_Store
