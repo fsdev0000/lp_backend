@@ -230,9 +230,15 @@ import { syncDefaultReferralsToDb } from './services/masterclassReferralService'
 import { ensureAudiobookFromSupabase } from './services/audiobookService';
 import { initAppointmentReminderWorker } from './services/reminderService';
 
+import { validateAnalyticsCredentials } from './modules/analytics/adapters/credentialValidator';
+import { GscIngestionJob } from './modules/analytics/jobs/gscIngestionJob';
+
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  const creds = validateAnalyticsCredentials();
+  console.log(`[Startup] Analytics credentials validated on boot: GA4 (${creds.ga4.isConfigured ? 'OK' : 'MISSING'}), GSC (${creds.gsc.isConfigured ? 'OK' : 'MISSING'}), Clarity (${creds.clarity.isConfigured ? 'OK' : 'DECOUPLED'}), GHL (${creds.ghl.isConfigured ? 'OK' : 'WEBHOOK_ONLY'})`);
   RealtimePollingJob.start();
+  GscIngestionJob.start();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
   initAppointmentReminderWorker();

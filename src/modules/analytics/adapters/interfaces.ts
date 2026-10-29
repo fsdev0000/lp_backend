@@ -84,6 +84,10 @@ export interface IntegrationHealthStatus {
   message?: string;
 }
 
+export interface IIntegrationHealth {
+  pingEndpoint(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; lastSync: Date }>;
+}
+
 export interface PageScreenRow {
   pageTitle: string;
   views: number;

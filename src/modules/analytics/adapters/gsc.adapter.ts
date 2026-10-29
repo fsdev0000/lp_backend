@@ -1,10 +1,13 @@
 import { google } from 'googleapis';
+import { PrismaClient } from '@prisma/client';
 import { IGscAdapter, GscQueryRow, GscTotals, GscKeywordsResponse } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
 
 import path from 'path';
 import fs from 'fs';
+
+const prisma = new PrismaClient();
 
 // Polyfill global.window with globalThis so Gaxios uses Node's native fetch
 // rather than attempting an experimental-vm dynamic import of node-fetch in Jest/Node environments.
@@ -202,6 +205,80 @@ export class GscAdapter implements IGscAdapter {
         endDate,
         totalQueries: 0,
       };
+    }
+  }
+
+  /**
+   * 4.1 & 4.2: Ingests Search Console queries with dimensions ['query', 'page'],
+   * calculates SERP rank rounded to 1 decimal place, and upserts into SearchConsoleKeyword table.
+   */
+  public async syncKeywords(days = 30, limit = 50, domain?: string): Promise<{ upserted: number; siteUrl: string }> {
+    const siteUrl = this.resolveSiteUrl(domain);
+    const { startDate, endDate } = this.resolveDateRange(days);
+
+    if (!this.searchconsole) {
+      console.warn('[GscAdapter] Cannot sync keywords: client not initialized');
+      return { upserted: 0, siteUrl };
+    }
+
+    try {
+      const queryRes = await this.searchconsole.searchanalytics.query({
+        siteUrl,
+        requestBody: {
+          startDate,
+          endDate,
+          dimensions: ['query', 'page'],
+          rowLimit: limit,
+        },
+      });
+
+      const rows = queryRes.data?.rows || [];
+      let upserted = 0;
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      for (const row of rows) {
+        const query = row.keys?.[0] || 'unknown';
+        const targetPage = row.keys?.[1] || null;
+        const impressions = row.impressions || 0;
+        const clicks = row.clicks || 0;
+        const ctr = parseFloat(Number(row.ctr || 0).toFixed(4));
+        const position = parseFloat(Number(row.position || 0).toFixed(1));
+
+        await prisma.searchConsoleKeyword.upsert({
+          where: {
+            query_snapshotDate_country: {
+              query,
+              snapshotDate: today,
+              country: 'GLOBAL',
+            },
+          },
+          create: {
+            query,
+            targetPage,
+            impressions,
+            clicks,
+            ctr,
+            position,
+            country: 'GLOBAL',
+            snapshotDate: today,
+          },
+          update: {
+            targetPage,
+            impressions,
+            clicks,
+            ctr,
+            position,
+          },
+        });
+        upserted++;
+      }
+
+      console.log(`[GscAdapter] Successfully synchronized ${upserted} keywords for ${siteUrl}`);
+      return { upserted, siteUrl };
+    } catch (error: any) {
+      await LiveErrorBoundary.logUpstreamError('GSC', 'syncKeywords', error);
+      return { upserted: 0, siteUrl };
     }
   }
 
