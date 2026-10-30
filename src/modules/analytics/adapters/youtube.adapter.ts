@@ -511,4 +511,17 @@ export class YouTubeAdapter implements IYouTubeAdapter {
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }> {
     const start = Date.now();
     if (!this.apiKey || !this.channelId) {
-      return { status: 'DEGRADED', latencyMs:
+      return { status: 'DEGRADED', latencyMs: Date.now() - start };
+    }
+    try {
+      const url = `https://www.googleapis.com/youtube/v3/channels?part=id&id=${this.channelId}&key=${this.apiKey}`;
+      const res = await fetch(url);
+      return {
+        status: res.ok ? 'HEALTHY' : 'DOWN',
+        latencyMs: Date.now() - start,
+      };
+    } catch {
+      return { status: 'DOWN', latencyMs: Date.now() - start };
+    }
+  }
+}
