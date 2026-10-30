@@ -32,9 +32,16 @@ export function swaggerBasicAuth(req: Request, res: Response, next: NextFunction
     const password = credentials.substring(separatorIndex + 1);
 
     const expectedUser = process.env.SWAGGER_USER || 'admin';
-    const expectedPassword = process.env.SWAGGER_PASSWORD || 'Leaders2026!';
+    const expectedPassword = process.env.SWAGGER_PASSWORD;
 
-    if (username === expectedUser && password === expectedPassword) {
+    if (!expectedPassword && process.env.NODE_ENV === 'production') {
+      res.setHeader('WWW-Authenticate', 'Basic realm="Leaders Performance API Documentation"');
+      return res.status(503).send('API documentation disabled: SWAGGER_PASSWORD must be configured in environment.');
+    }
+
+    const effectivePassword = expectedPassword || 'Leaders2026!';
+
+    if (username === expectedUser && password === effectivePassword) {
       return next();
     }
 

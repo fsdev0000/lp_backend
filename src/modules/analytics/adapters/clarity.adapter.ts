@@ -60,7 +60,7 @@ export class ClarityAdapter implements IClarityAdapter {
   public async getUxTelemetryMetrics(websiteKey = 'leaders_performance'): Promise<ClarityUxMetrics> {
     const analytics = await this.getLiveAnalytics(websiteKey);
     return {
-      activeTelemetryStreams: analytics.totalSessions || 128,
+      activeTelemetryStreams: analytics.totalSessions || 0,
       avgDwellSeconds: analytics.executiveDwellSeconds || 258,
       dwellTimeFormatted: analytics.executiveDwellFormatted || '4m 18s',
       rageClickRate: analytics.rageClickRatio,

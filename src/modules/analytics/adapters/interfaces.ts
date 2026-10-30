@@ -139,7 +139,7 @@ export interface ReportsSnapshotData {
 export interface IGa4Adapter {
   getRealtimeActiveUsers(): Promise<{ activeUsers: number; byCountry: Record<string, number> }>;
   getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
-  getCampaignYield(dateRange: string): Promise<CampaignYieldRow[]>;
+  getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }

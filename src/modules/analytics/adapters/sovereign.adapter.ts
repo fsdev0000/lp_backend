@@ -10,13 +10,15 @@ export class SovereignAdapter implements ISovereignAdapter {
     const start = new Date(`${startDate}T00:00:00.000Z`);
     const end = new Date(`${resolvedEnd}T23:59:59.999Z`);
 
+    const clean = domain ? domain.toLowerCase().trim() : undefined;
+    const isLe = clean?.includes('lioneleersteling');
+
     const visitWhere: any = {
       email: { not: null },
       createdAt: { gte: start, lte: end },
     };
 
-    if (domain) {
-      const clean = domain.toLowerCase().trim();
+    if (clean) {
       visitWhere.landingPage = { contains: clean, mode: 'insensitive' };
     }
 
@@ -24,11 +26,14 @@ export class SovereignAdapter implements ISovereignAdapter {
       prisma.attributionVisit.count({
         where: visitWhere,
       }),
-      prisma.pressureScanSubmission.count({
-        where: {
-          createdAt: { gte: start, lte: end },
-        },
-      }),
+      // Pressure scans belong strictly to Leaders Performance
+      isLe
+        ? 0
+        : prisma.pressureScanSubmission.count({
+            where: {
+              createdAt: { gte: start, lte: end },
+            },
+          }),
     ]);
 
     return visitCount + scanCount;
@@ -39,24 +44,23 @@ export class SovereignAdapter implements ISovereignAdapter {
     const start = new Date(`${startDate}T00:00:00.000Z`);
     const end = new Date(`${resolvedEnd}T23:59:59.999Z`);
 
-    const [enrollments, scans] = await Promise.all([
-      prisma.masterclassEnrollment.findMany({
-        where: {
-          createdAt: { gte: start, lte: end },
-        },
-        select: { amount: true, paymentStatus: true },
-      }),
-      prisma.pressureScanSubmission.count({
-        where: {
-          createdAt: { gte: start, lte: end },
-        },
-      }),
-    ]);
+    const clean = domain ? domain.toLowerCase().trim() : undefined;
+    const isLe = clean?.includes('lioneleersteling');
 
-    let value = enrollments.reduce((acc, curr) => acc + (curr.amount || 75000), 0);
-    value += scans * 25000;
+    // Only count verified enrolled deals; do not fabricate €25,000 per diagnostic scan
+    const enrollments = await prisma.masterclassEnrollment.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+      },
+      select: { amount: true, paymentStatus: true },
+    });
 
-    return value;
+    if (isLe) {
+      // Lionel Eersteling workspace has its own direct advisory pipeline
+      return 0;
+    }
+
+    return enrollments.reduce((acc, curr) => acc + (curr.amount || 0), 0);
   }
 
   public async getRecentFounderInbound(
@@ -65,6 +69,39 @@ export class SovereignAdapter implements ISovereignAdapter {
     endDate?: string,
     domain?: string
   ): Promise<any[]> {
+    const cleanDomain = domain ? domain.toLowerCase().trim() : undefined;
+    const isLe = cleanDomain?.includes('lioneleersteling');
+
+    if (isLe) {
+      // Return inquiries specifically submitted on Lionel Eersteling workspace
+      const visits = await prisma.attributionVisit.findMany({
+        where: {
+          email: { not: null },
+          ...(startDate && endDate
+            ? {
+                createdAt: {
+                  gte: new Date(`${startDate}T00:00:00.000Z`),
+                  lte: new Date(`${endDate}T23:59:59.999Z`),
+                },
+              }
+            : {}),
+          landingPage: { contains: cleanDomain, mode: 'insensitive' },
+        },
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return visits.map((v) => ({
+        id: v.id,
+        name: v.leadName || (v.email ? v.email.split('@')[0] : 'Executive Inquiry'),
+        company: v.email ? v.email.split('@')[1] : 'Private Office',
+        revenueTier: '€5M–€20M ARR',
+        leadScore: 85,
+        status: 'NEW',
+        timestamp: v.createdAt,
+      }));
+    }
+
     const where: any = {};
     if (startDate && endDate) {
       where.createdAt = {
@@ -142,12 +179,20 @@ export class SovereignAdapter implements ISovereignAdapter {
     const start = new Date(`${startDate}T00:00:00.000Z`);
     const end = new Date(`${endDate}T23:59:59.999Z`);
 
-    // Fetch visits with utmSource in window
+    const cleanDomain = domain ? domain.toLowerCase().trim() : undefined;
+
+    const visitWhere: any = {
+      createdAt: { gte: start, lte: end },
+      utmSource: { not: null },
+    };
+
+    if (cleanDomain) {
+      visitWhere.landingPage = { contains: cleanDomain, mode: 'insensitive' };
+    }
+
+    // Fetch visits with utmSource in window and matching domain
     const visits = await prisma.attributionVisit.findMany({
-      where: {
-        createdAt: { gte: start, lte: end },
-        utmSource: { not: null },
-      },
+      where: visitWhere,
       select: {
         utmSource: true,
         email: true,
@@ -160,7 +205,8 @@ export class SovereignAdapter implements ISovereignAdapter {
         if (src.includes(ch)) {
           if (v.email) {
             result[ch].leads += 1;
-            result[ch].pipelineValueEur += 25000;
+            // Pipeline value reflects actual deals, not an artificial €25k multiplier
+            result[ch].pipelineValueEur += 0;
           }
         }
       }
@@ -171,11 +217,17 @@ export class SovereignAdapter implements ISovereignAdapter {
       const prevStart = new Date(`${prevStartDate}T00:00:00.000Z`);
       const prevEnd = new Date(`${prevEndDate}T23:59:59.999Z`);
 
+      const prevVisitWhere: any = {
+        createdAt: { gte: prevStart, lte: prevEnd },
+        utmSource: { not: null },
+      };
+
+      if (cleanDomain) {
+        prevVisitWhere.landingPage = { contains: cleanDomain, mode: 'insensitive' };
+      }
+
       const prevVisits = await prisma.attributionVisit.findMany({
-        where: {
-          createdAt: { gte: prevStart, lte: prevEnd },
-          utmSource: { not: null },
-        },
+        where: prevVisitWhere,
         select: {
           utmSource: true,
           email: true,
@@ -188,7 +240,7 @@ export class SovereignAdapter implements ISovereignAdapter {
           if (src.includes(ch)) {
             if (v.email) {
               result[ch].prevLeads += 1;
-              result[ch].prevPipelineValueEur += 25000;
+              result[ch].prevPipelineValueEur += 0;
             }
           }
         }

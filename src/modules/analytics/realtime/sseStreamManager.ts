@@ -4,7 +4,7 @@ export class SseStreamManager {
   private static instance: SseStreamManager;
   private clients: Set<Response> = new Set();
   private heartbeatInterval: NodeJS.Timeout | null = null;
-  private lastActiveVisitorCount = 128;
+  private lastActiveVisitorCount = 0;
 
   private constructor() {
     this.startHeartbeat();

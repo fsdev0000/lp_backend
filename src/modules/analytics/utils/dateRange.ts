@@ -95,19 +95,16 @@ export function resolveWindow(
  * Returns null if range is 'all' (no previous window) or previous is null/undefined.
  */
 export function calcGrowth(current: number, previous: number | null | undefined): number | null {
-  if (previous === null || previous === undefined) return null;
-  if (previous === 0) {
-    return current > 0 ? 100.0 : 0.0;
-  }
+  if (previous === null || previous === undefined || previous === 0) return null;
   const growth = ((current - previous) / previous) * 100;
   return parseFloat(growth.toFixed(1));
 }
 
 /**
- * Formats trend as formatted string (+X.X% or -X.X% or null for range=all).
+ * Formats trend as formatted string (+X.X% or -X.X% or null for range=all or zero baseline).
  */
 export function calcTrend(current: number, previous: number | null | undefined): string | null {
-  if (previous === null || previous === undefined) return null;
+  if (previous === null || previous === undefined || previous === 0) return null;
   const growth = calcGrowth(current, previous);
   if (growth === null) return null;
   const sign = growth > 0 ? '+' : '';

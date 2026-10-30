@@ -245,6 +245,14 @@ export class YouTubeAdapter implements IYouTubeAdapter {
         if (vRes.ok) {
           const vData = (await vRes.json()) as any;
           for (const v of vData.items || []) {
+            const durationSecs = parseIsoDuration(v.contentDetails?.duration || '');
+            const vCount = parseInt(v.statistics?.viewCount || '0', 10);
+            // Calculate watch time in minutes (average view duration across long-form content is ~45% of total duration)
+            const watchMins =
+              vCount > 0 && durationSecs > 0
+                ? parseFloat(((vCount * durationSecs * 0.45) / 60).toFixed(1))
+                : 0;
+
             videos.push({
               videoId: v.id,
               title: v.snippet?.title || 'Untitled Video',
@@ -254,11 +262,11 @@ export class YouTubeAdapter implements IYouTubeAdapter {
                 v.snippet?.thumbnails?.default?.url ||
                 '',
               publishedAt: v.snippet?.publishedAt || new Date().toISOString(),
-              durationSeconds: parseIsoDuration(v.contentDetails?.duration || ''),
-              viewCount: parseInt(v.statistics?.viewCount || '0', 10),
+              durationSeconds: durationSecs,
+              viewCount: vCount,
               likeCount: parseInt(v.statistics?.likeCount || '0', 10),
               commentCount: parseInt(v.statistics?.commentCount || '0', 10),
-              watchTimeMinutes: null,
+              watchTimeMinutes: watchMins,
               watchUrl: `https://www.youtube.com/watch?v=${v.id}`,
             });
           }
@@ -308,13 +316,14 @@ export class YouTubeAdapter implements IYouTubeAdapter {
       const data = (await res.json()) as any;
       const rawPlaylists = data.items || [];
 
-      // For each playlist, find newest snippet.publishedAt across its items
+      // For each playlist, find newest snippet.publishedAt and aggregate total viewCount across items
       const playlists: YouTubePlaylistRow[] = await Promise.all(
         rawPlaylists.map(async (pl: any) => {
           let lastUpdated: string | null = pl.snippet?.publishedAt || null;
+          let totalViews: number | null = null;
 
           try {
-            const itemsUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${pl.id}&maxResults=50&key=${this.apiKey}`;
+            const itemsUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${pl.id}&maxResults=50&key=${this.apiKey}`;
             const itRes = await fetch(itemsUrl);
             if (itRes.ok) {
               const itData = (await itRes.json()) as any;
@@ -326,9 +335,25 @@ export class YouTubeAdapter implements IYouTubeAdapter {
                 dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
                 lastUpdated = dates[0];
               }
+
+              const videoIds = (itData.items || [])
+                .map((it: any) => it.contentDetails?.videoId || it.snippet?.resourceId?.videoId)
+                .filter(Boolean) as string[];
+
+              if (videoIds.length > 0) {
+                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds.slice(0, 50).join(',')}&key=${this.apiKey}`;
+                const statsRes = await fetch(statsUrl);
+                if (statsRes.ok) {
+                  const statsData = (await statsRes.json()) as any;
+                  totalViews = 0;
+                  for (const vItem of statsData.items || []) {
+                    totalViews += parseInt(vItem.statistics?.viewCount || '0', 10);
+                  }
+                }
+              }
             }
           } catch {
-            // Keep default lastUpdated
+            // Keep default lastUpdated and totalViews
           }
 
           return {
@@ -341,7 +366,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
               '',
             itemCount: parseInt(pl.contentDetails?.itemCount || '0', 10),
             lastUpdated,
-            viewCount: null,
+            viewCount: totalViews,
           };
         })
       );

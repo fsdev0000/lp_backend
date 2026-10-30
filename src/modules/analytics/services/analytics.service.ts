@@ -38,7 +38,7 @@ export class AnalyticsService {
     const [trafficHistory, topCampaigns, highIntentLeads, pipelineValueEur, recentLeads, realtime] =
       await Promise.all([
         this.ga4.getTrafficReport(win.startDate, win.endDate, domain),
-        this.ga4.getCampaignYield(win.range),
+        this.ga4.getCampaignYield(win.range, domain),
         this.sovereign.getAttributedLeadsCount(win.startDate, win.endDate, domain),
         this.sovereign.getAttributedPipelineValue(win.startDate, win.endDate, domain),
         this.sovereign.getRecentFounderInbound(4, win.startDate, win.endDate, domain),
@@ -69,11 +69,14 @@ export class AnalyticsService {
     const audienceGrowth = win.range === 'all' ? null : calcGrowth(totalAudience, prevAudience);
     const leadsGrowth = win.range === 'all' ? null : calcGrowth(highIntentLeads, prevLeads);
 
+    // Capped at 100% max to prevent irrational conversion rates when inquiries exceed recorded web sessions
     const avgConversionRate =
-      totalAudience > 0 ? parseFloat(((highIntentLeads / totalAudience) * 100).toFixed(2)) : 0.0;
+      totalAudience > 0
+        ? parseFloat(Math.min(100, (highIntentLeads / totalAudience) * 100).toFixed(2))
+        : 0.0;
     const prevConvRate =
       prevAudience && prevAudience > 0 && prevLeads !== null
-        ? (prevLeads / prevAudience) * 100
+        ? Math.min(100, (prevLeads / prevAudience) * 100)
         : null;
     const conversionGrowth = win.range === 'all' ? null : calcGrowth(avgConversionRate, prevConvRate);
 
@@ -151,7 +154,7 @@ export class AnalyticsService {
       ytConnected = false;
     }
 
-    // 3. Assemble channel rows
+    // 3. Assemble channel rows - trend evaluates clean web traffic change against previous period
     const ytWebsiteVisitors = ga4Traffic.byChannel.youtube?.activeUsers ?? 0;
     const ytLeads = sovAttribution.youtube?.leads ?? 0;
     const ytPipeline = sovAttribution.youtube?.pipelineValueEur ?? 0;
@@ -159,7 +162,7 @@ export class AnalyticsService {
     const ytTrend =
       win.range === 'all'
         ? null
-        : calcTrend(ytWebsiteVisitors + ytLeads, ytPrevTraffic + (sovAttribution.youtube?.prevLeads ?? 0));
+        : calcTrend(ytWebsiteVisitors, ytPrevTraffic);
 
     const liWebsiteVisitors = ga4Traffic.byChannel.linkedin?.activeUsers ?? 0;
     const liLeads = sovAttribution.linkedin?.leads ?? 0;
@@ -168,7 +171,7 @@ export class AnalyticsService {
     const liTrend =
       win.range === 'all'
         ? null
-        : calcTrend(liWebsiteVisitors + liLeads, liPrevTraffic + (sovAttribution.linkedin?.prevLeads ?? 0));
+        : calcTrend(liWebsiteVisitors, liPrevTraffic);
 
     const igWebsiteVisitors = ga4Traffic.byChannel.instagram?.activeUsers ?? 0;
     const igLeads = sovAttribution.instagram?.leads ?? 0;
@@ -177,7 +180,7 @@ export class AnalyticsService {
     const igTrend =
       win.range === 'all'
         ? null
-        : calcTrend(igWebsiteVisitors + igLeads, igPrevTraffic + (sovAttribution.instagram?.prevLeads ?? 0));
+        : calcTrend(igWebsiteVisitors, igPrevTraffic);
 
     const ttWebsiteVisitors = ga4Traffic.byChannel.tiktok?.activeUsers ?? 0;
     const ttLeads = sovAttribution.tiktok?.leads ?? 0;
@@ -186,7 +189,7 @@ export class AnalyticsService {
     const ttTrend =
       win.range === 'all'
         ? null
-        : calcTrend(ttWebsiteVisitors + ttLeads, ttPrevTraffic + (sovAttribution.tiktok?.prevLeads ?? 0));
+        : calcTrend(ttWebsiteVisitors, ttPrevTraffic);
 
     return [
       {
