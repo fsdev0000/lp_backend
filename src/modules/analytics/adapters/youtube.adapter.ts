@@ -29,6 +29,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
   private static cache: YouTubeCacheEntry | null = null;
   private static videosCache: { [type: string]: { data: YouTubeVideoDetailRow[]; cachedAt: number } } = {};
   private static playlistsCache: { data: YouTubePlaylistRow[]; cachedAt: number } | null = null;
+  private static oauthAccessToken: { token: string; expiresAt: number } | null = null;
   private readonly cacheTtlMs = 60 * 60 * 1000; // 1-hour cache to conserve 10,000 units/day quota
 
   constructor() {
@@ -235,6 +236,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
       } while (nextPageToken);
 
       // Batch fetch video details in chunks of 50
+      const watchTimeMap = await this.fetchVideoWatchTimeMap();
       const videos: YouTubeVideoDetailRow[] = [];
       const chunkSize = 50;
       for (let i = 0; i < allVideoIds.length; i += chunkSize) {
@@ -247,11 +249,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
           for (const v of vData.items || []) {
             const durationSecs = parseIsoDuration(v.contentDetails?.duration || '');
             const vCount = parseInt(v.statistics?.viewCount || '0', 10);
-            // Calculate watch time in minutes (average view duration across long-form content is ~45% of total duration)
-            const watchMins =
-              vCount > 0 && durationSecs > 0
-                ? parseFloat(((vCount * durationSecs * 0.45) / 60).toFixed(1))
-                : 0;
+            // Real watch time from YouTube Analytics API: estimatedMinutesWatched for video, 0 if missing from report, null if report unavailable
+            const watchMins = watchTimeMap !== null ? (watchTimeMap.get(v.id) ?? 0) : null;
 
             videos.push({
               videoId: v.id,
@@ -315,12 +314,12 @@ export class YouTubeAdapter implements IYouTubeAdapter {
 
       const data = (await res.json()) as any;
       const rawPlaylists = data.items || [];
+      const playlistViewsMap = await this.fetchPlaylistViewsMap();
 
-      // For each playlist, find newest snippet.publishedAt and aggregate total viewCount across items
+      // For each playlist, find newest snippet.publishedAt and populate real playlist views from YouTube Analytics
       const playlists: YouTubePlaylistRow[] = await Promise.all(
         rawPlaylists.map(async (pl: any) => {
           let lastUpdated: string | null = pl.snippet?.publishedAt || null;
-          let totalViews: number | null = null;
 
           try {
             const itemsUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${pl.id}&maxResults=50&key=${this.apiKey}`;
@@ -335,26 +334,13 @@ export class YouTubeAdapter implements IYouTubeAdapter {
                 dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
                 lastUpdated = dates[0];
               }
-
-              const videoIds = (itData.items || [])
-                .map((it: any) => it.contentDetails?.videoId || it.snippet?.resourceId?.videoId)
-                .filter(Boolean) as string[];
-
-              if (videoIds.length > 0) {
-                const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds.slice(0, 50).join(',')}&key=${this.apiKey}`;
-                const statsRes = await fetch(statsUrl);
-                if (statsRes.ok) {
-                  const statsData = (await statsRes.json()) as any;
-                  totalViews = 0;
-                  for (const vItem of statsData.items || []) {
-                    totalViews += parseInt(vItem.statistics?.viewCount || '0', 10);
-                  }
-                }
-              }
             }
           } catch {
-            // Keep default lastUpdated and totalViews
+            // Keep default lastUpdated
           }
+
+          // Real playlist views from YouTube Analytics API; missing gets 0, null if report unavailable
+          const viewCount = playlistViewsMap !== null ? (playlistViewsMap.get(pl.id) ?? 0) : null;
 
           return {
             playlistId: pl.id,
@@ -366,7 +352,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
               '',
             itemCount: parseInt(pl.contentDetails?.itemCount || '0', 10),
             lastUpdated,
-            viewCount: totalViews,
+            viewCount,
           };
         })
       );
@@ -383,6 +369,118 @@ export class YouTubeAdapter implements IYouTubeAdapter {
         return YouTubeAdapter.playlistsCache.data;
       }
       throw err;
+    }
+  }
+
+  private async getYouTubeAnalyticsOAuthAccessToken(): Promise<string | null> {
+    const now = Date.now();
+    if (YouTubeAdapter.oauthAccessToken && now < YouTubeAdapter.oauthAccessToken.expiresAt) {
+      return YouTubeAdapter.oauthAccessToken.token;
+    }
+
+    const refreshToken = process.env.YOUTUBE_OAUTH_REFRESH_TOKEN || process.env.YOUTUBE_REFRESH_TOKEN || null;
+    const clientId = process.env.YOUTUBE_OAUTH_CLIENT_ID || process.env.YOUTUBE_CLIENT_ID || null;
+    const clientSecret = process.env.YOUTUBE_OAUTH_CLIENT_SECRET || process.env.YOUTUBE_CLIENT_SECRET || null;
+
+    if (!refreshToken || !clientId || !clientSecret) {
+      return null;
+    }
+
+    try {
+      const tokenUrl = 'https://oauth2.googleapis.com/token';
+      const body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      });
+
+      const resp = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+
+      if (!resp.ok) {
+        console.warn('[YouTubeAdapter] Failed to refresh YouTube OAuth token:', await resp.text());
+        return null;
+      }
+
+      const tokenData = (await resp.json()) as any;
+      const accessToken = tokenData.access_token;
+      const expiresInSec = tokenData.expires_in || 3600;
+
+      if (accessToken) {
+        YouTubeAdapter.oauthAccessToken = {
+          token: accessToken,
+          expiresAt: now + (expiresInSec - 60) * 1000,
+        };
+        return accessToken;
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[YouTubeAdapter] OAuth token refresh error:', err?.message);
+      return null;
+    }
+  }
+
+  private async fetchVideoWatchTimeMap(): Promise<Map<string, number> | null> {
+    const accessToken = await this.getYouTubeAnalyticsOAuthAccessToken();
+    if (!accessToken) return null;
+
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate=2020-10-30&endDate=${today}&metrics=estimatedMinutesWatched&dimensions=video&sort=-estimatedMinutesWatched&maxResults=200`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!res.ok) {
+        console.warn('[YouTubeAdapter] YouTube Analytics video report returned HTTP', res.status);
+        return null;
+      }
+
+      const data = (await res.json()) as any;
+      const map = new Map<string, number>();
+      for (const row of data.rows || []) {
+        const vid = row[0];
+        const mins = typeof row[1] === 'number' ? row[1] : parseFloat(row[1]) || 0;
+        map.set(vid, mins);
+      }
+      return map;
+    } catch (err: any) {
+      console.warn('[YouTubeAdapter] Error fetching video watch time report:', err?.message);
+      return null;
+    }
+  }
+
+  private async fetchPlaylistViewsMap(): Promise<Map<string, number> | null> {
+    const accessToken = await this.getYouTubeAnalyticsOAuthAccessToken();
+    if (!accessToken) return null;
+
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate=2020-10-30&endDate=${today}&metrics=playlistViews&dimensions=playlist&sort=-playlistViews&maxResults=200`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!res.ok) {
+        console.warn('[YouTubeAdapter] YouTube Analytics playlist report returned HTTP', res.status);
+        return null;
+      }
+
+      const data = (await res.json()) as any;
+      const map = new Map<string, number>();
+      for (const row of data.rows || []) {
+        const pid = row[0];
+        const views = typeof row[1] === 'number' ? row[1] : parseInt(row[1], 10) || 0;
+        map.set(pid, views);
+      }
+      return map;
+    } catch (err: any) {
+      console.warn('[YouTubeAdapter] Error fetching playlist views report:', err?.message);
+      return null;
     }
   }
 

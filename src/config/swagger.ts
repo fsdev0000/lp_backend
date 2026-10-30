@@ -933,6 +933,13 @@ const swaggerOptions = {
           tags: ['Analytics & Performance'],
           parameters: [
             {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '7d' },
+              description: 'Date window for YouTube website visitors (evaluated in Asia/Dubai time, ending yesterday). Channel stats remain all-time.',
+            },
+            {
               name: 'refresh',
               in: 'query',
               required: false,
@@ -962,6 +969,25 @@ const swaggerOptions = {
                           engagementRate: { type: 'number', nullable: true, example: 5.9 },
                           isFallback: { type: 'boolean', example: false },
                           recentVideos: { type: 'array', items: { type: 'object' } },
+                          websiteVisitors: {
+                            type: 'object',
+                            properties: {
+                              range: { type: 'string', example: '7d' },
+                              startDate: { type: 'string', example: '2026-10-23' },
+                              endDate: { type: 'string', example: '2026-10-29' },
+                              total: { type: 'number', nullable: true, example: 1 },
+                              bySite: {
+                                type: 'array',
+                                items: {
+                                  type: 'object',
+                                  properties: {
+                                    domain: { type: 'string', example: 'leadersperformance.ae' },
+                                    users: { type: 'number', nullable: true, example: 1 },
+                                  },
+                                },
+                              },
+                            },
+                          },
                           cachedAt: { type: 'string', example: '2026-10-30T10:00:00.000Z' },
                           isCached: { type: 'boolean', example: false },
                         },

@@ -220,7 +220,8 @@ export class AnalyticsController {
   public getYouTubeAnalytics = async (req: Request, res: Response): Promise<void> => {
     try {
       const refresh = req.query.refresh === 'true';
-      const data = await this.service.getYouTubeAnalytics(refresh);
+      const range = ((req.query.range as string) || '7d').toLowerCase();
+      const data = await this.service.getYouTubeAnalytics(range, refresh);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
       console.error('[AnalyticsController] getYouTubeAnalytics failed:', error);

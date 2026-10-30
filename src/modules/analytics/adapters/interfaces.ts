@@ -141,6 +141,7 @@ export interface IGa4Adapter {
   getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
+  getYouTubeWebsiteVisitors(range?: string): Promise<YouTubeWebsiteVisitors>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
 
@@ -303,6 +304,17 @@ export interface YouTubePlaylistRow {
   viewCount: number | null;
 }
 
+export interface YouTubeWebsiteVisitors {
+  range: string;
+  startDate: string;
+  endDate: string;
+  total: number | null;
+  bySite: Array<{
+    domain: string;
+    users: number | null;
+  }>;
+}
+
 export interface YouTubeAnalyticsData {
   channelId: string;
   title: string;
@@ -317,6 +329,7 @@ export interface YouTubeAnalyticsData {
   engagementRate: number | null;
   engagementRateFormatted: string | null;
   recentVideos: YouTubeVideoRow[];
+  websiteVisitors?: YouTubeWebsiteVisitors;
   cachedAt: string;
   isCached: boolean;
   isFallback: boolean;

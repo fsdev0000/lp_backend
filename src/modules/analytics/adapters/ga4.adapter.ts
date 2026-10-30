@@ -10,6 +10,7 @@ import {
   DimensionMetricRow,
   CityMetricRow,
   CountryHierarchyRow,
+  YouTubeWebsiteVisitors,
 } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
@@ -803,72 +804,124 @@ export class Ga4Adapter implements IGa4Adapter {
     }
   }
 
-  private async getEmptyOrClarityReportsSnapshot(
-    startDate: string,
-    endDate: string,
-    domain?: string
-  ): Promise<ReportsSnapshotData> {
-    const clean = domain ? domain.toLowerCase().trim() : '';
-    const isLe = clean.includes('lioneleersteling') || clean === 'le';
+  public async getYouTubeWebsiteVisitors(range = '7d'): Promise<YouTubeWebsiteVisitors> {
+    const win = resolveWindow(range, 1);
+    const sites = ['leadersperformance.ae', 'lioneleersteling.com'];
+    const bySite: Array<{ domain: string; users: number | null }> = [];
 
-    if (isLe) {
+    for (const site of sites) {
+      const target = this.resolveGa4Target(site);
+      const propertyId = target.propertyId || (site.includes('leadersperformance') ? this.propertyId : null);
+
+      if (!this.client || !propertyId) {
+        bySite.push({ domain: site, users: null });
+        continue;
+      }
+
       try {
-        const { ClarityAdapter } = await import('./clarity.adapter');
-        const clarity = new ClarityAdapter();
-        const leData = await clarity.getLiveAnalytics('lionel_eersteling');
-        if (leData) {
-          const activeUsers = leData.distinctUsers || 36;
-          const newUsers = Math.round(activeUsers * 0.85);
-          const topPages: PageScreenRow[] = [
-            { pageTitle: 'Lionel Eersteling | Founder Performance & Executive Advisory', views: 42, activeUsers, eventCount: 180, bounceRate: '25.0%' },
-            { pageTitle: 'Executive Intensive Briefing | Lionel Eersteling', views: 24, activeUsers: Math.round(activeUsers * 0.6), eventCount: 95, bounceRate: '18.0%' },
-          ];
-          const usersByCountry: DimensionMetricRow[] = (leData.countries || []).map((c) => ({
-            name: c.name,
-            value: c.sessions,
-          }));
-          const usersByCity: DimensionMetricRow[] = (leData.cities || []).map((c) => ({
-            name: c.name,
-            value: c.sessions,
-          }));
-
-          return {
-            summary: {
-              activeUsers,
-              newUsers,
-              averageEngagementTimeSeconds: leData.executiveDwellSeconds || 240,
-              averageEngagementTimeFormatted: leData.executiveDwellFormatted || '4m 00s',
-              eventCount: leData.totalSessions ? leData.totalSessions * 5 : 210,
+        // Check if property actively tracks this hostName (or if dedicated property configured)
+        let isTracked = target.propertyId !== null;
+        if (!isTracked && this.propertyId) {
+          const [hostRes] = await this.client.runReport({
+            property: `properties/${propertyId}`,
+            dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+            dimensionFilter: {
+              filter: {
+                fieldName: 'hostName',
+                stringFilter: {
+                  matchType: 'CONTAINS' as const,
+                  value: site,
+                },
+              },
             },
-            topPages: topPages.length > 0 ? topPages : [
-              { pageTitle: 'Lionel Eersteling | Founder Performance', views: 42, activeUsers: 36, eventCount: 180, bounceRate: '25.0%' }
-            ],
-            usersBySourceMedium: [
-              { name: '(direct) / (none)', value: Math.round(activeUsers * 0.7) },
-              { name: 'linkedin / organic', value: Math.round(activeUsers * 0.3) },
-            ],
-            sessionsBySourceMedium: [
-              { name: '(direct) / (none)', value: Math.round((leData.totalSessions || 42) * 0.7) },
-              { name: 'linkedin / organic', value: Math.round((leData.totalSessions || 42) * 0.3) },
-            ],
-            usersByCountry,
-            usersByCity,
-            geographicHierarchy: usersByCountry.map((c) => ({
-              country: c.name,
-              activeUsers: c.value,
-              cities: usersByCity.slice(0, 3).map((ct) => ({ city: ct.name, activeUsers: ct.value })),
-            })),
-            reportingPeriod: {
-              startDate,
-              endDate,
-            },
-          };
+            metrics: [{ name: 'activeUsers' }],
+          });
+          const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
+          isTracked = totalHostUsers > 0;
         }
-      } catch {
-        // Fallback to empty snapshot
+
+        if (!isTracked) {
+          bySite.push({ domain: site, users: null });
+          continue;
+        }
+
+        // Query activeUsers for this host where sessionSource contains 'youtube' or 'youtu.be'
+        const dimensionFilter = {
+          andGroup: {
+            expressions: [
+              {
+                filter: {
+                  fieldName: 'hostName',
+                  stringFilter: {
+                    matchType: 'CONTAINS' as const,
+                    value: site,
+                  },
+                },
+              },
+              {
+                orGroup: {
+                  expressions: [
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'CONTAINS' as const,
+                          value: 'youtube',
+                        },
+                      },
+                    },
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'CONTAINS' as const,
+                          value: 'youtu.be',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        };
+
+        const [ytRes] = await this.client.runReport({
+          property: `properties/${propertyId}`,
+          dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+          dimensionFilter,
+          metrics: [{ name: 'activeUsers' }],
+        });
+
+        let users = 0;
+        for (const row of ytRes.rows || []) {
+          users += parseInt(row.metricValues?.[0]?.value || '0', 10);
+        }
+
+        bySite.push({ domain: site, users });
+      } catch (err: any) {
+        await LiveErrorBoundary.logUpstreamError('GA4', 'getYouTubeWebsiteVisitors', err);
+        bySite.push({ domain: site, users: null });
       }
     }
 
+    const nonNullUsers = bySite.map((s) => s.users).filter((u): u is number => u !== null);
+    const total = nonNullUsers.length > 0 ? nonNullUsers.reduce((a, b) => a + b, 0) : null;
+
+    return {
+      range: win.range,
+      startDate: win.startDate,
+      endDate: win.endDate,
+      total,
+      bySite,
+    };
+  }
+
+  private async getEmptyOrClarityReportsSnapshot(
+    startDate: string,
+    endDate: string,
+    _domain?: string
+  ): Promise<ReportsSnapshotData> {
     return {
       summary: {
         activeUsers: 0,
@@ -893,34 +946,19 @@ export class Ga4Adapter implements IGa4Adapter {
   private async getEmptyOrClarityTrafficHistory(
     startDate?: string,
     endDate?: string,
-    domain?: string
+    _domain?: string
   ): Promise<TrafficMetricRow[]> {
     const win = resolveWindow('30d', 1, startDate, endDate);
+    // For range=all, return empty list ("khali list aani chahiye")
+    if (win.range === 'all') {
+      return [];
+    }
     const start = new Date(win.startDate);
     const end = new Date(win.endDate);
     const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // For range=all, return empty list ("khali list aani chahiye")
-    if (diffDays > 120 || win.range === 'all') {
+    if (diffDays > 120) {
       return [];
-    }
-
-    const clean = domain ? domain.toLowerCase().trim() : '';
-    const isLe = clean.includes('lioneleersteling') || clean === 'le';
-
-    // If domain is Lionel Eersteling and GA4 has no property, use Clarity live metrics
-    let clarityDailyVisitors = 0;
-    if (isLe) {
-      try {
-        const { ClarityAdapter } = await import('./clarity.adapter');
-        const clarity = new ClarityAdapter();
-        const leData = await clarity.getLiveAnalytics('lionel_eersteling');
-        if (leData && leData.distinctUsers > 0) {
-          clarityDailyVisitors = Math.max(1, Math.round(leData.distinctUsers / Math.max(1, Math.min(diffDays, 7))));
-        }
-      } catch {
-        // Fallback to 0 if clarity is inaccessible
-      }
     }
 
     const rows: TrafficMetricRow[] = [];
@@ -929,8 +967,8 @@ export class Ga4Adapter implements IGa4Adapter {
       const iso = curr.toISOString().slice(0, 10);
       rows.push({
         date: iso,
-        visitors: clarityDailyVisitors,
-        pageviews: clarityDailyVisitors * 2,
+        visitors: 0,
+        pageviews: 0,
         leads: 0,
       });
       curr.setUTCDate(curr.getUTCDate() + 1);

@@ -84,8 +84,8 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(typeof linkedin.websiteVisitors).toBe('number');
   });
 
-  it('GET /api/v1/analytics/social/youtube returns live YouTube channel stats and recent videos', async () => {
-    const res = await request(app).get('/api/v1/analytics/social/youtube');
+  it('GET /api/v1/analytics/social/youtube returns live YouTube channel stats and website visitors by date range', async () => {
+    const res = await request(app).get('/api/v1/analytics/social/youtube?range=7d');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveProperty('channelId');
@@ -99,9 +99,24 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(res.body.data.isFallback).toBe(false);
     expect(res.body.data).toHaveProperty('recentVideos');
     expect(Array.isArray(res.body.data.recentVideos)).toBe(true);
+
+    // Verify website visitors from YouTube by site
+    expect(res.body.data).toHaveProperty('websiteVisitors');
+    const wv = res.body.data.websiteVisitors;
+    expect(wv.range).toBe('7d');
+    expect(wv.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(wv.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(wv.total).toBe(1);
+    expect(Array.isArray(wv.bySite)).toBe(true);
+    const lpSite = wv.bySite.find((s: any) => s.domain === 'leadersperformance.ae');
+    expect(lpSite).toBeDefined();
+    expect(lpSite.users).toBe(1);
+    const leSite = wv.bySite.find((s: any) => s.domain === 'lioneleersteling.com');
+    expect(leSite).toBeDefined();
+    expect(leSite.users).toBeNull();
   });
 
-  it('GET /api/v1/analytics/social/youtube/videos returns categorized public videos and shorts', async () => {
+  it('GET /api/v1/analytics/social/youtube/videos returns categorized public videos and shorts with null watch time if OAuth is unconfigured', async () => {
     // 1. Long videos
     const longRes = await request(app).get('/api/v1/analytics/social/youtube/videos?type=videos');
     expect(longRes.status).toBe(200);
@@ -118,7 +133,8 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(firstLong).toHaveProperty('viewCount');
     expect(firstLong).toHaveProperty('likeCount');
     expect(firstLong).toHaveProperty('commentCount');
-    expect(typeof firstLong.watchTimeMinutes === 'number' || firstLong.watchTimeMinutes === null).toBe(true);
+    // Rule: Never send an estimate or formula. If YouTube Analytics API is not configured with OAuth, send null right away!
+    expect(firstLong.watchTimeMinutes).toBeNull();
     expect(firstLong.watchUrl).toContain('https://www.youtube.com/watch?v=');
 
     // 2. Shorts
@@ -129,7 +145,7 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(shortsRes.body.data.videos.length).toBeGreaterThan(0);
   });
 
-  it('GET /api/v1/analytics/social/youtube/playlists returns public playlists with item counts and timestamps', async () => {
+  it('GET /api/v1/analytics/social/youtube/playlists returns public playlists with null viewCount if OAuth is unconfigured', async () => {
     const res = await request(app).get('/api/v1/analytics/social/youtube/playlists');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -143,7 +159,8 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(firstPl).toHaveProperty('itemCount');
     expect(typeof firstPl.itemCount).toBe('number');
     expect(firstPl).toHaveProperty('lastUpdated');
-    expect(typeof firstPl.viewCount === 'number' || firstPl.viewCount === null).toBe(true);
+    // Rule: Never send a sum formula. If YouTube Analytics API is not configured with OAuth, send null right away!
+    expect(firstPl.viewCount).toBeNull();
   });
 
   it('GET /api/v1/analytics/keywords returns top search queries with SERP rank and genuine totals', async () => {
@@ -256,12 +273,14 @@ describe('Analytics & Performance Module API Suite', () => {
     expect(res.body.data).toHaveProperty('geographicHierarchy');
     expect(Array.isArray(res.body.data.geographicHierarchy)).toBe(true);
 
-    // Verify domain isolation for Lionel Eersteling does not return Leaders Performance numbers
+    // Verify domain isolation for Lionel Eersteling does not return Leaders Performance numbers or fake fallbacks
     const leRes = await request(app).get('/api/v1/analytics/reports-snapshot?range=30d&domain=lioneleersteling.com');
     expect(leRes.status).toBe(200);
     expect(leRes.body.success).toBe(true);
-    // Since lioneleersteling.com has 0 traffic on this property, it should return 0 rather than LP's active users
-    expect(leRes.body.data.summary.activeUsers).not.toBe(res.body.data.summary.activeUsers);
+    // Since lioneleersteling.com is not tracked in GA4 yet, it must return 0 and empty arrays (no Clarity fake data)
+    expect(leRes.body.data.summary.activeUsers).toBe(0);
+    expect(leRes.body.data.topPages).toEqual([]);
+    expect(leRes.body.data.usersBySourceMedium).toEqual([]);
   });
 
   it('GET /api/v1/analytics/clarity/sessions returns session recordings with direct playback URLs for Social CRM', async () => {

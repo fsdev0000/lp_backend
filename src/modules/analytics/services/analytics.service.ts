@@ -4,7 +4,7 @@ import { GscAdapter } from '../adapters/gsc.adapter';
 import { ClarityAdapter } from '../adapters/clarity.adapter';
 import { SovereignAdapter } from '../adapters/sovereign.adapter';
 import { YouTubeAdapter } from '../adapters/youtube.adapter';
-import { ChannelPerformanceRow, IntegrationHealthStatus } from '../adapters/interfaces';
+import { ChannelPerformanceRow, IntegrationHealthStatus, YouTubeWebsiteVisitors } from '../adapters/interfaces';
 import { validateAnalyticsCredentials } from '../adapters/credentialValidator';
 import { resolveWindow, calcGrowth, calcTrend } from '../utils/dateRange';
 
@@ -17,6 +17,7 @@ export class AnalyticsService {
   private sovereign = new SovereignAdapter();
   private youtube = new YouTubeAdapter();
   private static overviewCache: { [key: string]: { data: any; expiresAt: number } } = {};
+  private static youtubeWebsiteVisitorsCache: Record<string, { data: YouTubeWebsiteVisitors; cachedAt: number }> = {};
 
   public async getOverview(range = '30d', domain = 'leadersperformance.ae') {
     const cacheKey = `${domain}_${range}`;
@@ -423,8 +424,27 @@ export class AnalyticsService {
     return this.clarity.ingestWebhookPayload(payload, websiteKey);
   }
 
-  public async getYouTubeAnalytics(forceRefresh = false) {
-    return this.youtube.getChannelAnalytics(forceRefresh);
+  public async getYouTubeAnalytics(range = '7d', forceRefresh = false) {
+    const channelData = await this.youtube.getChannelAnalytics(forceRefresh);
+
+    const now = Date.now();
+    const cachedVisitors = AnalyticsService.youtubeWebsiteVisitorsCache[range];
+    let websiteVisitors: YouTubeWebsiteVisitors;
+
+    if (!forceRefresh && cachedVisitors && now - cachedVisitors.cachedAt < 15 * 60 * 1000) {
+      websiteVisitors = cachedVisitors.data;
+    } else {
+      websiteVisitors = await this.ga4.getYouTubeWebsiteVisitors(range);
+      AnalyticsService.youtubeWebsiteVisitorsCache[range] = {
+        data: websiteVisitors,
+        cachedAt: now,
+      };
+    }
+
+    return {
+      ...channelData,
+      websiteVisitors,
+    };
   }
 
   public async getYouTubeVideos(type: 'videos' | 'shorts' = 'videos', forceRefresh = false) {
