@@ -442,7 +442,7 @@ const swaggerOptions = {
       '/analytics/overview': {
         get: {
           summary: 'Consolidated Business Intelligence & Web Vitals Overview',
-          description: 'Returns top executive KPIs, 30-day session trend lines from GA4, UTM campaign yield table, and recent qualified founder inbound leads with sub-150ms cached response SLA.',
+          description: 'Returns top executive KPIs, traffic velocity trend lines from GA4 (ISO yyyy-MM-dd), UTM campaign yield table, and qualified founder inbound leads. Window represents the last N complete days in Dubai time (Asia/Dubai), ending on yesterday. Growth fields compare against previous window of the same length (null for range=all). All-time snapshots (subscribers, followers, total views) ignore range.',
           tags: ['Analytics & Performance'],
           parameters: [
             {
@@ -450,12 +450,19 @@ const swaggerOptions = {
               in: 'query',
               required: false,
               schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '30d' },
-              description: 'Historical date filter range',
+              description: 'Historical date filter range in Dubai time (Asia/Dubai). 7d, 30d, 90d, or all (since 2015-08-14).',
+            },
+            {
+              name: 'domain',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leadersperformance.ae', 'lioneleersteling.com'], default: 'leadersperformance.ae' },
+              description: 'Target workspace website domain filter.',
             },
           ],
           responses: {
             200: {
-              description: 'Aggregated analytics metrics, traffic history, and campaign yield',
+              description: 'Aggregated analytics metrics, traffic history, and campaign yield with window boundaries',
               content: {
                 'application/json': {
                   schema: {
@@ -465,17 +472,21 @@ const swaggerOptions = {
                       data: {
                         type: 'object',
                         properties: {
+                          startDate: { type: 'string', example: '2026-10-23' },
+                          endDate: { type: 'string', example: '2026-10-29' },
+                          dateRange: { type: 'string', example: '7d' },
+                          domain: { type: 'string', example: 'leadersperformance.ae' },
                           metrics: {
                             type: 'object',
                             properties: {
-                              totalAudience: { type: 'number', example: 148520 },
-                              audienceGrowth: { type: 'number', example: 18.4 },
-                              highIntentLeads: { type: 'number', example: 342 },
-                              leadsGrowth: { type: 'number', example: 26.2 },
+                              totalAudience: { type: 'number', example: 125 },
+                              audienceGrowth: { type: 'number', nullable: true, example: 18.4 },
+                              highIntentLeads: { type: 'number', example: 27 },
+                              leadsGrowth: { type: 'number', nullable: true, example: 26.2 },
                               avgConversionRate: { type: 'number', example: 8.42 },
-                              conversionGrowth: { type: 'number', example: 2.1 },
-                              pipelineValueEur: { type: 'number', example: 4250000 },
-                              pipelineGrowth: { type: 'number', example: 34.0 },
+                              conversionGrowth: { type: 'number', nullable: true, example: 2.1 },
+                              pipelineValueEur: { type: 'number', example: 675000 },
+                              pipelineGrowth: { type: 'number', nullable: true, example: 34.0 },
                               realtimeActiveVisitors: { type: 'number', example: 128 },
                               ingestionLatencyMs: { type: 'number', example: 24 },
                             },
@@ -485,10 +496,10 @@ const swaggerOptions = {
                             items: {
                               type: 'object',
                               properties: {
-                                date: { type: 'string', example: '10/01' },
-                                visitors: { type: 'number', example: 1120 },
-                                leads: { type: 'number', example: 9 },
-                                pageviews: { type: 'number', example: 3410 },
+                                date: { type: 'string', example: '2026-10-23' },
+                                visitors: { type: 'number', example: 18 },
+                                leads: { type: 'number', example: 1 },
+                                pageviews: { type: 'number', example: 45 },
                               },
                             },
                           },
@@ -503,6 +514,21 @@ const swaggerOptions = {
                                 clicks: { type: 'number', example: 3280 },
                                 leads: { type: 'number', example: 142 },
                                 convRate: { type: 'string', example: '4.3%' },
+                              },
+                            },
+                          },
+                          recentLeads: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                id: { type: 'string', example: 'scan_101' },
+                                name: { type: 'string', example: 'Marcus Van Der Berg' },
+                                company: { type: 'string', example: 'Apex BioLogics Europe' },
+                                revenueTier: { type: 'string', example: '€5M–€20M ARR' },
+                                leadScore: { type: 'number', example: 94 },
+                                status: { type: 'string', example: 'STABLE' },
+                                timestamp: { type: 'string', example: '2026-10-29T08:18:28.823Z' },
                               },
                             },
                           },
@@ -523,11 +549,27 @@ const swaggerOptions = {
       '/analytics/channels': {
         get: {
           summary: 'Cross-Platform Social Intelligence Matrix',
-          description: 'Returns audience, engagement ratios, leads captured, and pipeline yield across LinkedIn, YouTube, Instagram, and TikTok.',
+          description: 'Returns audience, engagement ratios, leads captured, and pipeline yield across YouTube, LinkedIn, Instagram, and TikTok for the selected range in Dubai time (Asia/Dubai). All-time snapshots (subscribers/followers) ignore range. Unconnected channels return connected: false and null for unmeasured metrics. Trend compares against previous window of the same length (null for range=all).',
           tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '30d' },
+              description: 'Date range filter (7d, 30d, 90d, all).',
+            },
+            {
+              name: 'domain',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leadersperformance.ae', 'lioneleersteling.com'], default: 'leadersperformance.ae' },
+              description: 'Target workspace domain filter.',
+            },
+          ],
           responses: {
             200: {
-              description: 'Array of platform metrics',
+              description: 'Array of real cross-platform performance metrics',
               content: {
                 'application/json': {
                   schema: {
@@ -539,15 +581,19 @@ const swaggerOptions = {
                         items: {
                           type: 'object',
                           properties: {
-                            id: { type: 'string', example: 'linkedin' },
-                            name: { type: 'string', example: 'LinkedIn (Executive)' },
-                            followers: { type: 'number', example: 48920 },
-                            engagementRate: { type: 'number', example: 6.84 },
-                            postsMonth: { type: 'number', example: 24 },
-                            leadsGenerated: { type: 'number', example: 184 },
-                            pipelineValueEur: { type: 'number', example: 2840000 },
-                            color: { type: 'string', example: '#0A66C2' },
-                            trend: { type: 'string', example: '+24.5%' },
+                            id: { type: 'string', example: 'youtube' },
+                            name: { type: 'string', example: 'YouTube (@lioneleersteling)' },
+                            connected: { type: 'boolean', example: true },
+                            followers: { type: 'number', nullable: true, example: 106, description: 'All-time snapshot' },
+                            postsInRange: { type: 'number', nullable: true, example: 3 },
+                            engagementRate: { type: 'number', nullable: true, example: 5.9 },
+                            websiteVisitors: { type: 'number', nullable: true, example: 1, description: 'GA4 users from this network in the window' },
+                            leads: { type: 'number', nullable: true, example: 0, description: 'Leads attributed by UTM source in the window' },
+                            pipelineValueEur: { type: 'number', nullable: true, example: 0, description: 'Pipeline value attributed by UTM source in the window' },
+                            trend: { type: 'string', nullable: true, example: '+19.2%', description: 'Change vs previous window; null for range=all' },
+                            startDate: { type: 'string', example: '2026-10-23' },
+                            endDate: { type: 'string', example: '2026-10-29' },
+                            color: { type: 'string', example: '#FF0000' },
                           },
                         },
                       },
@@ -727,21 +773,35 @@ const swaggerOptions = {
       '/analytics/reports-snapshot': {
         get: {
           summary: 'Google Analytics 4 Reports Snapshot',
-          description: 'Retrieves Google Analytics 4 executive reports snapshot including active users, new users, average engagement duration, top pages with bounce rates, traffic sources, session sources, and breakdowns by both countries and cities.',
+          description: 'Retrieves Google Analytics 4 executive reports snapshot including active users, new users, average engagement duration, top pages with bounce rates, traffic sources, session sources, and breakdowns by both countries and cities. Domain is mapped to its dedicated GA4 property/hostname so each workspace sees only its own metrics.',
           tags: ['Analytics & Performance'],
           parameters: [
+            {
+              name: 'domain',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leadersperformance.ae', 'lioneleersteling.com'], default: 'leadersperformance.ae' },
+              description: 'Target website domain (e.g. leadersperformance.ae or lioneleersteling.com)',
+            },
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '30d' },
+              description: 'Date range filter in Dubai time (Asia/Dubai). Automatically computes startDate and endDate if not explicitly passed.',
+            },
             {
               name: 'startDate',
               in: 'query',
               required: false,
-              schema: { type: 'string', default: '30daysAgo' },
+              schema: { type: 'string', example: '2026-10-23' },
               description: 'Start date in YYYY-MM-DD or relative format (e.g. 30daysAgo, 7daysAgo)',
             },
             {
               name: 'endDate',
               in: 'query',
               required: false,
-              schema: { type: 'string', default: 'today' },
+              schema: { type: 'string', example: '2026-10-29' },
               description: 'End date in YYYY-MM-DD or relative format (e.g. today)',
             },
             {
@@ -868,8 +928,8 @@ const swaggerOptions = {
 
       '/analytics/social/youtube': {
         get: {
-          summary: 'Live YouTube Channel & Video Analytics',
-          description: 'Fetches live YouTube channel telemetry (subscribers, views, video count), calculates engagement rate, and retrieves recent uploads from the official YouTube Data API v3.',
+          summary: 'Live YouTube Channel & Video Analytics (YouTube card)',
+          description: 'Fetches live YouTube channel telemetry (subscriberCount, viewCount, videoCount, longVideoCount, shortsCount, engagementRate), and retrieves recent uploads from the official YouTube Data API v3. All-time snapshot ignores range: subscribers, followers, total views. If 0 views, engagementRate is null. On failure with nothing cached, returns HTTP 502 (never fake data).',
           tags: ['Analytics & Performance'],
           parameters: [
             {
@@ -882,7 +942,146 @@ const swaggerOptions = {
           ],
           responses: {
             200: {
-              description: 'Live YouTube channel statistics and recent video uploads',
+              description: 'Live YouTube channel statistics, public long/short counts, and recent video uploads',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          channelId: { type: 'string', example: 'UCCOqLAwS1JAMQVKEt4e0FXA' },
+                          title: { type: 'string', example: 'Lionel Eersteling' },
+                          subscriberCount: { type: 'number', example: 106, description: 'All-time snapshot' },
+                          viewCount: { type: 'number', example: 11417, description: 'All-time snapshot' },
+                          videoCount: { type: 'number', example: 94, description: 'All-time snapshot' },
+                          longVideoCount: { type: 'number', nullable: true, example: 57, description: 'Public long-form videos from UULF playlist' },
+                          shortsCount: { type: 'number', nullable: true, example: 37, description: 'Public Shorts from UUSH playlist' },
+                          engagementRate: { type: 'number', nullable: true, example: 5.9 },
+                          isFallback: { type: 'boolean', example: false },
+                          recentVideos: { type: 'array', items: { type: 'object' } },
+                          cachedAt: { type: 'string', example: '2026-10-30T10:00:00.000Z' },
+                          isCached: { type: 'boolean', example: false },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            502: {
+              description: 'YouTube API failure or missing configuration with nothing cached (no fake data)',
+            },
+          },
+        },
+      },
+
+      '/analytics/social/youtube/videos': {
+        get: {
+          summary: 'YouTube Videos and Shorts List (Videos and Shorts tabs)',
+          description: 'Returns every public video from auto playlists (UULF for long-form videos, UUSH for shorts), ordered newest first with lifetime view, like, and comment counts. Cached for 1 hour.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'type',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['videos', 'shorts'], default: 'videos' },
+              description: 'Type of video items to retrieve (videos = long-form, shorts = vertical shorts)',
+            },
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Bypass cache and force immediate refresh from YouTube Data API',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'List of video items with lifetime metrics and duration',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      videos: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            videoId: { type: 'string', example: 'Fkg67Niz5RY' },
+                            title: { type: 'string', example: 'Turn Pressure into Performance' },
+                            thumbnail: { type: 'string', example: 'https://i.ytimg.com/vi/Fkg67Niz5RY/mqdefault.jpg' },
+                            publishedAt: { type: 'string', example: '2026-10-29T07:00:00Z' },
+                            durationSeconds: { type: 'number', example: 270 },
+                            viewCount: { type: 'number', example: 734 },
+                            likeCount: { type: 'number', example: 15 },
+                            commentCount: { type: 'number', example: 0 },
+                            watchTimeMinutes: { type: 'number', nullable: true, example: null },
+                            watchUrl: { type: 'string', example: 'https://www.youtube.com/watch?v=Fkg67Niz5RY' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            502: {
+              description: 'YouTube API failure',
+            },
+          },
+        },
+      },
+
+      '/analytics/social/youtube/playlists': {
+        get: {
+          summary: 'YouTube Public Playlists (Playlists tab)',
+          description: 'Returns public channel playlists with public item counts and dynamically evaluated lastUpdated timestamp (the newest snippet.publishedAt across all items). Cached for 1 hour.',
+          tags: ['Analytics & Performance'],
+          parameters: [
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Bypass cache and force immediate refresh from YouTube Data API',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'List of public channel playlists',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      playlists: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            playlistId: { type: 'string', example: 'PLLvVIz_m5Oxg' },
+                            title: { type: 'string', example: 'The Next Level: Founder and Business Questions' },
+                            thumbnail: { type: 'string', example: 'https://i.ytimg.com/vi/sample/mqdefault.jpg' },
+                            itemCount: { type: 'number', example: 25 },
+                            lastUpdated: { type: 'string', example: '2026-10-29T12:22:32Z' },
+                            viewCount: { type: 'number', nullable: true, example: null },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            502: {
+              description: 'YouTube API failure',
             },
           },
         },

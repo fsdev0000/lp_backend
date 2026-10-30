@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { IGscAdapter, GscQueryRow, GscTotals, GscKeywordsResponse } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
+import { resolveWindow } from '../utils/dateRange';
 
 import path from 'path';
 import fs from 'fs';
@@ -78,26 +79,13 @@ export class GscAdapter implements IGscAdapter {
   /**
    * Resolves dates honoring Google Search Console's 2-day finalization lag
    */
-  public resolveDateRange(days = 30, customStartDate?: string, customEndDate?: string) {
-    if (customStartDate && customEndDate) {
-      return {
-        startDate: customStartDate,
-        endDate: customEndDate,
-        rangeLabel: `${customStartDate}..${customEndDate}`,
-      };
-    }
-
-    // Google Search Console finalize lag is typically 2 full days behind local today
-    const endObj = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    const startObj = new Date(endObj.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
-
-    const endDate = endObj.toISOString().split('T')[0];
-    const startDate = startObj.toISOString().split('T')[0];
-
+  public resolveDateRange(days: number | string = 30, customStartDate?: string, customEndDate?: string) {
+    const rangeStr = typeof days === 'number' ? `${days}d` : days;
+    const win = resolveWindow(rangeStr, 2, customStartDate, customEndDate);
     return {
-      startDate,
-      endDate,
-      rangeLabel: `${days}d`,
+      startDate: win.startDate,
+      endDate: win.endDate,
+      rangeLabel: customStartDate && customEndDate ? `${customStartDate}..${customEndDate}` : win.range,
     };
   }
 

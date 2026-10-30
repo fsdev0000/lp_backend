@@ -76,4 +76,16 @@ analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
 analyticsRoutes.get('/social/youtube', controller.getYouTubeAnalytics);
 analyticsRoutes.get('/youtube', controller.getYouTubeAnalytics);
 
+/**
+ * @route GET /api/v1/analytics/social/youtube/videos
+ * @desc Retrieve YouTube video list for videos or shorts tab (lifetime counts, newest first)
+ */
+analyticsRoutes.get('/social/youtube/videos', controller.getYouTubeVideos);
+
+/**
+ * @route GET /api/v1/analytics/social/youtube/playlists
+ * @desc Retrieve YouTube playlists with public item counts and last updated timestamp
+ */
+analyticsRoutes.get('/social/youtube/playlists', controller.getYouTubePlaylists);
+
 

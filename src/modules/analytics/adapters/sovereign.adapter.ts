@@ -1,44 +1,54 @@
 import { PrismaClient } from '@prisma/client';
 import { ISovereignAdapter } from './interfaces';
+import { resolveWindow } from '../utils/dateRange';
 
 const prisma = new PrismaClient();
 
 export class SovereignAdapter implements ISovereignAdapter {
-  public async getAttributedLeadsCount(dateRange: string): Promise<number> {
-    const days = this.getDaysFromRange(dateRange);
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  public async getAttributedLeadsCount(startDateOrRange: string, endDate?: string, domain?: string): Promise<number> {
+    const { startDate, endDate: resolvedEnd } = this.resolveDates(startDateOrRange, endDate);
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${resolvedEnd}T23:59:59.999Z`);
 
-    const [count, scanCount] = await Promise.all([
+    const visitWhere: any = {
+      email: { not: null },
+      createdAt: { gte: start, lte: end },
+    };
+
+    if (domain) {
+      const clean = domain.toLowerCase().trim();
+      visitWhere.landingPage = { contains: clean, mode: 'insensitive' };
+    }
+
+    const [visitCount, scanCount] = await Promise.all([
       prisma.attributionVisit.count({
-        where: {
-          email: { not: null },
-          createdAt: { gte: cutoff },
-        },
+        where: visitWhere,
       }),
       prisma.pressureScanSubmission.count({
         where: {
-          createdAt: { gte: cutoff },
+          createdAt: { gte: start, lte: end },
         },
       }),
     ]);
 
-    return Math.max(count + scanCount, 342); // Seed minimum high-intent baseline if fresh db
+    return visitCount + scanCount;
   }
 
-  public async getAttributedPipelineValue(dateRange: string): Promise<number> {
-    const days = this.getDaysFromRange(dateRange);
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  public async getAttributedPipelineValue(startDateOrRange: string, endDate?: string, domain?: string): Promise<number> {
+    const { startDate, endDate: resolvedEnd } = this.resolveDates(startDateOrRange, endDate);
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${resolvedEnd}T23:59:59.999Z`);
 
     const [enrollments, scans] = await Promise.all([
       prisma.masterclassEnrollment.findMany({
         where: {
-          createdAt: { gte: cutoff },
+          createdAt: { gte: start, lte: end },
         },
         select: { amount: true, paymentStatus: true },
       }),
       prisma.pressureScanSubmission.count({
         where: {
-          createdAt: { gte: cutoff },
+          createdAt: { gte: start, lte: end },
         },
       }),
     ]);
@@ -46,11 +56,25 @@ export class SovereignAdapter implements ISovereignAdapter {
     let value = enrollments.reduce((acc, curr) => acc + (curr.amount || 75000), 0);
     value += scans * 25000;
 
-    return Math.max(value, 4250000); // Baseline pipeline value in EUR
+    return value;
   }
 
-  public async getRecentFounderInbound(limit = 4): Promise<any[]> {
+  public async getRecentFounderInbound(
+    limit = 4,
+    startDate?: string,
+    endDate?: string,
+    domain?: string
+  ): Promise<any[]> {
+    const where: any = {};
+    if (startDate && endDate) {
+      where.createdAt = {
+        gte: new Date(`${startDate}T00:00:00.000Z`),
+        lte: new Date(`${endDate}T23:59:59.999Z`),
+      };
+    }
+
     const scans = await prisma.pressureScanSubmission.findMany({
+      where,
       take: limit,
       orderBy: { createdAt: 'desc' },
       select: {
@@ -75,26 +99,110 @@ export class SovereignAdapter implements ISovereignAdapter {
       }));
     }
 
-    // Default high-profile fallback if DB is pristine
-    return [
-      { id: 'lead-1', name: 'Marcus Van Der Berg', company: 'Apex BioLogics Europe', revenueTier: '€10M–€50M ARR', leadScore: 94 },
-      { id: 'lead-2', name: 'Elena Rostova', company: 'Vanguard FinTech Zurich', revenueTier: '€20M–€100M ARR', leadScore: 91 },
-      { id: 'lead-3', name: 'Tariq Al-Mansoor', company: 'Emirates Capital Partners', revenueTier: '€50M+ Sovereign', leadScore: 89 },
-      { id: 'lead-4', name: 'Johan De Witt', company: 'Nordic Scale Capital', revenueTier: '€10M–€25M ARR', leadScore: 86 },
-    ];
+    return [];
   }
 
-  private getDaysFromRange(range: string): number {
-    switch (range) {
-      case '7d':
-        return 7;
-      case '90d':
-        return 90;
-      case 'all':
-        return 365;
-      case '30d':
-      default:
-        return 30;
+  public async getChannelAttribution(
+    startDate: string,
+    endDate: string,
+    prevStartDate?: string | null,
+    prevEndDate?: string | null,
+    domain?: string
+  ): Promise<
+    Record<
+      string,
+      {
+        leads: number;
+        pipelineValueEur: number;
+        prevLeads: number;
+        prevPipelineValueEur: number;
+      }
+    >
+  > {
+    const channels = ['youtube', 'linkedin', 'instagram', 'tiktok'];
+    const result: Record<
+      string,
+      {
+        leads: number;
+        pipelineValueEur: number;
+        prevLeads: number;
+        prevPipelineValueEur: number;
+      }
+    > = {};
+
+    for (const ch of channels) {
+      result[ch] = {
+        leads: 0,
+        pipelineValueEur: 0,
+        prevLeads: 0,
+        prevPipelineValueEur: 0,
+      };
     }
+
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T23:59:59.999Z`);
+
+    // Fetch visits with utmSource in window
+    const visits = await prisma.attributionVisit.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+        utmSource: { not: null },
+      },
+      select: {
+        utmSource: true,
+        email: true,
+      },
+    });
+
+    for (const v of visits) {
+      const src = (v.utmSource || '').toLowerCase();
+      for (const ch of channels) {
+        if (src.includes(ch)) {
+          if (v.email) {
+            result[ch].leads += 1;
+            result[ch].pipelineValueEur += 25000;
+          }
+        }
+      }
+    }
+
+    // Previous period if requested
+    if (prevStartDate && prevEndDate) {
+      const prevStart = new Date(`${prevStartDate}T00:00:00.000Z`);
+      const prevEnd = new Date(`${prevEndDate}T23:59:59.999Z`);
+
+      const prevVisits = await prisma.attributionVisit.findMany({
+        where: {
+          createdAt: { gte: prevStart, lte: prevEnd },
+          utmSource: { not: null },
+        },
+        select: {
+          utmSource: true,
+          email: true,
+        },
+      });
+
+      for (const v of prevVisits) {
+        const src = (v.utmSource || '').toLowerCase();
+        for (const ch of channels) {
+          if (src.includes(ch)) {
+            if (v.email) {
+              result[ch].prevLeads += 1;
+              result[ch].prevPipelineValueEur += 25000;
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  private resolveDates(startDateOrRange: string, endDate?: string): { startDate: string; endDate: string } {
+    if (endDate) {
+      return { startDate: startDateOrRange, endDate };
+    }
+    const win = resolveWindow(startDateOrRange, 1);
+    return { startDate: win.startDate, endDate: win.endDate };
   }
 }

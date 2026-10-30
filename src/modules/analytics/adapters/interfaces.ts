@@ -53,24 +53,28 @@ export interface ClarityUxMetrics {
 export interface ChannelPerformanceRow {
   id: string;
   name: string;
-  followers: number;
-  engagementRate: number;
-  postsMonth: number;
-  leadsGenerated: number;
-  pipelineValueEur: number;
-  color: string;
-  trend: string;
+  connected: boolean;
+  followers: number | null;
+  postsInRange: number | null;
+  engagementRate: number | null;
+  websiteVisitors: number | null;
+  leads: number | null;
+  pipelineValueEur: number | null;
+  trend: string | null;
+  startDate: string;
+  endDate: string;
+  color?: string;
 }
 
 export interface OverviewMetrics {
   totalAudience: number;
-  audienceGrowth: number;
+  audienceGrowth: number | null;
   highIntentLeads: number;
-  leadsGrowth: number;
+  leadsGrowth: number | null;
   avgConversionRate: number;
-  conversionGrowth: number;
+  conversionGrowth: number | null;
   pipelineValueEur: number;
-  pipelineGrowth: number;
+  pipelineGrowth: number | null;
   realtimeActiveVisitors: number;
   ingestionLatencyMs: number;
 }
@@ -134,9 +138,9 @@ export interface ReportsSnapshotData {
 
 export interface IGa4Adapter {
   getRealtimeActiveUsers(): Promise<{ activeUsers: number; byCountry: Record<string, number> }>;
-  getTrafficReport(startDate: string, endDate: string): Promise<TrafficMetricRow[]>;
+  getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string): Promise<CampaignYieldRow[]>;
-  getReportsSnapshot(startDate?: string, endDate?: string, limit?: number): Promise<ReportsSnapshotData>;
+  getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
 
@@ -243,9 +247,26 @@ export interface IClarityAdapter {
 }
 
 export interface ISovereignAdapter {
-  getAttributedLeadsCount(dateRange: string): Promise<number>;
-  getAttributedPipelineValue(dateRange: string): Promise<number>;
-  getRecentFounderInbound(limit?: number): Promise<any[]>;
+  getAttributedLeadsCount(startDateOrRange: string, endDate?: string, domain?: string): Promise<number>;
+  getAttributedPipelineValue(startDateOrRange: string, endDate?: string, domain?: string): Promise<number>;
+  getRecentFounderInbound(limit?: number, startDate?: string, endDate?: string, domain?: string): Promise<any[]>;
+  getChannelAttribution(
+    startDate: string,
+    endDate: string,
+    prevStartDate?: string | null,
+    prevEndDate?: string | null,
+    domain?: string
+  ): Promise<
+    Record<
+      string,
+      {
+        leads: number;
+        pipelineValueEur: number;
+        prevLeads: number;
+        prevPipelineValueEur: number;
+      }
+    >
+  >;
 }
 
 export interface YouTubeVideoRow {
@@ -260,6 +281,28 @@ export interface YouTubeVideoRow {
   watchUrl: string;
 }
 
+export interface YouTubeVideoDetailRow {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  publishedAt: string;
+  durationSeconds: number;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  watchTimeMinutes: number | null;
+  watchUrl: string;
+}
+
+export interface YouTubePlaylistRow {
+  playlistId: string;
+  title: string;
+  thumbnail: string;
+  itemCount: number;
+  lastUpdated: string | null;
+  viewCount: number | null;
+}
+
 export interface YouTubeAnalyticsData {
   channelId: string;
   title: string;
@@ -269,14 +312,19 @@ export interface YouTubeAnalyticsData {
   subscriberCount: number;
   viewCount: number;
   videoCount: number;
-  engagementRate: number;
-  engagementRateFormatted: string;
+  longVideoCount: number | null;
+  shortsCount: number | null;
+  engagementRate: number | null;
+  engagementRateFormatted: string | null;
   recentVideos: YouTubeVideoRow[];
   cachedAt: string;
   isCached: boolean;
+  isFallback: boolean;
 }
 
 export interface IYouTubeAdapter {
   getChannelAnalytics(forceRefresh?: boolean): Promise<YouTubeAnalyticsData>;
+  getVideos(type?: 'videos' | 'shorts', forceRefresh?: boolean): Promise<YouTubeVideoDetailRow[]>;
+  getPlaylists(forceRefresh?: boolean): Promise<YouTubePlaylistRow[]>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }

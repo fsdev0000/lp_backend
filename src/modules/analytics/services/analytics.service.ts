@@ -6,6 +6,7 @@ import { SovereignAdapter } from '../adapters/sovereign.adapter';
 import { YouTubeAdapter } from '../adapters/youtube.adapter';
 import { ChannelPerformanceRow, IntegrationHealthStatus } from '../adapters/interfaces';
 import { validateAnalyticsCredentials } from '../adapters/credentialValidator';
+import { resolveWindow, calcGrowth, calcTrend } from '../utils/dateRange';
 
 const prisma = new PrismaClient();
 
@@ -15,10 +16,11 @@ export class AnalyticsService {
   private clarity = new ClarityAdapter();
   private sovereign = new SovereignAdapter();
   private youtube = new YouTubeAdapter();
-  private static overviewCache: { [range: string]: { data: any; expiresAt: number } } = {};
+  private static overviewCache: { [key: string]: { data: any; expiresAt: number } } = {};
 
-  public async getOverview(range = '30d') {
-    const cached = AnalyticsService.overviewCache[range];
+  public async getOverview(range = '30d', domain = 'leadersperformance.ae') {
+    const cacheKey = `${domain}_${range}`;
+    const cached = AnalyticsService.overviewCache[cacheKey];
     if (cached && cached.expiresAt > Date.now()) {
       return {
         ...cached.data,
@@ -30,40 +32,79 @@ export class AnalyticsService {
     }
 
     const start = Date.now();
+    const win = resolveWindow(range, 1);
 
-    // Parallel extraction from adapters
+    // Current window extraction from adapters
     const [trafficHistory, topCampaigns, highIntentLeads, pipelineValueEur, recentLeads, realtime] =
       await Promise.all([
-        this.ga4.getTrafficReport('30daysAgo', 'today'),
-        this.ga4.getCampaignYield(range),
-        this.sovereign.getAttributedLeadsCount(range),
-        this.sovereign.getAttributedPipelineValue(range),
-        this.sovereign.getRecentFounderInbound(4),
+        this.ga4.getTrafficReport(win.startDate, win.endDate, domain),
+        this.ga4.getCampaignYield(win.range),
+        this.sovereign.getAttributedLeadsCount(win.startDate, win.endDate, domain),
+        this.sovereign.getAttributedPipelineValue(win.startDate, win.endDate, domain),
+        this.sovereign.getRecentFounderInbound(4, win.startDate, win.endDate, domain),
         this.ga4.getRealtimeActiveUsers(),
       ]);
+
+    // Previous window extraction for growth comparison (if applicable)
+    let prevAudience: number | null = null;
+    let prevLeads: number | null = null;
+    let prevPipelineValueEur: number | null = null;
+
+    if (win.prevStartDate && win.prevEndDate) {
+      try {
+        const [prevTraffic, pLeads, pPipeline] = await Promise.all([
+          this.ga4.getTrafficReport(win.prevStartDate, win.prevEndDate, domain),
+          this.sovereign.getAttributedLeadsCount(win.prevStartDate, win.prevEndDate, domain),
+          this.sovereign.getAttributedPipelineValue(win.prevStartDate, win.prevEndDate, domain),
+        ]);
+        prevAudience = prevTraffic.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+        prevLeads = pLeads;
+        prevPipelineValueEur = pPipeline;
+      } catch {
+        // Fallback gracefully
+      }
+    }
+
+    const totalAudience = trafficHistory.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+    const audienceGrowth = win.range === 'all' ? null : calcGrowth(totalAudience, prevAudience);
+    const leadsGrowth = win.range === 'all' ? null : calcGrowth(highIntentLeads, prevLeads);
+
+    const avgConversionRate =
+      totalAudience > 0 ? parseFloat(((highIntentLeads / totalAudience) * 100).toFixed(2)) : 0.0;
+    const prevConvRate =
+      prevAudience && prevAudience > 0 && prevLeads !== null
+        ? (prevLeads / prevAudience) * 100
+        : null;
+    const conversionGrowth = win.range === 'all' ? null : calcGrowth(avgConversionRate, prevConvRate);
+
+    const pipelineGrowth =
+      win.range === 'all' ? null : calcGrowth(pipelineValueEur, prevPipelineValueEur);
 
     const ingestionLatencyMs = Date.now() - start;
 
     const result = {
+      startDate: win.startDate,
+      endDate: win.endDate,
+      dateRange: range,
+      domain,
       metrics: {
-        totalAudience: 148520,
-        audienceGrowth: 18.4,
+        totalAudience,
+        audienceGrowth,
         highIntentLeads,
-        leadsGrowth: 26.2,
-        avgConversionRate: 8.42,
-        conversionGrowth: 2.1,
+        leadsGrowth,
+        avgConversionRate,
+        conversionGrowth,
         pipelineValueEur,
-        pipelineGrowth: 34.0,
+        pipelineGrowth,
         realtimeActiveVisitors: realtime.activeUsers,
         ingestionLatencyMs: Math.max(ingestionLatencyMs, 18),
       },
       trafficHistory,
       topCampaigns,
       recentLeads,
-      dateRange: range,
     };
 
-    AnalyticsService.overviewCache[range] = {
+    AnalyticsService.overviewCache[cacheKey] = {
       data: result,
       expiresAt: Date.now() + 15000, // 15s cache TTL
     };
@@ -71,64 +112,142 @@ export class AnalyticsService {
     return result;
   }
 
-  public async getChannels(): Promise<ChannelPerformanceRow[]> {
-    let ytFollowers = 106;
-    let ytEngagement = 6.84;
-    let ytPosts = 96;
+  public async getChannels(range = '30d', domain = 'leadersperformance.ae'): Promise<ChannelPerformanceRow[]> {
+    const win = resolveWindow(range, 1);
+
+    // 1. Fetch channel traffic breakdown from GA4
+    const [ga4Traffic, prevGa4Traffic, sovAttribution] = await Promise.all([
+      this.ga4.getChannelTraffic(win.startDate, win.endDate, domain),
+      win.prevStartDate && win.prevEndDate
+        ? this.ga4.getChannelTraffic(win.prevStartDate, win.prevEndDate, domain)
+        : Promise.resolve({ byChannel: {}, totalUsers: 0, totalSessions: 0 } as any),
+      this.sovereign.getChannelAttribution(win.startDate, win.endDate, win.prevStartDate, win.prevEndDate, domain),
+    ]);
+
+    // 2. Fetch YouTube details
+    let ytFollowers: number | null = null;
+    let ytEngagement: number | null = null;
+    let ytConnected = false;
+    let ytPostsInRange = 0;
 
     try {
       const yt = await this.youtube.getChannelAnalytics(false);
-      ytFollowers = yt.subscriberCount || 106;
-      ytEngagement = yt.engagementRate || 6.84;
-      ytPosts = yt.videoCount || 96;
+      ytFollowers = yt.subscriberCount;
+      ytEngagement = yt.engagementRate;
+      ytConnected = true;
+
+      // Count posts published in range
+      const [longVideos, shorts] = await Promise.all([
+        this.youtube.getVideos('videos', false).catch(() => []),
+        this.youtube.getVideos('shorts', false).catch(() => []),
+      ]);
+
+      const allYtVideos = [...longVideos, ...shorts];
+      ytPostsInRange = allYtVideos.filter((v) => {
+        const pDate = v.publishedAt.slice(0, 10);
+        return pDate >= win.startDate && pDate <= win.endDate;
+      }).length;
     } catch {
-      // fallback
+      ytConnected = false;
     }
+
+    // 3. Assemble channel rows
+    const ytWebsiteVisitors = ga4Traffic.byChannel.youtube?.activeUsers ?? 0;
+    const ytLeads = sovAttribution.youtube?.leads ?? 0;
+    const ytPipeline = sovAttribution.youtube?.pipelineValueEur ?? 0;
+    const ytPrevTraffic = prevGa4Traffic.byChannel?.youtube?.activeUsers ?? 0;
+    const ytTrend =
+      win.range === 'all'
+        ? null
+        : calcTrend(ytWebsiteVisitors + ytLeads, ytPrevTraffic + (sovAttribution.youtube?.prevLeads ?? 0));
+
+    const liWebsiteVisitors = ga4Traffic.byChannel.linkedin?.activeUsers ?? 0;
+    const liLeads = sovAttribution.linkedin?.leads ?? 0;
+    const liPipeline = sovAttribution.linkedin?.pipelineValueEur ?? 0;
+    const liPrevTraffic = prevGa4Traffic.byChannel?.linkedin?.activeUsers ?? 0;
+    const liTrend =
+      win.range === 'all'
+        ? null
+        : calcTrend(liWebsiteVisitors + liLeads, liPrevTraffic + (sovAttribution.linkedin?.prevLeads ?? 0));
+
+    const igWebsiteVisitors = ga4Traffic.byChannel.instagram?.activeUsers ?? 0;
+    const igLeads = sovAttribution.instagram?.leads ?? 0;
+    const igPipeline = sovAttribution.instagram?.pipelineValueEur ?? 0;
+    const igPrevTraffic = prevGa4Traffic.byChannel?.instagram?.activeUsers ?? 0;
+    const igTrend =
+      win.range === 'all'
+        ? null
+        : calcTrend(igWebsiteVisitors + igLeads, igPrevTraffic + (sovAttribution.instagram?.prevLeads ?? 0));
+
+    const ttWebsiteVisitors = ga4Traffic.byChannel.tiktok?.activeUsers ?? 0;
+    const ttLeads = sovAttribution.tiktok?.leads ?? 0;
+    const ttPipeline = sovAttribution.tiktok?.pipelineValueEur ?? 0;
+    const ttPrevTraffic = prevGa4Traffic.byChannel?.tiktok?.activeUsers ?? 0;
+    const ttTrend =
+      win.range === 'all'
+        ? null
+        : calcTrend(ttWebsiteVisitors + ttLeads, ttPrevTraffic + (sovAttribution.tiktok?.prevLeads ?? 0));
 
     return [
       {
-        id: 'linkedin',
-        name: 'LinkedIn (Executive)',
-        followers: 48920,
-        engagementRate: 6.84,
-        postsMonth: 24,
-        leadsGenerated: 184,
-        pipelineValueEur: 2840000,
-        color: '#0A66C2',
-        trend: '+24.5%',
-      },
-      {
         id: 'youtube',
         name: 'YouTube (@lioneleersteling)',
+        connected: ytConnected,
         followers: ytFollowers,
+        postsInRange: ytPostsInRange,
         engagementRate: ytEngagement,
-        postsMonth: ytPosts,
-        leadsGenerated: 96,
-        pipelineValueEur: 1120000,
+        websiteVisitors: ytWebsiteVisitors,
+        leads: ytLeads,
+        pipelineValueEur: ytPipeline,
+        trend: ytTrend,
+        startDate: win.startDate,
+        endDate: win.endDate,
         color: '#FF0000',
-        trend: '+19.2%',
+      },
+      {
+        id: 'linkedin',
+        name: 'LinkedIn (Executive)',
+        connected: false,
+        followers: null,
+        postsInRange: null,
+        engagementRate: null,
+        websiteVisitors: liWebsiteVisitors,
+        leads: liLeads,
+        pipelineValueEur: liPipeline,
+        trend: liTrend,
+        startDate: win.startDate,
+        endDate: win.endDate,
+        color: '#0A66C2',
       },
       {
         id: 'instagram',
         name: 'Instagram (Visual Insights)',
-        followers: 24800,
-        engagementRate: 4.65,
-        postsMonth: 32,
-        leadsGenerated: 42,
-        pipelineValueEur: 190000,
+        connected: false,
+        followers: null,
+        postsInRange: null,
+        engagementRate: null,
+        websiteVisitors: igWebsiteVisitors,
+        leads: igLeads,
+        pipelineValueEur: igPipeline,
+        trend: igTrend,
+        startDate: win.startDate,
+        endDate: win.endDate,
         color: '#E4405F',
-        trend: '+11.8%',
       },
       {
         id: 'tiktok',
         name: 'TikTok (Bite-sized Frameworks)',
-        followers: 12400,
-        engagementRate: 9.40,
-        postsMonth: 18,
-        leadsGenerated: 20,
-        pipelineValueEur: 100000,
+        connected: false,
+        followers: null,
+        postsInRange: null,
+        engagementRate: null,
+        websiteVisitors: ttWebsiteVisitors,
+        leads: ttLeads,
+        pipelineValueEur: ttPipeline,
+        trend: ttTrend,
+        startDate: win.startDate,
+        endDate: win.endDate,
         color: '#000000',
-        trend: '+45.1%',
       },
     ];
   }
@@ -167,8 +286,8 @@ export class AnalyticsService {
     return !isNaN(parsed) && parsed > 0 ? parsed : 30;
   }
 
-  public async getTelemetry() {
-    return await this.clarity.getUxTelemetryMetrics();
+  public async getTelemetry(websiteOrDomain = 'leaders_performance') {
+    return await this.clarity.getUxTelemetryMetrics(websiteOrDomain);
   }
 
   public async getIntegrationsStatus(): Promise<IntegrationHealthStatus[]> {
@@ -264,8 +383,14 @@ export class AnalyticsService {
     }
   }
 
-  public async getReportsSnapshot(startDate = '30daysAgo', endDate = 'today', limit = 10) {
-    return this.ga4.getReportsSnapshot(startDate, endDate, limit);
+  public async getReportsSnapshot(
+    startDate = '30daysAgo',
+    endDate = 'today',
+    limit = 10,
+    domain?: string,
+    range?: string
+  ) {
+    return this.ga4.getReportsSnapshot(startDate, endDate, limit, domain, range);
   }
 
   public async getClaritySessions(limit = 20, websiteKey = 'leaders_performance') {
@@ -298,5 +423,12 @@ export class AnalyticsService {
   public async getYouTubeAnalytics(forceRefresh = false) {
     return this.youtube.getChannelAnalytics(forceRefresh);
   }
-}
 
+  public async getYouTubeVideos(type: 'videos' | 'shorts' = 'videos', forceRefresh = false) {
+    return this.youtube.getVideos(type, forceRefresh);
+  }
+
+  public async getYouTubePlaylists(forceRefresh = false) {
+    return this.youtube.getPlaylists(forceRefresh);
+  }
+}
