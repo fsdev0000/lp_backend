@@ -236,7 +236,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
       } while (nextPageToken);
 
       // Batch fetch video details in chunks of 50
-      const watchTimeMap = await this.fetchVideoWatchTimeMap();
+      const watchTimeMap = await this.fetchVideoWatchTimeMap(allVideoIds);
       const videos: YouTubeVideoDetailRow[] = [];
       const chunkSize = 50;
       for (let i = 0; i < allVideoIds.length; i += chunkSize) {
@@ -424,28 +424,38 @@ export class YouTubeAdapter implements IYouTubeAdapter {
     }
   }
 
-  private async fetchVideoWatchTimeMap(): Promise<Map<string, number> | null> {
+  /**
+   * Lifetime watch time for the given videos. The report is filtered by our public video IDs
+   * because the channel has more than 200 videos (private and deleted ones included), so a
+   * "top 200" report leaves some public videos out.
+   */
+  private async fetchVideoWatchTimeMap(videoIds: string[]): Promise<Map<string, number> | null> {
     const accessToken = await this.getYouTubeAnalyticsOAuthAccessToken();
     if (!accessToken) return null;
 
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate=2020-10-30&endDate=${today}&metrics=estimatedMinutesWatched&dimensions=video&sort=-estimatedMinutesWatched&maxResults=200`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (!res.ok) {
-        console.warn('[YouTubeAdapter] YouTube Analytics video report returned HTTP', res.status);
-        return null;
-      }
-
-      const data = (await res.json()) as any;
       const map = new Map<string, number>();
-      for (const row of data.rows || []) {
-        const vid = row[0];
-        const mins = typeof row[1] === 'number' ? row[1] : parseFloat(row[1]) || 0;
-        map.set(vid, mins);
+      const chunkSize = 200;
+      for (let i = 0; i < videoIds.length; i += chunkSize) {
+        const ids = videoIds.slice(i, i + chunkSize).join(',');
+        // channel==<id>, not MINE: the OAuth account manages the channel but isn't the channel itself.
+        const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==${this.channelId}&startDate=2020-10-30&endDate=${today}&metrics=estimatedMinutesWatched&dimensions=video&filters=video==${ids}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        if (!res.ok) {
+          console.warn('[YouTubeAdapter] YouTube Analytics video report returned HTTP', res.status);
+          return null;
+        }
+
+        const data = (await res.json()) as any;
+        for (const row of data.rows || []) {
+          const vid = row[0];
+          const mins = typeof row[1] === 'number' ? row[1] : parseFloat(row[1]) || 0;
+          map.set(vid, mins);
+        }
       }
       return map;
     } catch (err: any) {
@@ -460,7 +470,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
 
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate=2020-10-30&endDate=${today}&metrics=playlistViews&dimensions=playlist&sort=-playlistViews&maxResults=200`;
+      // channel==<id>, not MINE: the OAuth account manages the channel but isn't the channel itself.
+      const url = `https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==${this.channelId}&startDate=2020-10-30&endDate=${today}&metrics=playlistViews&dimensions=playlist&sort=-playlistViews&maxResults=200`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -500,17 +511,4 @@ export class YouTubeAdapter implements IYouTubeAdapter {
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }> {
     const start = Date.now();
     if (!this.apiKey || !this.channelId) {
-      return { status: 'DEGRADED', latencyMs: Date.now() - start };
-    }
-    try {
-      const url = `https://www.googleapis.com/youtube/v3/channels?part=id&id=${this.channelId}&key=${this.apiKey}`;
-      const res = await fetch(url);
-      return {
-        status: res.ok ? 'HEALTHY' : 'DOWN',
-        latencyMs: Date.now() - start,
-      };
-    } catch {
-      return { status: 'DOWN', latencyMs: Date.now() - start };
-    }
-  }
-}
+      return { status: 'DEGRADED', latencyMs:
