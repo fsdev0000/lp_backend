@@ -504,4 +504,78 @@ model CampaignUtmYield {
   @@map("campaign_utm_yields")
 }
 
+// ============================================================================
+// SOCIAL CRM & CONTENT AUTOMATION MODULE
+// ============================================================================
+
+model SocialPost {
+  id                 String    @id @default(uuid())
+  title              String
+  hook               String?   @db.Text
+  body               String?   @db.Text
+  platform           String    @default("LINKEDIN") // LINKEDIN, YOUTUBE, INSTAGRAM, TIKTOK, X
+  status             String    @default("DRAFT") // DRAFT, PENDING_REVIEW, APPROVED, SCHEDULED, PUBLISHED, REJECTED, FAILED
+  author             String    @default("Lieke (Marketing Ops)")
+  scheduledFor       DateTime? @map("scheduled_for")
+  publishedAt        DateTime? @map("published_at")
+  mediaUrl           String?   @map("media_url")
+  mediaType          String?   @default("image") @map("media_type") // image, video, article, text
+  tags               String[]  @default([])
+  approvalSignature  String?   @map("approval_signature") // e.g. SIG-LIONEL-2026-9812-VERIFIED
+  approvedBy         String?   @map("approved_by") // Lionel Eersteling
+  approvedAt         DateTime? @map("approved_at")
+  rejectionReason    String?   @db.Text @map("rejection_reason")
+  rejectedAt         DateTime? @map("rejected_at")
+  platformPostId     String?   @map("platform_post_id") // LinkedIn URN: urn:li:share:... or urn:li:ugcPost:...
+  platformPostUrl    String?   @map("platform_post_url")
+  metrics            Json?
+  metadata           Json?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([platform])
+  @@index([scheduledFor])
+  @@index([createdAt])
+  @@map("social_posts")
+}
+
+model SocialAccountConnection {
+  id                    String    @id @default(uuid())
+  platform              String    @unique // LINKEDIN
+  accountName           String?   @map("account_name")
+  accountUrn           String?   @map("account_urn") // urn:li:person:...
+  accountEmail          String?   @map("account_email")
+  profilePictureUrl     String?   @map("profile_picture_url")
+  accessToken           String    @db.Text @map("access_token")
+  refreshToken          String?   @db.Text @map("refresh_token")
+  tokenExpiresAt        DateTime? @map("token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scopes                String[]  @default([])
+  status                String    @default("HEALTHY") // HEALTHY, EXPIRED, DISCONNECTED
+  lastSyncAt            DateTime? @map("last_sync_at")
+  followersCount        Int?      @default(0) @map("followers_count")
+  metadata              Json?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("social_account_connections")
+}
+
+model SocialAuditLog {
+  id         String   @id @default(uuid())
+  actor      String   // "Lionel Eersteling (Owner)", "Lieke (Marketing Ops)", "System Scheduler"
+  action     String   // DRAFT_CREATED, PENDING_REVIEW_REQUESTED, CRYPTOGRAPHIC_APPROVAL_GRANTED, POST_REJECTED, LINKEDIN_BROADCAST_DISPATCHED, LINKEDIN_BROADCAST_FAILED
+  entity     String   // ContentPost #post-103
+  details    String   @db.Text
+  ipAddress  String?  @map("ip_address")
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([action])
+  @@map("social_audit_logs")
+}
+
+
 

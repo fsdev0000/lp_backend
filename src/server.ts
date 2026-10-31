@@ -42,7 +42,7 @@ if (process.env.FRONTEND_URL) {
 
 // Allow localhost only in development
 if (process.env.NODE_ENV !== 'production') {
-  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:8080');
+  ALLOWED_ORIGINS.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://localhost:4000', 'http://localhost:8080');
 }
 
 const corsOptions: cors.CorsOptions = {
@@ -173,11 +173,18 @@ app.use('/api/v1/books', booksRouter);
 import { analyticsRoutes } from './modules/analytics/analytics.routes';
 import { clarityRoutes } from './modules/analytics/clarity.routes';
 import { RealtimePollingJob } from './modules/analytics/jobs/realtimePollingJob';
+import contentRoutes from './modules/content/content.routes';
+import linkedinRoutes from './modules/social/linkedin.routes';
+import { LinkedInSchedulerJob } from './modules/content/jobs/linkedinSchedulerJob';
 
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/clarity', clarityRoutes);
 app.use('/api/v1/clarity', clarityRoutes);
+app.use('/api/content', contentRoutes);
+app.use('/api/v1/content', contentRoutes);
+app.use('/api/social/linkedin', linkedinRoutes);
+app.use('/api/v1/social/linkedin', linkedinRoutes);
 
 // Stripe Webhook Endpoint (Universal)
 app.post('/api/v1/webhooks/stripe', handleStripeWebhook);
@@ -239,6 +246,7 @@ httpServer.listen(PORT, () => {
   console.log(`[Startup] Analytics credentials validated on boot: GA4 (${creds.ga4.isConfigured ? 'OK' : 'MISSING'}), GSC (${creds.gsc.isConfigured ? 'OK' : 'MISSING'}), Clarity (${creds.clarity.isConfigured ? 'OK' : 'DECOUPLED'}), GHL (${creds.ghl.isConfigured ? 'OK' : 'WEBHOOK_ONLY'})`);
   RealtimePollingJob.start();
   GscIngestionJob.start();
+  LinkedInSchedulerJob.start();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
   initAppointmentReminderWorker();

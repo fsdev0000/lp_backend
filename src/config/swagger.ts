@@ -53,6 +53,18 @@ const swaggerOptions = {
         name: 'Microsoft Clarity UX & Telemetry',
         description: 'Multi-website Microsoft Clarity UX telemetry, session recordings with validated playback URLs for Social CRM embed, live metric cache, and rage-click anomaly detection',
       },
+      {
+        name: 'Content Studio & Publishing Matrix',
+        description: 'Multi-channel social media content matrix, scheduling calendar, drafting, and cross-platform publishing (LinkedIn, YouTube, Instagram, TikTok, X).',
+      },
+      {
+        name: 'Executive Approval Desk',
+        description: 'Human-in-the-loop review desk for Mr. Lionel with cryptographic signature verification (SIG-LIONEL-2026-XXXX-VERIFIED) and revision feedback loop.',
+      },
+      {
+        name: 'LinkedIn Social CRM',
+        description: 'LinkedIn OAuth 2.0 connection lifecycle, authorization URL generation, member profile synchronization, and automated feed broadcasting.',
+      },
     ],
     paths: {
       '/health': {
@@ -1448,6 +1460,346 @@ const swaggerOptions = {
                           playbackUrl: { type: 'string', example: 'https://clarity.microsoft.com/projects/view/wu4o652peo/sessions/cls_session_94819' },
                         },
                       },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/content/posts': {
+        get: {
+          summary: 'List content posts',
+          description: 'Retrieves multi-channel posts with support for platform filtering, status filtering, and search.',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [
+            { name: 'platform', in: 'query', schema: { type: 'string', enum: ['LINKEDIN', 'YOUTUBE', 'INSTAGRAM', 'TIKTOK', 'X'] }, description: 'Filter by channel' },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'REJECTED', 'FAILED'] }, description: 'Filter by lifecycle state' },
+            { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search keywords in title, body, or tags' },
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+          ],
+          responses: {
+            200: {
+              description: 'List of posts with pagination and status counts',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: { type: 'array', items: { type: 'object' } },
+                      total: { type: 'integer', example: 5 },
+                      counts: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          summary: 'Create a new content post',
+          description: 'Creates a draft or scheduled post. If requireApproval is true (default), sets status to PENDING_REVIEW for Mr. Lionel sign-off.',
+          tags: ['Content Studio & Publishing Matrix'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['title'],
+                  properties: {
+                    title: { type: 'string', example: 'The Founder Dilemma: Scaling vs Operating' },
+                    hook: { type: 'string', example: 'Most CEOs spend 70% of their time solving problems they created.' },
+                    body: { type: 'string', example: 'Full post commentary on executive discipline and delegation.' },
+                    platform: { type: 'string', enum: ['LINKEDIN', 'YOUTUBE', 'INSTAGRAM', 'TIKTOK', 'X'], default: 'LINKEDIN' },
+                    scheduledFor: { type: 'string', format: 'date-time', example: '2026-11-04T09:00:00.000Z' },
+                    mediaUrl: { type: 'string' },
+                    mediaType: { type: 'string', enum: ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'] },
+                    tags: { type: 'array', items: { type: 'string' }, example: ['leadership', 'discipline', 'founders'] },
+                    author: { type: 'string', default: 'Lionel Eersteling' },
+                    requireApproval: { type: 'boolean', default: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            201: { description: 'Post created successfully' },
+            400: { description: 'Validation error' },
+          },
+        },
+      },
+
+      '/content/posts/{id}': {
+        get: {
+          summary: 'Get post details',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Post details' }, 404: { description: 'Post not found' } },
+        },
+        put: {
+          summary: 'Update post content or schedule',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+          responses: { 200: { description: 'Post updated' } },
+        },
+        delete: {
+          summary: 'Delete a post',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Post deleted' } },
+        },
+      },
+
+      '/content/posts/{id}/request-approval': {
+        post: {
+          summary: 'Submit post for executive review',
+          description: 'Transitions post status to PENDING_REVIEW and logs to audit trail.',
+          tags: ['Executive Approval Desk'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Submitted for sign-off' } },
+        },
+      },
+
+      '/content/posts/{id}/approve': {
+        post: {
+          summary: 'Approve post with cryptographic sign-off',
+          description: 'Registers Mr. Lionel’s approval with verified signature token (SIG-LIONEL-2026-XXXX-VERIFIED) and queues for dispatch.',
+          tags: ['Executive Approval Desk'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    signature: { type: 'string', example: 'SIG-LIONEL-2026-9842-VERIFIED' },
+                    approvedBy: { type: 'string', example: 'Lionel Eersteling (Owner)' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 200: { description: 'Approved and queued' } },
+        },
+      },
+
+      '/content/posts/{id}/reject': {
+        post: {
+          summary: 'Request revisions / reject post',
+          description: 'Rejects the current draft and logs revision notes for the editorial team.',
+          tags: ['Executive Approval Desk'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['reason'],
+                  properties: {
+                    reason: { type: 'string', example: 'Sharpen the opening hook and reference the masterclass workbook.' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 200: { description: 'Post returned for revisions' } },
+        },
+      },
+
+      '/content/posts/{id}/publish-now': {
+        post: {
+          summary: 'Broadcast post immediately to LinkedIn',
+          description: 'Publishes an approved post directly to LinkedIn feed using active OAuth credentials and updates status to PUBLISHED.',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Broadcast completed' }, 502: { description: 'Publishing failure' } },
+        },
+      },
+
+      '/content/approvals': {
+        get: {
+          summary: 'List posts pending executive sign-off',
+          description: 'Returns all posts in PENDING_REVIEW state awaiting Mr. Lionel’s decision.',
+          tags: ['Executive Approval Desk'],
+          responses: { 200: { description: 'Approval queue items' } },
+        },
+      },
+
+      '/content/approvals/stats': {
+        get: {
+          summary: 'Executive Approval Desk KPIs',
+          description: 'Summary counters for pending reviews, approved queues, scheduled items, and total posts.',
+          tags: ['Executive Approval Desk'],
+          responses: { 200: { description: 'Summary statistics' } },
+        },
+      },
+
+      '/content/audit-logs': {
+        get: {
+          summary: 'Get content audit log history',
+          description: 'Chronological trail of editorial submissions, approvals, signatures, and dispatches.',
+          tags: ['Content Studio & Publishing Matrix'],
+          parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } }],
+          responses: { 200: { description: 'Audit log entries' } },
+        },
+      },
+
+      '/social/linkedin/auth-url': {
+        get: {
+          summary: 'Generate LinkedIn OAuth 2.0 authorization URL',
+          description: 'Builds OAuth URL with client ID, state token, and scopes (openid, profile, email, w_member_social).',
+          tags: ['LinkedIn Social CRM'],
+          parameters: [
+            { name: 'redirect_uri', in: 'query', schema: { type: 'string' } },
+            { name: 'state', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: {
+              description: 'OAuth authorization URL ready for redirection',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      url: { type: 'string', example: 'https://www.linkedin.com/oauth/v2/authorization?...' },
+                      clientId: { type: 'string', example: '78ocx3kz1moo0s' },
+                      scopes: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/linkedin/callback': {
+        get: {
+          summary: 'OAuth 2.0 callback receiver',
+          description: 'Exchanges authorization code for access token, retrieves member profile, and saves connection.',
+          tags: ['LinkedIn Social CRM'],
+          parameters: [
+            { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
+            { name: 'state', in: 'query', schema: { type: 'string' } },
+            { name: 'redirect_uri', in: 'query', schema: { type: 'string' } },
+            { name: 'return_to', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: { description: 'Account connected successfully' },
+            400: { description: 'Authorization code invalid or expired' },
+          },
+        },
+      },
+
+      '/social/linkedin/status': {
+        get: {
+          summary: 'Get LinkedIn connection status',
+          description: 'Returns active account connection details, member URN, follower count, and token lifespan.',
+          tags: ['LinkedIn Social CRM'],
+          responses: {
+            200: {
+              description: 'Connection status details',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      connected: { type: 'boolean', example: true },
+                      status: { type: 'string', example: 'CONNECTED' },
+                      accountName: { type: 'string', example: 'Lionel Eersteling' },
+                      accountUrn: { type: 'string', example: 'urn:li:person:abcdef123' },
+                      tokenExpiresIn: { type: 'string', example: '60 days' },
+                      followersCount: { type: 'number', example: 48920 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/linkedin/disconnect': {
+        post: {
+          summary: 'Disconnect LinkedIn integration',
+          description: 'Revokes active credentials and flags connection state as DISCONNECTED.',
+          tags: ['LinkedIn Social CRM'],
+          responses: { 200: { description: 'Account disconnected successfully' } },
+        },
+      },
+
+      '/social/linkedin/share': {
+        post: {
+          summary: 'Publish direct message to LinkedIn feed',
+          description: 'Publishes text/media post directly to the authenticated member profile.',
+          tags: ['LinkedIn Social CRM'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['text'],
+                  properties: {
+                    text: { type: 'string', example: 'Sharing executive insights from the latest masterclass cohort.' },
+                    title: { type: 'string', example: 'Masterclass Cohort #4 Key Takeaways' },
+                    mediaUrl: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Post published successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          postUrn: { type: 'string', example: 'urn:li:share:7182930491' },
+                          postUrl: { type: 'string', example: 'https://www.linkedin.com/feed/update/urn:li:share:7182930491' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/linkedin/ping': {
+        get: {
+          summary: 'Ping LinkedIn API service and credentials',
+          description: 'Validates configured Client ID, Primary Client Secret, and remote API connectivity.',
+          tags: ['LinkedIn Social CRM'],
+          responses: {
+            200: {
+              description: 'API credentials and connectivity healthy',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      configured: { type: 'boolean', example: true },
+                      connected: { type: 'boolean', example: true },
+                      service: { type: 'string', example: 'linkedin' },
                     },
                   },
                 },
