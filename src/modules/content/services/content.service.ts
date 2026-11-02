@@ -332,11 +332,42 @@ export class ContentService {
   }
 
   /**
+   * Resolves and validates mediaType according to CRM requirements:
+   * Accepts "image" | "video" | "article".
+   * Defaults to "article" when only a link is given.
+   */
+  public resolveMediaType(mediaType?: string, mediaUrl?: string): 'image' | 'video' | 'article' {
+    if (mediaType && mediaType.trim()) {
+      const normalized = mediaType.toLowerCase().trim();
+      if (['image', 'video', 'article'].includes(normalized)) {
+        return normalized as 'image' | 'video' | 'article';
+      }
+      throw new Error(`Invalid mediaType: "${mediaType}". Allowed values are "image", "video", or "article".`);
+    }
+
+    if (!mediaUrl || !mediaUrl.trim()) {
+      return 'article';
+    }
+
+    const clean = mediaUrl.trim().toLowerCase().split('?')[0];
+    if (clean.endsWith('.mp4')) {
+      return 'video';
+    }
+    if (clean.endsWith('.jpg') || clean.endsWith('.jpeg') || clean.endsWith('.png') || clean.endsWith('.gif')) {
+      return 'image';
+    }
+
+    // Default to "article" when only a link is given
+    return 'article';
+  }
+
+  /**
    * Creates a new post in DRAFT or PENDING_REVIEW
    */
   public async createPost(dto: CreatePostDto, ipAddress?: string): Promise<SocialPost> {
     const status = dto.requireApproval ? 'PENDING_REVIEW' : 'DRAFT';
     const scheduledFor = dto.scheduledFor ? new Date(dto.scheduledFor) : null;
+    const resolvedMediaType = this.resolveMediaType(dto.mediaType, dto.mediaUrl);
     let post: any;
 
     try {
@@ -350,7 +381,7 @@ export class ContentService {
           author: dto.author || 'Lieke (Marketing Ops)',
           scheduledFor,
           mediaUrl: dto.mediaUrl || null,
-          mediaType: dto.mediaType || 'image',
+          mediaType: resolvedMediaType,
           tags: dto.tags || [],
         },
       });
@@ -365,7 +396,7 @@ export class ContentService {
         author: dto.author || 'Lieke (Marketing Ops)',
         scheduledFor,
         mediaUrl: dto.mediaUrl || null,
-        mediaType: dto.mediaType || 'image',
+        mediaType: resolvedMediaType,
         tags: dto.tags || [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -390,19 +421,46 @@ export class ContentService {
   public async updatePost(id: string, updates: Partial<CreatePostDto>, ipAddress?: string): Promise<SocialPost> {
     const existing = await this.getPostById(id);
 
-    const post = await prisma.socialPost.update({
-      where: { id },
-      data: {
+    let resolvedMediaType: string | undefined = undefined;
+    if (updates.mediaType !== undefined) {
+      resolvedMediaType = this.resolveMediaType(updates.mediaType, updates.mediaUrl ?? existing.mediaUrl ?? undefined);
+    } else if (updates.mediaUrl !== undefined) {
+      resolvedMediaType = this.resolveMediaType(undefined, updates.mediaUrl);
+    }
+
+    let post: any;
+    try {
+      post = await prisma.socialPost.update({
+        where: { id },
+        data: {
+          ...(updates.title !== undefined ? { title: updates.title } : {}),
+          ...(updates.hook !== undefined ? { hook: updates.hook } : {}),
+          ...(updates.body !== undefined ? { body: updates.body } : {}),
+          ...(updates.platform !== undefined ? { platform: updates.platform.toUpperCase() } : {}),
+          ...(updates.scheduledFor !== undefined ? { scheduledFor: updates.scheduledFor ? new Date(updates.scheduledFor) : null } : {}),
+          ...(updates.mediaUrl !== undefined ? { mediaUrl: updates.mediaUrl } : {}),
+          ...(resolvedMediaType !== undefined ? { mediaType: resolvedMediaType } : {}),
+          ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
+        },
+      });
+    } catch {
+      post = {
+        ...existing,
         ...(updates.title !== undefined ? { title: updates.title } : {}),
         ...(updates.hook !== undefined ? { hook: updates.hook } : {}),
         ...(updates.body !== undefined ? { body: updates.body } : {}),
         ...(updates.platform !== undefined ? { platform: updates.platform.toUpperCase() } : {}),
         ...(updates.scheduledFor !== undefined ? { scheduledFor: updates.scheduledFor ? new Date(updates.scheduledFor) : null } : {}),
         ...(updates.mediaUrl !== undefined ? { mediaUrl: updates.mediaUrl } : {}),
-        ...(updates.mediaType !== undefined ? { mediaType: updates.mediaType } : {}),
+        ...(resolvedMediaType !== undefined ? { mediaType: resolvedMediaType } : {}),
         ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
-      },
-    });
+        updatedAt: new Date(),
+      };
+      const idx = ContentService.fallbackPosts.findIndex((p) => p.id === id);
+      if (idx !== -1) {
+        ContentService.fallbackPosts[idx] = post;
+      }
+    }
 
     await this.logAudit({
       actor: 'Lieke (Marketing Ops)',
@@ -684,6 +742,7 @@ export class ContentService {
       title: post.title,
       text: post.hook ? `${post.hook}\n\n${post.body || ''}` : post.body || post.title,
       mediaUrl: post.mediaUrl || undefined,
+      mediaType: (post.mediaType || 'article').toLowerCase(),
     });
   }
 

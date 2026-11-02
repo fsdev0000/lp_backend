@@ -1,8 +1,90 @@
 import { Request, Response } from 'express';
 import { ContentService } from '../services/content.service';
 
+import path from 'path';
+import { uploadContentMedia } from '../../../services/supabaseStorageService';
+
 export class ContentController {
   private service = new ContentService();
+
+  /**
+   * Uploads image or video file for Content Studio posts.
+   * Multipart field: 'file'.
+   * Validates JPG/PNG/GIF (up to 10MB) and MP4 (up to 200MB).
+   */
+  public uploadMedia = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          error: "No file uploaded. Please upload a file with field 'file'.",
+        });
+        return;
+      }
+
+      const ext = path.extname(file.originalname).toLowerCase();
+      const mimetype = (file.mimetype || '').toLowerCase();
+
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif'];
+      const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+
+      const isImage = imageExtensions.includes(ext) || imageMimeTypes.includes(mimetype);
+      const isVideo = ext === '.mp4' || mimetype === 'video/mp4';
+
+      if (!isImage && !isVideo) {
+        res.status(400).json({
+          success: false,
+          error: 'Unsupported file type. Only JPG, PNG, GIF images and MP4 videos are accepted.',
+        });
+        return;
+      }
+
+      const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image';
+
+      // LinkedIn size limits: max 10MB for images, max 200MB for video
+      const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+      const MAX_VIDEO_SIZE = 200 * 1024 * 1024; // 200MB
+
+      if (mediaType === 'image' && file.size > MAX_IMAGE_SIZE) {
+        res.status(400).json({
+          success: false,
+          error: `Image size exceeds LinkedIn limit of 10MB (${(file.size / (1024 * 1024)).toFixed(1)}MB uploaded).`,
+        });
+        return;
+      }
+
+      if (mediaType === 'video' && file.size > MAX_VIDEO_SIZE) {
+        res.status(400).json({
+          success: false,
+          error: `Video size exceeds LinkedIn limit of 200MB (${(file.size / (1024 * 1024)).toFixed(1)}MB uploaded).`,
+        });
+        return;
+      }
+
+      const uploadResult = await uploadContentMedia(file, mediaType);
+
+      res.status(200).json({
+        success: true,
+        mediaUrl: uploadResult.mediaUrl,
+        mediaType,
+        fileName: uploadResult.fileName,
+        size: uploadResult.size,
+        data: {
+          mediaUrl: uploadResult.mediaUrl,
+          mediaType,
+          fileName: uploadResult.fileName,
+          size: uploadResult.size,
+        },
+      });
+    } catch (error: any) {
+      console.error('[ContentController] uploadMedia error:', error);
+      res.status(500).json({
+        success: false,
+        error: error?.message || 'Failed to upload media file',
+      });
+    }
+  };
 
   public listPosts = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -59,7 +141,8 @@ export class ContentController {
       res.status(201).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] createPost error:', error);
-      res.status(500).json({ success: false, error: error?.message || 'Failed to create post' });
+      const isClientError = error?.message?.includes('Invalid mediaType') || error?.message?.includes('required');
+      res.status(isClientError ? 400 : 500).json({ success: false, error: error?.message || 'Failed to create post' });
     }
   };
 

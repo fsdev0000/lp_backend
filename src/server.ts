@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import { apiRoutes } from './api/routes';
@@ -145,6 +146,7 @@ app.use(
   })
 );
 app.use(express.text({ type: ['text/*', 'application/x-yaml', 'text/markdown'] }));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);

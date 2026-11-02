@@ -4,9 +4,12 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 
+import { randomUUID } from 'crypto';
+
 export const UNMASKED_BUCKET = 'unmasked-private';
 export const UNMASKED_VIDEO_OBJECT = 'unmasked-private.mp4';
 export const MASTERCLASS_BUCKET = 'masterclass';
+export const CONTENT_MEDIA_BUCKET = 'content-media';
 // Effectively permanent / long-lived (10 years)
 export const DEFAULT_EXPIRES_IN_SECONDS = 315360000;
 
@@ -207,5 +210,66 @@ export async function createMasterclassSignedUrl(
     console.warn(`[SupabaseStorage] Exception generating signed url for ${fileName}:`, err.message);
     return null;
   }
+}
+
+/**
+ * Uploads media file (image or video) for Social CRM Content Studio.
+ * Tries Supabase public bucket 'content-media' first; falls back to local static disk storage.
+ */
+export async function uploadContentMedia(
+  file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+  mediaType: 'image' | 'video'
+): Promise<{ mediaUrl: string; fileName: string; size: number }> {
+  const ext = path.extname(file.originalname).toLowerCase() || (mediaType === 'video' ? '.mp4' : '.jpg');
+  const safeBaseName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const uniqueKey = `${mediaType}s/${Date.now()}-${randomUUID().slice(0, 8)}-${safeBaseName}${ext}`;
+
+  // 1. Attempt Supabase Storage upload
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from(CONTENT_MEDIA_BUCKET)
+      .upload(uniqueKey, file.buffer, {
+        contentType: file.mimetype,
+        upsert: true,
+      });
+
+    if (!error && data?.path) {
+      const { data: publicData } = supabase.storage
+        .from(CONTENT_MEDIA_BUCKET)
+        .getPublicUrl(data.path);
+
+      if (publicData?.publicUrl) {
+        return {
+          mediaUrl: publicData.publicUrl,
+          fileName: file.originalname,
+          size: file.size,
+        };
+      }
+    } else if (error) {
+      console.warn(`[SupabaseStorage] Upload to '${CONTENT_MEDIA_BUCKET}' failed:`, error.message);
+    }
+  } catch (err: any) {
+    console.warn(`[SupabaseStorage] Exception uploading to Supabase:`, err?.message);
+  }
+
+  // 2. Fallback: Local persistent static storage
+  const uploadDir = path.resolve(process.cwd(), 'uploads', 'content', mediaType + 's');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const localFileName = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeBaseName}${ext}`;
+  const localFilePath = path.join(uploadDir, localFileName);
+  fs.writeFileSync(localFilePath, file.buffer);
+
+  const baseUrl = process.env.BACKEND_PUBLIC_URL || process.env.API_BASE_URL || '';
+  const mediaUrl = `${baseUrl}/uploads/content/${mediaType}s/${localFileName}`;
+
+  return {
+    mediaUrl,
+    fileName: file.originalname,
+    size: file.size,
+  };
 }
 

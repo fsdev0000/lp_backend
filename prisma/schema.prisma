@@ -519,7 +519,7 @@ model SocialPost {
   scheduledFor       DateTime? @map("scheduled_for")
   publishedAt        DateTime? @map("published_at")
   mediaUrl           String?   @map("media_url")
-  mediaType          String?   @default("image") @map("media_type") // image, video, article, text
+  mediaType          String?   @default("article") @map("media_type") // image, video, article
   tags               String[]  @default([])
   approvalSignature  String?   @map("approval_signature") // e.g. SIG-LIONEL-2026-9812-VERIFIED
   approvedBy         String?   @map("approved_by") // Lionel Eersteling

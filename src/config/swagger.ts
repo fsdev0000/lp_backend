@@ -1469,14 +1469,62 @@ const swaggerOptions = {
         },
       },
 
+      '/content/media': {
+        post: {
+          summary: 'Upload image or video for Content Studio posts',
+          description: 'Uploads media file (JPG/PNG/GIF up to 10MB, MP4 up to 200MB) to storage (Supabase Storage with local fallback). Returns mediaUrl, mediaType, fileName, and size.',
+          tags: ['Content Studio & Publishing Matrix'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'multipart/form-data': {
+                schema: {
+                  type: 'object',
+                  required: ['file'],
+                  properties: {
+                    file: {
+                      type: 'string',
+                      format: 'binary',
+                      description: 'Media file: JPG/PNG/GIF image (<= 10MB) or MP4 video (<= 200MB)',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Media uploaded successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      mediaUrl: { type: 'string', example: 'https://.../content-media/images/1700000000-photo.jpg' },
+                      mediaType: { type: 'string', enum: ['image', 'video'], example: 'image' },
+                      fileName: { type: 'string', example: 'photo.jpg' },
+                      size: { type: 'integer', example: 1048576 },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: 'File validation error (unsupported format or size limit exceeded)' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
       '/content/posts': {
         get: {
           summary: 'List content posts',
-          description: 'Retrieves multi-channel posts with support for platform filtering, status filtering, and search.',
+          description: 'Retrieves paginated posts filtered by platform, status, and search query.',
           tags: ['Content Studio & Publishing Matrix'],
           parameters: [
-            { name: 'platform', in: 'query', schema: { type: 'string', enum: ['LINKEDIN', 'YOUTUBE', 'INSTAGRAM', 'TIKTOK', 'X'] }, description: 'Filter by channel' },
-            { name: 'status', in: 'query', schema: { type: 'string', enum: ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'REJECTED', 'FAILED'] }, description: 'Filter by lifecycle state' },
+            { name: 'platform', in: 'query', schema: { type: 'string', enum: ['ALL', 'LINKEDIN', 'YOUTUBE', 'INSTAGRAM', 'TIKTOK', 'X'] } },
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['ALL', 'DRAFT', 'PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'REJECTED'] } },
             { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search keywords in title, body, or tags' },
             { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
             { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
@@ -1518,7 +1566,7 @@ const swaggerOptions = {
                     platform: { type: 'string', enum: ['LINKEDIN', 'YOUTUBE', 'INSTAGRAM', 'TIKTOK', 'X'], default: 'LINKEDIN' },
                     scheduledFor: { type: 'string', format: 'date-time', example: '2026-11-04T09:00:00.000Z' },
                     mediaUrl: { type: 'string' },
-                    mediaType: { type: 'string', enum: ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'] },
+                    mediaType: { type: 'string', enum: ['image', 'video', 'article'], default: 'article' },
                     tags: { type: 'array', items: { type: 'string' }, example: ['leadership', 'discipline', 'founders'] },
                     author: { type: 'string', default: 'Lionel Eersteling' },
                     requireApproval: { type: 'boolean', default: true },

@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import path from 'path';
+import fs from 'fs';
 
 const prisma = new PrismaClient();
 
@@ -130,6 +132,191 @@ export class LinkedInAdapter {
   }
 
   /**
+   * Helper to retrieve media buffer from URL or local file path
+   */
+  private async getMediaBuffer(mediaUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
+    if (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://')) {
+      const res = await fetch(mediaUrl);
+      if (!res.ok) {
+        throw new Error(`Failed to download media from ${mediaUrl}: HTTP ${res.status}`);
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      const contentType = res.headers.get('content-type') || 'application/octet-stream';
+      return { buffer: Buffer.from(arrayBuffer), contentType };
+    }
+
+    // Local file fallback
+    const relative = mediaUrl.startsWith('/') ? mediaUrl.slice(1) : mediaUrl;
+    const localPath = path.resolve(process.cwd(), relative);
+    if (fs.existsSync(localPath)) {
+      const buffer = fs.readFileSync(localPath);
+      const ext = path.extname(localPath).toLowerCase();
+      let contentType = 'application/octet-stream';
+      if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+      else if (ext === '.png') contentType = 'image/png';
+      else if (ext === '.gif') contentType = 'image/gif';
+      else if (ext === '.mp4') contentType = 'video/mp4';
+      return { buffer, contentType };
+    }
+
+    throw new Error(`Media not found at ${mediaUrl}`);
+  }
+
+  /**
+   * Uploads an image to LinkedIn using the 2-step REST Images API
+   * Step 1: initializeUpload -> Step 2: PUT binary
+   */
+  public async uploadImageToLinkedIn(accessToken: string, authorUrn: string, mediaUrl: string): Promise<string> {
+    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
+      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is off. Returning simulated image URN.');
+      return `urn:li:image:safety-dry-run-${Date.now()}`;
+    }
+
+    const { buffer, contentType } = await this.getMediaBuffer(mediaUrl);
+
+    // Step 1: Initialize Image Upload
+    const initRes = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'LinkedIn-Version': '202401',
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: {
+          owner: authorUrn,
+        },
+      }),
+    });
+
+    if (!initRes.ok) {
+      const err = await initRes.text();
+      throw new Error(`LinkedIn Images initializeUpload error ${initRes.status}: ${err}`);
+    }
+
+    const initData = (await initRes.json()) as any;
+    const uploadUrl = initData.value?.uploadUrl;
+    const imageUrn = initData.value?.image;
+
+    if (!uploadUrl || !imageUrn) {
+      throw new Error('LinkedIn did not return uploadUrl or image URN in initializeUpload response');
+    }
+
+    // Step 2: Upload Image Binary
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType || 'image/jpeg',
+      },
+      body: buffer as any,
+    });
+
+    if (!uploadRes.ok) {
+      const err = await uploadRes.text();
+      throw new Error(`LinkedIn Image binary upload error ${uploadRes.status}: ${err}`);
+    }
+
+    return imageUrn;
+  }
+
+  /**
+   * Uploads a video to LinkedIn using the 3-step REST Videos API
+   * Step 1: initializeUpload -> Step 2: PUT binary chunks -> Step 3: finalizeUpload
+   */
+  public async uploadVideoToLinkedIn(accessToken: string, authorUrn: string, mediaUrl: string): Promise<string> {
+    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
+      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is off. Returning simulated video URN.');
+      return `urn:li:video:safety-dry-run-${Date.now()}`;
+    }
+
+    const { buffer } = await this.getMediaBuffer(mediaUrl);
+    const fileSizeBytes = buffer.length;
+
+    // Step 1: Initialize Video Upload
+    const initRes = await fetch('https://api.linkedin.com/rest/videos?action=initializeUpload', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'LinkedIn-Version': '202401',
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: {
+          owner: authorUrn,
+          fileSizeBytes,
+          uploadCaptions: false,
+          uploadThumbnail: false,
+        },
+      }),
+    });
+
+    if (!initRes.ok) {
+      const err = await initRes.text();
+      throw new Error(`LinkedIn Videos initializeUpload error ${initRes.status}: ${err}`);
+    }
+
+    const initData = (await initRes.json()) as any;
+    const instructions = initData.value?.uploadInstructions;
+    const videoUrn = initData.value?.video;
+    const uploadToken = initData.value?.uploadToken || '';
+
+    if (!instructions || !instructions.length || !videoUrn) {
+      throw new Error('LinkedIn did not return uploadInstructions or video URN');
+    }
+
+    const uploadedPartIds: string[] = [];
+
+    // Step 2: Upload Part Binary
+    for (const instruction of instructions) {
+      const chunk = buffer.subarray(instruction.firstByte, instruction.lastByte + 1);
+      const uploadRes = await fetch(instruction.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: chunk as any,
+      });
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.text();
+        throw new Error(`LinkedIn Video part upload error ${uploadRes.status}: ${err}`);
+      }
+
+      const etag = uploadRes.headers.get('etag') || uploadRes.headers.get('ETag') || '';
+      if (etag) {
+        uploadedPartIds.push(etag);
+      }
+    }
+
+    // Step 3: Finalize Video Upload
+    const finalizeRes = await fetch('https://api.linkedin.com/rest/videos?action=finalizeUpload', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'LinkedIn-Version': '202401',
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        finalizeUploadRequest: {
+          video: videoUrn,
+          uploadToken,
+          uploadedPartIds,
+        },
+      }),
+    });
+
+    if (!finalizeRes.ok) {
+      const err = await finalizeRes.text();
+      throw new Error(`LinkedIn Videos finalizeUpload error ${finalizeRes.status}: ${err}`);
+    }
+
+    return videoUrn;
+  }
+
+  /**
    * Publishes an authoritative post to LinkedIn using the REST API (with UGC fallback)
    */
   public async publishPost(
@@ -137,8 +324,32 @@ export class LinkedInAdapter {
     authorUrn: string,
     content: LinkedInPostPayload
   ): Promise<LinkedInPostResult> {
-    const cleanUrn = authorUrn.startsWith('urn:li:person:') ? authorUrn : `urn:li:person:${authorUrn}`;
+    const cleanUrn = authorUrn.startsWith('urn:li:person:') || authorUrn.startsWith('urn:li:organization:')
+      ? authorUrn
+      : `urn:li:person:${authorUrn}`;
     const commentary = `${content.title ? content.title + '\n\n' : ''}${content.text}`;
+    const mediaType = (content.mediaType || 'article').toLowerCase();
+
+    // Safety gate: verify publishing switch
+    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
+      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is not "true". Post dispatch simulated.');
+      const simulatedPostUrn = `urn:li:share:safety-dry-run-${Date.now()}`;
+      return {
+        postId: simulatedPostUrn,
+        postUrn: simulatedPostUrn,
+        postUrl: `https://www.linkedin.com/feed/update/${encodeURIComponent(simulatedPostUrn)}`,
+      };
+    }
+
+    // Upload image or video to LinkedIn first if provided
+    let assetUrn: string | null = null;
+    if (content.mediaUrl) {
+      if (mediaType === 'image') {
+        assetUrn = await this.uploadImageToLinkedIn(accessToken, cleanUrn, content.mediaUrl);
+      } else if (mediaType === 'video') {
+        assetUrn = await this.uploadVideoToLinkedIn(accessToken, cleanUrn, content.mediaUrl);
+      }
+    }
 
     // 1. Primary: Try modern LinkedIn Posts REST API
     try {
@@ -156,7 +367,15 @@ export class LinkedInAdapter {
         isReshareDisabledByAuthor: false,
       };
 
-      if (content.mediaUrl) {
+      if (assetUrn) {
+        // Send the asset URN in content.media.id
+        body.content = {
+          media: {
+            id: assetUrn,
+          },
+        };
+      } else if (content.mediaUrl && mediaType === 'article') {
+        // Links stay as they are (article card)
         body.content = {
           article: {
             source: content.mediaUrl,
@@ -201,8 +420,26 @@ export class LinkedInAdapter {
           shareCommentary: {
             text: commentary,
           },
-          shareMediaCategory: content.mediaUrl ? 'ARTICLE' : 'NONE',
-          ...(content.mediaUrl
+          shareMediaCategory: assetUrn
+            ? mediaType === 'video'
+              ? 'VIDEO'
+              : 'IMAGE'
+            : content.mediaUrl
+            ? 'ARTICLE'
+            : 'NONE',
+          ...(assetUrn
+            ? {
+                media: [
+                  {
+                    status: 'READY',
+                    media: assetUrn,
+                    title: {
+                      text: content.title || 'Leaders Performance Executive Thought Leadership',
+                    },
+                  },
+                ],
+              }
+            : content.mediaUrl
             ? {
                 media: [
                   {
