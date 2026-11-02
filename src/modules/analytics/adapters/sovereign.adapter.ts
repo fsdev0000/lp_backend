@@ -190,61 +190,65 @@ export class SovereignAdapter implements ISovereignAdapter {
       visitWhere.landingPage = { contains: cleanDomain, mode: 'insensitive' };
     }
 
-    // Fetch visits with utmSource in window and matching domain
-    const visits = await prisma.attributionVisit.findMany({
-      where: visitWhere,
-      select: {
-        utmSource: true,
-        email: true,
-      },
-    });
-
-    for (const v of visits) {
-      const src = (v.utmSource || '').toLowerCase();
-      for (const ch of channels) {
-        if (src.includes(ch)) {
-          if (v.email) {
-            result[ch].leads += 1;
-            // Pipeline value reflects actual deals, not an artificial €25k multiplier
-            result[ch].pipelineValueEur += 0;
-          }
-        }
-      }
-    }
-
-    // Previous period if requested
-    if (prevStartDate && prevEndDate) {
-      const prevStart = new Date(`${prevStartDate}T00:00:00.000Z`);
-      const prevEnd = new Date(`${prevEndDate}T23:59:59.999Z`);
-
-      const prevVisitWhere: any = {
-        createdAt: { gte: prevStart, lte: prevEnd },
-        utmSource: { not: null },
-      };
-
-      if (cleanDomain) {
-        prevVisitWhere.landingPage = { contains: cleanDomain, mode: 'insensitive' };
-      }
-
-      const prevVisits = await prisma.attributionVisit.findMany({
-        where: prevVisitWhere,
+    try {
+      // Fetch visits with utmSource in window and matching domain
+      const visits = await prisma.attributionVisit.findMany({
+        where: visitWhere,
         select: {
           utmSource: true,
           email: true,
         },
       });
 
-      for (const v of prevVisits) {
+      for (const v of visits) {
         const src = (v.utmSource || '').toLowerCase();
         for (const ch of channels) {
           if (src.includes(ch)) {
             if (v.email) {
-              result[ch].prevLeads += 1;
-              result[ch].prevPipelineValueEur += 0;
+              result[ch].leads += 1;
+              // Pipeline value reflects actual deals, not an artificial €25k multiplier
+              result[ch].pipelineValueEur += 0;
             }
           }
         }
       }
+
+      // Previous period if requested
+      if (prevStartDate && prevEndDate) {
+        const prevStart = new Date(`${prevStartDate}T00:00:00.000Z`);
+        const prevEnd = new Date(`${prevEndDate}T23:59:59.999Z`);
+
+        const prevVisitWhere: any = {
+          createdAt: { gte: prevStart, lte: prevEnd },
+          utmSource: { not: null },
+        };
+
+        if (cleanDomain) {
+          prevVisitWhere.landingPage = { contains: cleanDomain, mode: 'insensitive' };
+        }
+
+        const prevVisits = await prisma.attributionVisit.findMany({
+          where: prevVisitWhere,
+          select: {
+            utmSource: true,
+            email: true,
+          },
+        });
+
+        for (const v of prevVisits) {
+          const src = (v.utmSource || '').toLowerCase();
+          for (const ch of channels) {
+            if (src.includes(ch)) {
+              if (v.email) {
+                result[ch].prevLeads += 1;
+                result[ch].prevPipelineValueEur += 0;
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SovereignAdapter] getChannelAttribution database query failed, using empty attribution:', err);
     }
 
     return result;

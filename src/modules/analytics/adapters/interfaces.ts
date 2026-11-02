@@ -142,6 +142,7 @@ export interface IGa4Adapter {
   getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
   getYouTubeWebsiteVisitors(range?: string): Promise<YouTubeWebsiteVisitors>;
+  getLinkedInWebsiteVisitors(range?: string): Promise<LinkedInWebsiteVisitors>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
 
@@ -341,3 +342,67 @@ export interface IYouTubeAdapter {
   getPlaylists(forceRefresh?: boolean): Promise<YouTubePlaylistRow[]>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
+
+export interface LinkedInWebsiteVisitors {
+  range: string;
+  startDate: string;
+  endDate: string;
+  total: number | null;
+  bySite: Array<{
+    domain: string;
+    users: number | null;
+  }>;
+}
+
+export interface LinkedInPostDetailRow {
+  id: string;
+  urn: string;
+  title: string | null;
+  text: string;
+  publishedAt: string;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  impressions: number | null;
+  clicks: number | null;
+  reactions: number | null;
+  comments: number | null;
+  reposts: number | null;
+  engagementRate: number | null;
+  engagementRateFormatted: string | null;
+  url: string | null;
+}
+
+export interface LinkedInAnalyticsData {
+  organizationId: string | null;
+  organizationUrn: string | null;
+  name: string;
+  vanityName: string | null;
+  description: string | null;
+  logoUrl: string | null;
+  connected: boolean;
+  followers: number | null;
+  followerGrowth: number | null;
+  followerGrowthFormatted: string | null;
+  impressions: number | null;
+  clicks: number | null;
+  engagementRate: number | null;
+  engagementRateFormatted: string | null;
+  pageViews: number | null;
+  uniquePageViews: number | null;
+  postsInRange: number | null;
+  recentPosts?: LinkedInPostDetailRow[];
+  websiteVisitors?: LinkedInWebsiteVisitors;
+  range: string;
+  startDate: string;
+  endDate: string;
+  cachedAt: string;
+  isCached: boolean;
+  isFallback: boolean;
+}
+
+export interface ILinkedInAnalyticsAdapter {
+  getCompanyAnalytics(range?: string, forceRefresh?: boolean): Promise<LinkedInAnalyticsData>;
+  getPosts(forceRefresh?: boolean): Promise<LinkedInPostDetailRow[]>;
+  ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }>;
+}
+

@@ -9,12 +9,14 @@ export class LinkedInService {
   /**
    * Generates OAuth 2.0 authorization URL for LinkedIn sign-in
    */
-  public getAuthUrl(redirectUri?: string, state?: string) {
-    const url = this.adapter.getAuthorizationUrl(redirectUri, state);
+  public getAuthUrl(redirectUri?: string, state?: string, scopes?: string[]) {
+    const defaultScopes = ['openid', 'profile', 'email', 'w_member_social'];
+    const activeScopes = scopes && scopes.length > 0 ? scopes : defaultScopes;
+    const url = this.adapter.getAuthorizationUrl(redirectUri, state, activeScopes);
     return {
       url,
       clientId: process.env.LINKEDIN_CLIENT_ID || '78ocx3kz1moo0s',
-      scopes: ['openid', 'profile', 'email', 'w_member_social'],
+      scopes: activeScopes,
     };
   }
 
@@ -69,34 +71,47 @@ export class LinkedInService {
    * Gets current LinkedIn connection status
    */
   public async getStatus() {
-    const conn = await this.adapter.getActiveConnection();
-    if (!conn) {
+    try {
+      const conn = await this.adapter.getActiveConnection();
+      if (!conn) {
+        return {
+          connected: false,
+          status: 'DISCONNECTED',
+          accountName: null,
+          accountUrn: null,
+          followersCount: null,
+          message: 'No LinkedIn account connected yet',
+        };
+      }
+
+      const isExpired = conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() < Date.now();
+      const daysUntilExpiry = conn.tokenExpiresAt
+        ? Math.max(0, Math.round((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+        : null;
+
+      return {
+        connected: !isExpired,
+        status: isExpired ? 'EXPIRED' : conn.status,
+        accountName: conn.accountName,
+        accountUrn: conn.accountUrn,
+        accountEmail: conn.accountEmail,
+        profilePictureUrl: conn.profilePictureUrl,
+        lastSyncAt: conn.lastSyncAt,
+        expiresAt: conn.tokenExpiresAt,
+        tokenExpiresIn: `${daysUntilExpiry || 60} days`,
+        followersCount: conn.followersCount ?? null,
+      };
+    } catch (error) {
+      console.warn('[LinkedInService] Failed to check status:', error);
       return {
         connected: false,
         status: 'DISCONNECTED',
         accountName: null,
         accountUrn: null,
+        followersCount: null,
         message: 'No LinkedIn account connected yet',
       };
     }
-
-    const isExpired = conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() < Date.now();
-    const daysUntilExpiry = conn.tokenExpiresAt
-      ? Math.max(0, Math.round((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-      : null;
-
-    return {
-      connected: !isExpired,
-      status: isExpired ? 'EXPIRED' : conn.status,
-      accountName: conn.accountName,
-      accountUrn: conn.accountUrn,
-      accountEmail: conn.accountEmail,
-      profilePictureUrl: conn.profilePictureUrl,
-      lastSyncAt: conn.lastSyncAt,
-      expiresAt: conn.tokenExpiresAt,
-      tokenExpiresIn: `${daysUntilExpiry || 60} days`,
-      followersCount: conn.followersCount || 48920,
-    };
   }
 
   /**

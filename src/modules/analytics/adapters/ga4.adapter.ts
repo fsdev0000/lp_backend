@@ -11,6 +11,7 @@ import {
   CityMetricRow,
   CountryHierarchyRow,
   YouTubeWebsiteVisitors,
+  LinkedInWebsiteVisitors,
 } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
@@ -901,6 +902,118 @@ export class Ga4Adapter implements IGa4Adapter {
         bySite.push({ domain: site, users });
       } catch (err: any) {
         await LiveErrorBoundary.logUpstreamError('GA4', 'getYouTubeWebsiteVisitors', err);
+        bySite.push({ domain: site, users: null });
+      }
+    }
+
+    const nonNullUsers = bySite.map((s) => s.users).filter((u): u is number => u !== null);
+    const total = nonNullUsers.length > 0 ? nonNullUsers.reduce((a, b) => a + b, 0) : null;
+
+    return {
+      range: win.range,
+      startDate: win.startDate,
+      endDate: win.endDate,
+      total,
+      bySite,
+    };
+  }
+
+  public async getLinkedInWebsiteVisitors(range = '7d'): Promise<LinkedInWebsiteVisitors> {
+    const win = resolveWindow(range, 1);
+    const sites = ['leadersperformance.ae', 'lioneleersteling.com'];
+    const bySite: Array<{ domain: string; users: number | null }> = [];
+
+    for (const site of sites) {
+      const target = this.resolveGa4Target(site);
+      const propertyId = target.propertyId || (site.includes('leadersperformance') ? this.propertyId : null);
+
+      if (!this.client || !propertyId) {
+        bySite.push({ domain: site, users: null });
+        continue;
+      }
+
+      try {
+        let isTracked = target.propertyId !== null;
+        if (!isTracked && this.propertyId) {
+          const [hostRes] = await this.client.runReport({
+            property: `properties/${propertyId}`,
+            dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+            dimensionFilter: {
+              filter: {
+                fieldName: 'hostName',
+                stringFilter: {
+                  matchType: 'CONTAINS' as const,
+                  value: site,
+                },
+              },
+            },
+            metrics: [{ name: 'activeUsers' }],
+          });
+          const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
+          isTracked = totalHostUsers > 0;
+        }
+
+        if (!isTracked) {
+          bySite.push({ domain: site, users: null });
+          continue;
+        }
+
+        // Query activeUsers for this host where sessionSource contains 'linkedin' or 'lnkd.in'
+        const dimensionFilter = {
+          andGroup: {
+            expressions: [
+              {
+                filter: {
+                  fieldName: 'hostName',
+                  stringFilter: {
+                    matchType: 'CONTAINS' as const,
+                    value: site,
+                  },
+                },
+              },
+              {
+                orGroup: {
+                  expressions: [
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'CONTAINS' as const,
+                          value: 'linkedin',
+                        },
+                      },
+                    },
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'CONTAINS' as const,
+                          value: 'lnkd.in',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        };
+
+        const [liRes] = await this.client.runReport({
+          property: `properties/${propertyId}`,
+          dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+          dimensionFilter,
+          metrics: [{ name: 'activeUsers' }],
+        });
+
+        let users = 0;
+        for (const row of liRes.rows || []) {
+          users += parseInt(row.metricValues?.[0]?.value || '0', 10);
+        }
+
+        bySite.push({ domain: site, users });
+      } catch (err: any) {
+        await LiveErrorBoundary.logUpstreamError('GA4', 'getLinkedInWebsiteVisitors', err);
         bySite.push({ domain: site, users: null });
       }
     }

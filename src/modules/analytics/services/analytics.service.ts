@@ -4,7 +4,13 @@ import { GscAdapter } from '../adapters/gsc.adapter';
 import { ClarityAdapter } from '../adapters/clarity.adapter';
 import { SovereignAdapter } from '../adapters/sovereign.adapter';
 import { YouTubeAdapter } from '../adapters/youtube.adapter';
-import { ChannelPerformanceRow, IntegrationHealthStatus, YouTubeWebsiteVisitors } from '../adapters/interfaces';
+import { LinkedInAnalyticsAdapter } from '../adapters/linkedinAnalytics.adapter';
+import {
+  ChannelPerformanceRow,
+  IntegrationHealthStatus,
+  YouTubeWebsiteVisitors,
+  LinkedInWebsiteVisitors,
+} from '../adapters/interfaces';
 import { validateAnalyticsCredentials } from '../adapters/credentialValidator';
 import { resolveWindow, calcGrowth, calcTrend } from '../utils/dateRange';
 
@@ -16,8 +22,10 @@ export class AnalyticsService {
   private clarity = new ClarityAdapter();
   private sovereign = new SovereignAdapter();
   private youtube = new YouTubeAdapter();
+  private linkedinAnalytics = new LinkedInAnalyticsAdapter();
   private static overviewCache: { [key: string]: { data: any; expiresAt: number } } = {};
   private static youtubeWebsiteVisitorsCache: Record<string, { data: YouTubeWebsiteVisitors; cachedAt: number }> = {};
+  private static linkedinWebsiteVisitorsCache: Record<string, { data: LinkedInWebsiteVisitors; cachedAt: number }> = {};
 
   public async getOverview(range = '30d', domain = 'leadersperformance.ae') {
     const cacheKey = `${domain}_${range}`;
@@ -155,6 +163,22 @@ export class AnalyticsService {
       ytConnected = false;
     }
 
+    // 2b. Fetch LinkedIn company page details
+    let liFollowers: number | null = null;
+    let liEngagement: number | null = null;
+    let liConnected = false;
+    let liPostsInRange: number | null = null;
+
+    try {
+      const li = await this.linkedinAnalytics.getCompanyAnalytics(range, false);
+      liConnected = li.connected;
+      liFollowers = li.followers;
+      liEngagement = li.engagementRate;
+      liPostsInRange = li.postsInRange;
+    } catch {
+      liConnected = false;
+    }
+
     // 3. Assemble channel rows - trend evaluates clean web traffic change against previous period
     const ytWebsiteVisitors = ga4Traffic.byChannel.youtube?.activeUsers ?? 0;
     const ytLeads = sovAttribution.youtube?.leads ?? 0;
@@ -210,11 +234,11 @@ export class AnalyticsService {
       },
       {
         id: 'linkedin',
-        name: 'LinkedIn (Executive)',
-        connected: false,
-        followers: null,
-        postsInRange: null,
-        engagementRate: null,
+        name: 'LinkedIn (Leaders Performance)',
+        connected: liConnected,
+        followers: liFollowers,
+        postsInRange: liPostsInRange,
+        engagementRate: liEngagement,
         websiteVisitors: liWebsiteVisitors,
         leads: liLeads,
         pipelineValueEur: liPipeline,
@@ -454,4 +478,32 @@ export class AnalyticsService {
   public async getYouTubePlaylists(forceRefresh = false) {
     return this.youtube.getPlaylists(forceRefresh);
   }
+
+  public async getLinkedInAnalytics(range = '7d', forceRefresh = false) {
+    const companyData = await this.linkedinAnalytics.getCompanyAnalytics(range, forceRefresh);
+
+    const now = Date.now();
+    const cachedVisitors = AnalyticsService.linkedinWebsiteVisitorsCache[range];
+    let websiteVisitors: LinkedInWebsiteVisitors;
+
+    if (!forceRefresh && cachedVisitors && now - cachedVisitors.cachedAt < 15 * 60 * 1000) {
+      websiteVisitors = cachedVisitors.data;
+    } else {
+      websiteVisitors = await this.ga4.getLinkedInWebsiteVisitors(range);
+      AnalyticsService.linkedinWebsiteVisitorsCache[range] = {
+        data: websiteVisitors,
+        cachedAt: now,
+      };
+    }
+
+    return {
+      ...companyData,
+      websiteVisitors,
+    };
+  }
+
+  public async getLinkedInPosts(forceRefresh = false) {
+    return this.linkedinAnalytics.getPosts(forceRefresh);
+  }
 }
+

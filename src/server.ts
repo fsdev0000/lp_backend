@@ -239,6 +239,7 @@ import { initAppointmentReminderWorker } from './services/reminderService';
 
 import { validateAnalyticsCredentials } from './modules/analytics/adapters/credentialValidator';
 import { GscIngestionJob } from './modules/analytics/jobs/gscIngestionJob';
+import { LinkedInAnalyticsSyncJob } from './modules/analytics/jobs/linkedinAnalyticsSyncJob';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -247,6 +248,7 @@ httpServer.listen(PORT, () => {
   RealtimePollingJob.start();
   GscIngestionJob.start();
   LinkedInSchedulerJob.start();
+  LinkedInAnalyticsSyncJob.start();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
   initAppointmentReminderWorker();

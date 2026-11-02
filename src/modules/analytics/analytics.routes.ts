@@ -88,4 +88,18 @@ analyticsRoutes.get('/social/youtube/videos', controller.getYouTubeVideos);
  */
 analyticsRoutes.get('/social/youtube/playlists', controller.getYouTubePlaylists);
 
+/**
+ * @route GET /api/v1/analytics/social/linkedin
+ * @desc Retrieve LinkedIn Organization analytics, followers, impressions, clicks, engagement, and website visitors
+ */
+analyticsRoutes.get('/social/linkedin', controller.getLinkedInAnalytics);
+analyticsRoutes.get('/linkedin', controller.getLinkedInAnalytics);
+
+/**
+ * @route GET /api/v1/analytics/social/linkedin/posts
+ * @desc Retrieve recent posts of the LinkedIn company page with engagement metrics, newest first
+ */
+analyticsRoutes.get('/social/linkedin/posts', controller.getLinkedInPosts);
+analyticsRoutes.get('/linkedin/posts', controller.getLinkedInPosts);
+
 

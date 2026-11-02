@@ -1808,6 +1808,116 @@ const swaggerOptions = {
           },
         },
       },
+
+      '/analytics/social/linkedin': {
+        get: {
+          summary: 'Retrieve LinkedIn Company Page Analytics',
+          description: 'Returns followers, follower growth, page impressions, clicks, engagement rate, page views, and GA4 website visitors. Never returns estimates or sample numbers (returns null if unverified/unconnected).',
+          tags: ['Analytics & Performance', 'LinkedIn Social CRM'],
+          parameters: [
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '7d' },
+              description: 'Analysis time window',
+            },
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Bypass cache and query LinkedIn API directly',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Company page analytics data',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          organizationId: { type: 'string', nullable: true },
+                          organizationUrn: { type: 'string', nullable: true },
+                          name: { type: 'string', example: 'Leaders Performance' },
+                          connected: { type: 'boolean', example: false },
+                          followers: { type: 'number', nullable: true },
+                          followerGrowth: { type: 'number', nullable: true },
+                          impressions: { type: 'number', nullable: true },
+                          clicks: { type: 'number', nullable: true },
+                          engagementRate: { type: 'number', nullable: true },
+                          pageViews: { type: 'number', nullable: true },
+                          postsInRange: { type: 'number', nullable: true },
+                          websiteVisitors: { type: 'object' },
+                          isCached: { type: 'boolean', example: false },
+                          isFallback: { type: 'boolean', example: false },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/analytics/social/linkedin/posts': {
+        get: {
+          summary: 'Retrieve LinkedIn Company Page Recent Posts',
+          description: 'Returns recent company page posts with impressions, reactions, comments, reposts, and clicks, sorted newest first.',
+          tags: ['Analytics & Performance', 'LinkedIn Social CRM'],
+          parameters: [
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+              description: 'Bypass cache and query LinkedIn API directly',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'List of company posts with performance metrics',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      posts: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' },
+                            urn: { type: 'string' },
+                            title: { type: 'string', nullable: true },
+                            text: { type: 'string' },
+                            publishedAt: { type: 'string' },
+                            impressions: { type: 'number', nullable: true },
+                            clicks: { type: 'number', nullable: true },
+                            reactions: { type: 'number', nullable: true },
+                            comments: { type: 'number', nullable: true },
+                            reposts: { type: 'number', nullable: true },
+                            engagementRate: { type: 'number', nullable: true },
+                            url: { type: 'string', nullable: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     servers: [
       {

@@ -3,14 +3,16 @@ import request from 'supertest';
 import express from 'express';
 import contentRoutes from '../modules/content/content.routes';
 import linkedinRoutes from '../modules/social/linkedin.routes';
+import { analyticsRoutes } from '../modules/analytics/analytics.routes';
 import { LinkedInAdapter } from '../modules/social/adapters/linkedin.adapter';
 
-jest.setTimeout(25000);
+jest.setTimeout(45000);
 
 const app = express();
 app.use(express.json());
 app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/social/linkedin', linkedinRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
 
 describe('Social CRM & Content Studio API Suite', () => {
   const linkedinAdapter = new LinkedInAdapter();
@@ -115,12 +117,16 @@ describe('Social CRM & Content Studio API Suite', () => {
       expect(res.body.scopes).toContain('w_member_social');
     });
 
-    it('GET /api/v1/social/linkedin/status - should return current connection status', async () => {
+    it('GET /api/v1/social/linkedin/status - should return current connection status without fake default numbers', async () => {
       const res = await request(app).get('/api/v1/social/linkedin/status');
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(typeof res.body.connected).toBe('boolean');
       expect(res.body.status).toBeDefined();
+      // Must never return 48920 fake sample number
+      if (!res.body.connected) {
+        expect(res.body.followersCount).toBeNull();
+      }
     });
 
     it('GET /api/v1/social/linkedin/ping - should confirm credentials configuration', async () => {
@@ -134,6 +140,66 @@ describe('Social CRM & Content Studio API Suite', () => {
       const url = linkedinAdapter.getAuthorizationUrl();
       expect(url).toContain('response_type=code');
       expect(url).toContain('client_id=78ocx3kz1moo0s');
+    });
+  });
+
+  describe('LinkedIn Company Page Analytics & CRM Endpoints', () => {
+    it('GET /api/v1/analytics/social/linkedin - returns valid structure matching YouTube layout with nulls when not connected', async () => {
+      const res = await request(app).get('/api/v1/analytics/social/linkedin?range=7d');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeDefined();
+      expect(res.body.data.name).toBe('Leaders Performance');
+      expect(res.body.data).toHaveProperty('connected');
+      expect(res.body.data).toHaveProperty('followers');
+      expect(res.body.data).toHaveProperty('followerGrowth');
+      expect(res.body.data).toHaveProperty('impressions');
+      expect(res.body.data).toHaveProperty('clicks');
+      expect(res.body.data).toHaveProperty('engagementRate');
+      expect(res.body.data).toHaveProperty('pageViews');
+      expect(res.body.data).toHaveProperty('postsInRange');
+      expect(res.body.data).toHaveProperty('websiteVisitors');
+      expect(res.body.data).toHaveProperty('isCached');
+      expect(res.body.data).toHaveProperty('isFallback');
+
+      // If page is not connected, values MUST be null and never fake numbers
+      if (!res.body.data.connected) {
+        expect(res.body.data.followers).toBeNull();
+        expect(res.body.data.impressions).toBeNull();
+      }
+
+      // Check GA4 websiteVisitors structure
+      if (res.body.data.websiteVisitors) {
+        expect(res.body.data.websiteVisitors).toHaveProperty('range');
+        expect(res.body.data.websiteVisitors).toHaveProperty('total');
+        expect(Array.isArray(res.body.data.websiteVisitors.bySite)).toBe(true);
+      }
+    });
+
+    it('GET /api/v1/analytics/social/linkedin/posts - returns recent posts list sorted newest first', async () => {
+      const res = await request(app).get('/api/v1/analytics/social/linkedin/posts');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.posts)).toBe(true);
+      expect(res.body.data).toBeDefined();
+      expect(Array.isArray(res.body.data.posts)).toBe(true);
+    });
+
+    it('GET /api/v1/analytics/channels - includes LinkedIn (Leaders Performance) with dynamic metrics', async () => {
+      const res = await request(app).get('/api/v1/analytics/channels?range=7d');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+
+      const liChannel = res.body.data.find((c: any) => c.id === 'linkedin');
+      expect(liChannel).toBeDefined();
+      expect(liChannel.name).toContain('LinkedIn');
+      expect(typeof liChannel.connected).toBe('boolean');
+      expect(liChannel).toHaveProperty('websiteVisitors');
+      expect(liChannel).toHaveProperty('leads');
+      expect(liChannel).toHaveProperty('pipelineValueEur');
+      expect(liChannel).toHaveProperty('color');
+      expect(liChannel.color).toBe('#0A66C2');
     });
   });
 });

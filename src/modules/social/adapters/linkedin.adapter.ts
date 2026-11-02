@@ -48,10 +48,12 @@ export class LinkedInAdapter {
   /**
    * Generates LinkedIn OAuth 2.0 Authorization URL
    */
-  public getAuthorizationUrl(redirectUri?: string, state?: string): string {
+  public getAuthorizationUrl(redirectUri?: string, state?: string, customScopes?: string[]): string {
     const uri = redirectUri || this.defaultRedirectUri;
     const authState = state || `state_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const scopes = ['openid', 'profile', 'email', 'w_member_social'].join('%20');
+    const baseScopes = ['openid', 'profile', 'email', 'w_member_social'];
+    const activeScopes = customScopes && customScopes.length > 0 ? customScopes : baseScopes;
+    const scopes = activeScopes.join('%20');
 
     return (
       `https://www.linkedin.com/oauth/v2/authorization` +
@@ -267,6 +269,7 @@ export class LinkedInAdapter {
     refreshToken?: string;
     expiresInSeconds: number;
     scopes?: string[];
+    followersCount?: number | null;
   }) {
     const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000); // Defaults ~60 days
 
@@ -284,7 +287,7 @@ export class LinkedInAdapter {
         scopes: data.scopes || ['openid', 'profile', 'email', 'w_member_social'],
         status: 'HEALTHY',
         lastSyncAt: new Date(),
-        followersCount: 48920, // Initial executive baseline
+        followersCount: data.followersCount !== undefined ? data.followersCount : null,
       },
       update: {
         accountName: data.accountName,
@@ -315,17 +318,17 @@ export class LinkedInAdapter {
    */
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }> {
     const start = Date.now();
-    const conn = await this.getActiveConnection();
-
-    if (!conn) {
-      return {
-        status: 'DEGRADED',
-        latencyMs: Date.now() - start,
-        message: 'LinkedIn app configured but account not connected via OAuth yet',
-      };
-    }
-
     try {
+      const conn = await this.getActiveConnection();
+
+      if (!conn) {
+        return {
+          status: 'DEGRADED',
+          latencyMs: Date.now() - start,
+          message: 'LinkedIn app configured but account not connected via OAuth yet',
+        };
+      }
+
       const res = await fetch('https://api.linkedin.com/v2/userinfo', {
         headers: { Authorization: `Bearer ${conn.accessToken}` },
       });
@@ -336,7 +339,7 @@ export class LinkedInAdapter {
       }
       return { status: 'DEGRADED', latencyMs, message: `Token validation returned HTTP ${res.status}` };
     } catch (err: any) {
-      return { status: 'DOWN', latencyMs: Date.now() - start, message: err?.message || 'Connection error' };
+      return { status: 'DEGRADED', latencyMs: Date.now() - start, message: err?.message || 'Connection error' };
     }
   }
 }
