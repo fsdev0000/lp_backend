@@ -186,6 +186,12 @@ app.use('/api/v1/content', contentRoutes);
 app.use('/api/social/linkedin', linkedinRoutes);
 app.use('/api/v1/social/linkedin', linkedinRoutes);
 
+import instagramRoutes from './modules/social/instagram.routes';
+app.use('/api/social/instagram', instagramRoutes);
+app.use('/api/v1/social/instagram', instagramRoutes);
+app.use('/api/v1/integrations/instagram', instagramRoutes);
+app.use('/api/integrations/instagram', instagramRoutes);
+
 // Stripe Webhook Endpoint (Universal)
 app.post('/api/v1/webhooks/stripe', handleStripeWebhook);
 app.post('/api/webhooks/stripe', handleStripeWebhook);
@@ -240,6 +246,7 @@ import { initAppointmentReminderWorker } from './services/reminderService';
 import { validateAnalyticsCredentials } from './modules/analytics/adapters/credentialValidator';
 import { GscIngestionJob } from './modules/analytics/jobs/gscIngestionJob';
 import { LinkedInAnalyticsSyncJob } from './modules/analytics/jobs/linkedinAnalyticsSyncJob';
+import { InstagramAnalyticsSyncJob } from './modules/analytics/jobs/instagramAnalyticsSyncJob';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -249,6 +256,7 @@ httpServer.listen(PORT, () => {
   GscIngestionJob.start();
   LinkedInSchedulerJob.start();
   LinkedInAnalyticsSyncJob.start();
+  InstagramAnalyticsSyncJob.start();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
   initAppointmentReminderWorker();

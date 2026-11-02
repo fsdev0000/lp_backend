@@ -102,4 +102,19 @@ analyticsRoutes.get('/linkedin', controller.getLinkedInAnalytics);
 analyticsRoutes.get('/social/linkedin/posts', controller.getLinkedInPosts);
 analyticsRoutes.get('/linkedin/posts', controller.getLinkedInPosts);
 
+/**
+ * @route GET /api/v1/analytics/social/instagram
+ * @desc Retrieve Instagram Professional analytics, followers, reach, impressions, profile views, and GA4 attribution
+ */
+analyticsRoutes.get('/social/instagram', controller.getInstagramAnalytics);
+analyticsRoutes.get('/instagram', controller.getInstagramAnalytics);
+
+/**
+ * @route GET /api/v1/analytics/social/instagram/posts
+ * @desc Retrieve recent posts/reels of the Instagram Professional account with metrics, newest first
+ */
+analyticsRoutes.get('/social/instagram/posts', controller.getInstagramPosts);
+analyticsRoutes.get('/instagram/posts', controller.getInstagramPosts);
+
+
 

@@ -577,5 +577,70 @@ model SocialAuditLog {
   @@map("social_audit_logs")
 }
 
+// ============================================================================
+// INSTAGRAM SOCIAL CRM MODELS
+// ============================================================================
+
+model InstagramAnalyticsSnapshot {
+  id              String   @id @default(uuid())
+  followersCount  Int      @map("followers_count")
+  followsCount    Int      @map("follows_count")
+  mediaCount      Int      @map("media_count")
+  impressions     Int?
+  reach           Int?
+  profileViews    Int?     @map("profile_views")
+  engagementRate  Float?   @map("engagement_rate")
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+  dateRange       String   @default("7d") @map("date_range")
+  rawMetrics      Json?    @map("raw_metrics")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([recordedAt])
+  @@index([dateRange])
+  @@map("instagram_analytics_snapshots")
+}
+
+model InstagramMediaSnapshot {
+  id             String   @id @default(uuid())
+  mediaId        String   @unique @map("media_id") // Meta IG Media ID
+  mediaType      String   @map("media_type") // IMAGE, VIDEO, CAROUSEL_ALBUM, REELS
+  caption        String?  @db.Text
+  permalink      String?
+  mediaUrl       String?  @db.Text @map("media_url")
+  thumbnailUrl   String?  @db.Text @map("thumbnail_url")
+  likeCount      Int      @default(0) @map("like_count")
+  commentsCount  Int      @default(0) @map("comments_count")
+  reach          Int?
+  impressions    Int?
+  saved          Int?
+  shares         Int?
+  publishedAt    DateTime @map("published_at")
+  lastSyncedAt   DateTime @default(now()) @map("last_synced_at")
+
+  @@index([publishedAt])
+  @@index([mediaType])
+  @@map("instagram_media_snapshots")
+}
+
+model InstagramPublishingLog {
+  id                String    @id @default(uuid())
+  postId            String?   @map("post_id")
+  containerId       String?   @map("container_id")
+  publishedMediaId  String?   @map("published_media_id")
+  mediaType         String    @map("media_type") // IMAGE, VIDEO, REELS, CAROUSEL
+  caption           String?   @db.Text
+  status            String    // IN_PROGRESS, FINISHED, FAILED
+  approvalSignature String    @map("approval_signature")
+  approvedBy        String    @map("approved_by")
+  errorDetails      String?   @db.Text @map("error_details")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  publishedAt       DateTime? @map("published_at")
+
+  @@index([status])
+  @@index([postId])
+  @@map("instagram_publishing_logs")
+}
+
+
 
 

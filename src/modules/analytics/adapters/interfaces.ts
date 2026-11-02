@@ -143,6 +143,7 @@ export interface IGa4Adapter {
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
   getYouTubeWebsiteVisitors(range?: string): Promise<YouTubeWebsiteVisitors>;
   getLinkedInWebsiteVisitors(range?: string): Promise<LinkedInWebsiteVisitors>;
+  getInstagramWebsiteVisitors(range?: string): Promise<InstagramWebsiteVisitors>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }>;
 }
 
@@ -405,4 +406,66 @@ export interface ILinkedInAnalyticsAdapter {
   getPosts(forceRefresh?: boolean): Promise<LinkedInPostDetailRow[]>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }>;
 }
+
+export interface InstagramWebsiteVisitors {
+  range: string;
+  totalVisitors: number;
+  leadersPerformance: number;
+  lionelEersteling: number;
+  conversions: number;
+  leads: number;
+  breakdown: Array<{ landingPage: string; visitors: number }>;
+}
+
+export interface InstagramPostDetailRow {
+  id: string;
+  caption: string | null;
+  mediaType: string;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  permalink: string | null;
+  publishedAt: string;
+  likes: number | null;
+  comments: number | null;
+  reach: number | null;
+  impressions: number | null;
+  saved: number | null;
+  shares: number | null;
+  engagementRate: number | null;
+  engagementRateFormatted: string | null;
+}
+
+export interface InstagramAnalyticsData {
+  accountId: string;
+  username: string;
+  name: string | null;
+  profilePictureUrl: string | null;
+  biography: string | null;
+  connected: boolean;
+  followers: number | null;
+  followerGrowth: number | null;
+  followerGrowthFormatted: string | null;
+  reach: number | null;
+  impressions: number | null;
+  profileViews: number | null;
+  engagementRate: number | null;
+  engagementRateFormatted: string | null;
+  postsCount: number | null;
+  postsInRange: number | null;
+  recentPosts?: InstagramPostDetailRow[];
+  websiteVisitors?: InstagramWebsiteVisitors;
+  range: string;
+  startDate: string;
+  endDate: string;
+  cachedAt: string;
+  isCached: boolean;
+  isFallback: boolean;
+}
+
+export interface IInstagramAnalyticsAdapter {
+  getAccountAnalytics(range?: string, forceRefresh?: boolean): Promise<InstagramAnalyticsData>;
+  getPosts(forceRefresh?: boolean): Promise<InstagramPostDetailRow[]>;
+  ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }>;
+}
+
 

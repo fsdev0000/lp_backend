@@ -12,6 +12,7 @@ import {
   CountryHierarchyRow,
   YouTubeWebsiteVisitors,
   LinkedInWebsiteVisitors,
+  InstagramWebsiteVisitors,
 } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
@@ -1027,6 +1028,109 @@ export class Ga4Adapter implements IGa4Adapter {
       endDate: win.endDate,
       total,
       bySite,
+    };
+  }
+
+  public async getInstagramWebsiteVisitors(range = '7d'): Promise<InstagramWebsiteVisitors> {
+    const win = resolveWindow(range, 1);
+    let lpVisitors = 0;
+    let lioneleerstelingVisitors = 0;
+    let totalConversions = 0;
+    const breakdownMap = new Map<string, number>();
+
+    const sites = [
+      { domain: 'leadersperformance.ae', isLp: true },
+      { domain: 'lioneleersteling.com', isLp: false },
+    ];
+
+    for (const site of sites) {
+      const target = this.resolveGa4Target(site.domain);
+      const propertyId = target.propertyId || (site.isLp ? this.propertyId : null);
+
+      if (!this.client || !propertyId) {
+        continue;
+      }
+
+      try {
+        const dimensionFilter = {
+          andGroup: {
+            expressions: [
+              {
+                filter: {
+                  fieldName: 'hostName',
+                  stringFilter: {
+                    matchType: 'CONTAINS' as const,
+                    value: site.domain,
+                  },
+                },
+              },
+              {
+                orGroup: {
+                  expressions: [
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'CONTAINS' as const,
+                          value: 'instagram',
+                        },
+                      },
+                    },
+                    {
+                      filter: {
+                        fieldName: 'sessionSource',
+                        stringFilter: {
+                          matchType: 'EXACT' as const,
+                          value: 'ig',
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        };
+
+        const [igRes] = await this.client.runReport({
+          property: `properties/${propertyId}`,
+          dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+          dimensionFilter,
+          dimensions: [{ name: 'pagePath' }],
+          metrics: [{ name: 'activeUsers' }, { name: 'conversions' }],
+        });
+
+        for (const row of igRes.rows || []) {
+          const path = row.dimensionValues?.[0]?.value || '/';
+          const users = parseInt(row.metricValues?.[0]?.value || '0', 10);
+          const conversions = parseInt(row.metricValues?.[1]?.value || '0', 10);
+
+          if (site.isLp) {
+            lpVisitors += users;
+          } else {
+            lioneleerstelingVisitors += users;
+          }
+          totalConversions += conversions;
+          breakdownMap.set(path, (breakdownMap.get(path) || 0) + users);
+        }
+      } catch (err: any) {
+        await LiveErrorBoundary.logUpstreamError('GA4', 'getInstagramWebsiteVisitors', err);
+      }
+    }
+
+    const breakdown = Array.from(breakdownMap.entries())
+      .map(([landingPage, visitors]) => ({ landingPage, visitors }))
+      .sort((a, b) => b.visitors - a.visitors)
+      .slice(0, 10);
+
+    return {
+      range: win.range,
+      totalVisitors: lpVisitors + lioneleerstelingVisitors,
+      leadersPerformance: lpVisitors,
+      lionelEersteling: lioneleerstelingVisitors,
+      conversions: totalConversions,
+      leads: totalConversions,
+      breakdown,
     };
   }
 

@@ -1918,6 +1918,136 @@ const swaggerOptions = {
           },
         },
       },
+
+      '/social/instagram/auth-url': {
+        get: {
+          summary: 'Generate Meta Instagram OAuth 2.0 Authorization URL',
+          description: 'Generates CSRF-protected OAuth URL with Unified Login configuration (or requested Instagram scopes).',
+          tags: ['Instagram Social CRM'],
+          parameters: [
+            {
+              name: 'redirect_uri',
+              in: 'query',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Optional custom callback URI',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Generated OAuth URL with state',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      url: { type: 'string' },
+                      state: { type: 'string' },
+                      appId: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/instagram/status': {
+        get: {
+          summary: 'Retrieve Instagram Connection Status',
+          description: 'Checks current connection state, username, account ID, followers count, and token health.',
+          tags: ['Instagram Social CRM'],
+          responses: {
+            200: {
+              description: 'Current connection status (never exposes access tokens)',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      connected: { type: 'boolean', example: true },
+                      status: { type: 'string', example: 'HEALTHY' },
+                      username: { type: 'string', example: 'lioneleersteling' },
+                      accountId: { type: 'string', example: '17841427503988004' },
+                      followersCount: { type: 'number', example: 51 },
+                      tokenHealth: { type: 'string', example: 'HEALTHY' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/instagram/ping': {
+        get: {
+          summary: 'Ping Meta Graph API',
+          description: 'Performs live diagnostic probe to Meta Graph API, measuring response latency.',
+          tags: ['Instagram Social CRM'],
+          responses: {
+            200: {
+              description: 'Ping latency and connectivity health',
+            },
+          },
+        },
+      },
+
+      '/social/instagram/disconnect': {
+        post: {
+          summary: 'Disconnect Instagram Account',
+          description: 'Revokes active Instagram connection credentials and stops scheduled synchronization.',
+          tags: ['Instagram Social CRM'],
+          responses: {
+            200: {
+              description: 'Disconnection confirmation',
+            },
+          },
+        },
+      },
+
+      '/analytics/social/instagram': {
+        get: {
+          summary: 'Retrieve Instagram Professional Account Analytics',
+          description: 'Returns real followers, reach, impressions, profile views, engagement rate, and GA4 website visitors.',
+          tags: ['Analytics & Performance', 'Instagram Social CRM'],
+          parameters: [
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '7d' },
+            },
+            {
+              name: 'refresh',
+              in: 'query',
+              required: false,
+              schema: { type: 'boolean', default: false },
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Account analytics data',
+            },
+          },
+        },
+      },
+
+      '/analytics/social/instagram/posts': {
+        get: {
+          summary: 'Retrieve Recent Instagram Media and Reels',
+          description: 'Returns recent posts, reels, and carousels ordered newest first with engagement metrics.',
+          tags: ['Analytics & Performance', 'Instagram Social CRM'],
+          responses: {
+            200: {
+              description: 'List of recent Instagram media items',
+            },
+          },
+        },
+      },
     },
     servers: [
       {

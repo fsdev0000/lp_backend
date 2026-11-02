@@ -1,5 +1,7 @@
 import { PrismaClient, SocialPost } from '@prisma/client';
 import { LinkedInAdapter } from '../../social/adapters/linkedin.adapter';
+import { InstagramPublishingService } from './instagramPublishing.service';
+import { generateAuthoritativeSignature } from '../../../utils/approvalSignature';
 
 const prisma = new PrismaClient();
 
@@ -26,6 +28,7 @@ export interface PostFilterDto {
 
 export class ContentService {
   private linkedin = new LinkedInAdapter();
+  private instagramPublishing = new InstagramPublishingService();
   private static seeded = false;
 
   public static fallbackPosts: any[] = [
@@ -472,8 +475,16 @@ export class ContentService {
   ): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
-    const tokenNumber = Math.floor(1000 + Math.random() * 9000);
-    const signature = approvalData.signature || `SIG-LIONEL-2026-${tokenNumber}-VERIFIED`;
+    const signature =
+      approvalData.signature ||
+      generateAuthoritativeSignature({
+        id: post.id,
+        title: post.title,
+        hook: post.hook,
+        body: post.body,
+        platform: post.platform,
+        mediaUrl: post.mediaUrl,
+      });
     const approvedBy = approvalData.approvedBy || 'Lionel Eersteling (Owner)';
     const approvedAt = new Date();
 
@@ -495,6 +506,26 @@ export class ContentService {
       } catch (err: any) {
         console.warn(`[ContentService] Immediate LinkedIn dispatch deferred: ${err?.message}`);
         newStatus = 'SCHEDULED'; // Retain in scheduled queue for background retry
+      }
+    } else if (post.platform === 'INSTAGRAM' && isImmediate && post.mediaUrl) {
+      try {
+        const igRes = await this.instagramPublishing.publishToInstagram({
+          postId: post.id,
+          caption: post.body || post.hook || post.title,
+          mediaType: (post.mediaType as any) || 'IMAGE',
+          mediaUrl: post.mediaUrl,
+          approvalSignature: signature,
+          approvedBy,
+          title: post.title,
+          hook: post.hook || undefined,
+        });
+        newStatus = 'PUBLISHED';
+        publishedAt = new Date();
+        platformPostId = igRes.publishedMediaId;
+        platformPostUrl = igRes.permalink;
+      } catch (err: any) {
+        console.warn(`[ContentService] Immediate Instagram dispatch deferred: ${err?.message}`);
+        newStatus = 'SCHEDULED';
       }
     }
 
@@ -565,8 +596,38 @@ export class ContentService {
     const approvedBy = post.approvedBy || 'Lionel Eersteling (Owner)';
     const signature = post.approvalSignature || `SIG-LIONEL-2026-${Math.floor(1000 + Math.random() * 9000)}-VERIFIED`;
 
+    if (post.platform === 'INSTAGRAM') {
+      if (!post.mediaUrl) {
+        throw new Error('Cannot publish to Instagram without mediaUrl');
+      }
+      const igRes = await this.instagramPublishing.publishToInstagram({
+        postId: post.id,
+        caption: post.body || post.hook || post.title,
+        mediaType: (post.mediaType as any) || 'IMAGE',
+        mediaUrl: post.mediaUrl,
+        approvalSignature: signature,
+        approvedBy,
+        title: post.title,
+        hook: post.hook || undefined,
+      });
+
+      const updated = await prisma.socialPost.update({
+        where: { id },
+        data: {
+          status: 'PUBLISHED',
+          publishedAt: new Date(),
+          approvalSignature: signature,
+          approvedBy,
+          approvedAt: post.approvedAt || new Date(),
+          platformPostId: igRes.publishedMediaId,
+          platformPostUrl: igRes.permalink,
+        },
+      });
+      return updated;
+    }
+
     if (post.platform !== 'LINKEDIN') {
-      // For YouTube, IG, TikTok, mark published and track
+      // For YouTube, TikTok, mark published and track
       const updated = await prisma.socialPost.update({
         where: { id },
         data: {

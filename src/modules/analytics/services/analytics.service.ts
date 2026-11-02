@@ -5,11 +5,15 @@ import { ClarityAdapter } from '../adapters/clarity.adapter';
 import { SovereignAdapter } from '../adapters/sovereign.adapter';
 import { YouTubeAdapter } from '../adapters/youtube.adapter';
 import { LinkedInAnalyticsAdapter } from '../adapters/linkedinAnalytics.adapter';
+import { InstagramAnalyticsAdapter } from '../adapters/instagramAnalytics.adapter';
 import {
   ChannelPerformanceRow,
   IntegrationHealthStatus,
   YouTubeWebsiteVisitors,
   LinkedInWebsiteVisitors,
+  InstagramWebsiteVisitors,
+  InstagramAnalyticsData,
+  InstagramPostDetailRow,
 } from '../adapters/interfaces';
 import { validateAnalyticsCredentials } from '../adapters/credentialValidator';
 import { resolveWindow, calcGrowth, calcTrend } from '../utils/dateRange';
@@ -23,9 +27,11 @@ export class AnalyticsService {
   private sovereign = new SovereignAdapter();
   private youtube = new YouTubeAdapter();
   private linkedinAnalytics = new LinkedInAnalyticsAdapter();
+  private instagramAnalytics = new InstagramAnalyticsAdapter();
   private static overviewCache: { [key: string]: { data: any; expiresAt: number } } = {};
   private static youtubeWebsiteVisitorsCache: Record<string, { data: YouTubeWebsiteVisitors; cachedAt: number }> = {};
   private static linkedinWebsiteVisitorsCache: Record<string, { data: LinkedInWebsiteVisitors; cachedAt: number }> = {};
+  private static instagramWebsiteVisitorsCache: Record<string, { data: InstagramWebsiteVisitors; cachedAt: number }> = {};
 
   public async getOverview(range = '30d', domain = 'leadersperformance.ae') {
     const cacheKey = `${domain}_${range}`;
@@ -198,6 +204,19 @@ export class AnalyticsService {
         ? null
         : calcTrend(liWebsiteVisitors, liPrevTraffic);
 
+    let igFollowers: number | null = null;
+    let igEngagement: number | null = null;
+    let igConnected = false;
+    let igPostsInRange = 0;
+
+    try {
+      const ig = await this.instagramAnalytics.getAccountAnalytics(range, false);
+      igFollowers = ig.followers;
+      igEngagement = ig.engagementRate;
+      igConnected = ig.connected;
+      igPostsInRange = ig.postsInRange || 0;
+    } catch {}
+
     const igWebsiteVisitors = ga4Traffic.byChannel.instagram?.activeUsers ?? 0;
     const igLeads = sovAttribution.instagram?.leads ?? 0;
     const igPipeline = sovAttribution.instagram?.pipelineValueEur ?? 0;
@@ -249,11 +268,11 @@ export class AnalyticsService {
       },
       {
         id: 'instagram',
-        name: 'Instagram (Visual Insights)',
-        connected: false,
-        followers: null,
-        postsInRange: null,
-        engagementRate: null,
+        name: 'Instagram (@lioneleersteling)',
+        connected: igConnected,
+        followers: igFollowers,
+        postsInRange: igPostsInRange,
+        engagementRate: igEngagement,
         websiteVisitors: igWebsiteVisitors,
         leads: igLeads,
         pipelineValueEur: igPipeline,
@@ -504,6 +523,33 @@ export class AnalyticsService {
 
   public async getLinkedInPosts(forceRefresh = false) {
     return this.linkedinAnalytics.getPosts(forceRefresh);
+  }
+
+  public async getInstagramAnalytics(range = '7d', forceRefresh = false): Promise<InstagramAnalyticsData> {
+    const accountData = await this.instagramAnalytics.getAccountAnalytics(range, forceRefresh);
+
+    const now = Date.now();
+    const cachedVisitors = AnalyticsService.instagramWebsiteVisitorsCache[range];
+    let websiteVisitors: InstagramWebsiteVisitors;
+
+    if (!forceRefresh && cachedVisitors && now - cachedVisitors.cachedAt < 15 * 60 * 1000) {
+      websiteVisitors = cachedVisitors.data;
+    } else {
+      websiteVisitors = await this.ga4.getInstagramWebsiteVisitors(range);
+      AnalyticsService.instagramWebsiteVisitorsCache[range] = {
+        data: websiteVisitors,
+        cachedAt: now,
+      };
+    }
+
+    return {
+      ...accountData,
+      websiteVisitors,
+    };
+  }
+
+  public async getInstagramPosts(forceRefresh = false): Promise<InstagramPostDetailRow[]> {
+    return this.instagramAnalytics.getPosts(forceRefresh);
   }
 }
 
