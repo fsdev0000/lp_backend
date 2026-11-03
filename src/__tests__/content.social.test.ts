@@ -370,7 +370,15 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       expect(getLinkedInApiVersion()).not.toBe('202401');
     });
 
-    it('Item 9: Connecting LINKEDIN_PAGE for analytics never gives LinkedInAdapter (personal posting) a token', async () => {
+    it('Item 9: Connecting LINKEDIN_PAGE for analytics never gives LinkedInAdapter (personal posting) a token, and /status reports pageConnected: true, memberConnected: false, publishingEnabled: false', async () => {
+      process.env.LINKEDIN_PUBLISHING_ENABLED = 'false';
+
+      // Personal profile (target=member) auth-url must be blocked with 403 while publishing is off
+      const memberAuthRes = await request(app)
+        .get('/api/v1/social/linkedin/auth-url?target=member')
+        .set('x-api-key', TEST_API_KEY);
+      expect(memberAuthRes.status).toBe(403);
+
       mockConnections.set('LINKEDIN_PAGE', {
         id: 'conn-page',
         platform: 'LINKEDIN_PAGE',
@@ -383,6 +391,14 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
 
       const postingConn = await linkedinAdapter.getActiveConnection();
       expect(postingConn).toBeNull();
+
+      const statusRes = await request(app)
+        .get('/api/v1/social/linkedin/status')
+        .set('x-api-key', TEST_API_KEY);
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.pageConnected).toBe(true);
+      expect(statusRes.body.memberConnected).toBe(false);
+      expect(statusRes.body.publishingEnabled).toBe(false);
     });
 
     it('Items 10, 13, 14: Disconnected analytics returns vanityName="lioneleersteling", isCached=false (not cached), and /posts returns [] without DB fallback', async () => {

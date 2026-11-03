@@ -78,15 +78,22 @@ export class LinkedInService {
       );
     }
 
+    if (target === 'member' && !isLinkedInPublishingEnabled()) {
+      throw createHttpError(
+        'Personal profile connection (target=member) is disabled while LINKEDIN_PUBLISHING_ENABLED=false. Only company page analytics (target=page) may be connected.',
+        403
+      );
+    }
+
     const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES;
     const activeScopes =
       scopes && scopes.length > 0
         ? scopes
         : defaultScopes;
 
-    // Ensure page analytics connection never requests member/org write posting scopes
+    // Ensure page analytics connection (or any flow while publishing is disabled) never requests write posting scopes
     const sanitizedScopes =
-      target === 'page'
+      target === 'page' || !isLinkedInPublishingEnabled()
         ? activeScopes.filter((s) => s !== 'w_member_social' && s !== 'w_organization_social')
         : activeScopes;
 

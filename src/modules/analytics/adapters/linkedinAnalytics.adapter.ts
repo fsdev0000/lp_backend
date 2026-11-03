@@ -63,17 +63,17 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
 
     const vanityName = getLinkedInVanityName();
     const apiVersion = getLinkedInApiVersion();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'LinkedIn-Version': apiVersion,
+      'X-Restli-Protocol-Version': '2.0.0',
+    };
+
     try {
       const url = `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(
         vanityName
       )}`;
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'LinkedIn-Version': apiVersion,
-          'X-Restli-Protocol-Version': '2.0.0',
-        },
-      });
+      const res = await fetch(url, { headers });
       if (res.ok) {
         const data = (await res.json()) as any;
         const orgId = data?.elements?.[0]?.id;
@@ -81,6 +81,22 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           const urn = `urn:li:organization:${orgId}`;
           LinkedInAnalyticsAdapter.resolvedOrgUrn = urn;
           return urn;
+        }
+      }
+    } catch {
+      // Ignore network lookup failure and try organizationAcls next
+    }
+
+    try {
+      const aclRes = await fetch('https://api.linkedin.com/rest/organizationAcls?q=roleAssignee', { headers });
+      if (aclRes.ok) {
+        const aclData = (await aclRes.json()) as any;
+        const firstOrgUrn: string | undefined = aclData.elements?.find(
+          (el: any) => typeof el.organization === 'string' && el.organization.startsWith('urn:li:organization:')
+        )?.organization;
+        if (firstOrgUrn) {
+          LinkedInAnalyticsAdapter.resolvedOrgUrn = firstOrgUrn;
+          return firstOrgUrn;
         }
       }
     } catch {

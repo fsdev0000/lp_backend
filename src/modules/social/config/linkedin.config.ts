@@ -78,10 +78,12 @@ export function isAllowedReturnToUrl(returnTo?: string): boolean {
     }
 
     if (process.env.NODE_ENV !== 'production') {
+      allowedOrigins.add('http://localhost:4000');
       allowedOrigins.add('http://localhost:5173');
       allowedOrigins.add('http://localhost:5174');
       allowedOrigins.add('http://localhost:5175');
       allowedOrigins.add('http://localhost:3000');
+      allowedOrigins.add('http://127.0.0.1:4000');
       allowedOrigins.add('http://127.0.0.1:5173');
       allowedOrigins.add('http://127.0.0.1:5174');
       allowedOrigins.add('http://127.0.0.1:5175');
