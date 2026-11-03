@@ -28,22 +28,30 @@ export class LinkedInAnalyticsSyncJob {
     }
   }
 
+  /**
+   * Item 14: Warms all supported analytics ranges (7d, 30d, 90d, all) and recent page posts.
+   */
   public static async runSync(): Promise<void> {
-    const orgUrn = this.adapter.getOrganizationUrn();
-    if (!orgUrn) {
-      return;
-    }
-
-    console.log(`[LinkedInAnalyticsSyncJob] Syncing LinkedIn company analytics for ${orgUrn}...`);
+    console.log('[LinkedInAnalyticsSyncJob] Syncing LinkedIn company analytics (7d, 30d, 90d, all)...');
     try {
-      const [analytics7d, analytics30d, posts] = await Promise.all([
+      const [analytics7d, analytics30d, analytics90d, analyticsAll, posts] = await Promise.all([
         this.adapter.getCompanyAnalytics('7d', true),
         this.adapter.getCompanyAnalytics('30d', true),
+        this.adapter.getCompanyAnalytics('90d', true),
+        this.adapter.getCompanyAnalytics('all', true),
         this.adapter.getPosts(true),
       ]);
 
+      if (!analytics30d.connected) {
+        return;
+      }
+
       console.log(
-        `[LinkedInAnalyticsSyncJob] Sync complete: ${posts.length} posts cached, followers: ${analytics30d.followers ?? 'null'}, impressions(30d): ${analytics30d.impressions ?? 'null'}`
+        `[LinkedInAnalyticsSyncJob] Sync complete: ${posts.length} posts cached, followers: ${
+          analytics30d.followers ?? 'null'
+        }, impressions(7d/30d/90d/all): ${analytics7d.impressions ?? 'null'}/${
+          analytics30d.impressions ?? 'null'
+        }/${analytics90d.impressions ?? 'null'}/${analyticsAll.impressions ?? 'null'}`
       );
     } catch (err: any) {
       console.warn('[LinkedInAnalyticsSyncJob] Sync notice:', err?.message);

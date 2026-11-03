@@ -1,5 +1,12 @@
 import { Request, Response } from 'express';
 import { LinkedInService } from '../services/linkedin.service';
+import { LinkedInOAuthTarget } from '../adapters/linkedin.adapter';
+import {
+  isAllowedReturnToUrl,
+  isLinkedInPublishingEnabled,
+  LINKEDIN_MEMBER_SCOPES,
+  LINKEDIN_PAGE_SCOPES,
+} from '../config/linkedin.config';
 
 export class LinkedInController {
   private service = new LinkedInService();
@@ -7,16 +14,35 @@ export class LinkedInController {
   /**
    * Generates LinkedIn OAuth 2.0 authorization URL
    * GET /api/v1/social/linkedin/auth-url
+   * GET /api/v1/social/linkedin/page/auth-url
    */
   public getAuthUrl = async (req: Request, res: Response): Promise<void> => {
     try {
       const redirectUri = req.query.redirect_uri as string | undefined;
       const state = req.query.state as string | undefined;
-      const result = this.service.getAuthUrl(redirectUri, state);
+      const returnTo = req.query.return_to as string | undefined;
+      const rawTarget = ((req.query.target as string) || '').toLowerCase().trim();
+      const isPageRoute = req.path.includes('/page/');
+      const target: LinkedInOAuthTarget =
+        isPageRoute || rawTarget !== 'member' ? 'page' : 'member';
+
+      const rawScopes = req.query.scopes || req.query.scope;
+      let parsedScopes: string[] | undefined = undefined;
+      if (typeof rawScopes === 'string' && rawScopes.trim()) {
+        parsedScopes = rawScopes.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+      } else if (Array.isArray(rawScopes)) {
+        parsedScopes = rawScopes.map((s) => String(s).trim()).filter(Boolean);
+      } else {
+        parsedScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES;
+      }
+
+      const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, target, returnTo);
       res.status(200).json({ success: true, ...result });
     } catch (error: any) {
       console.error('[LinkedInController] getAuthUrl error:', error);
-      res.status(500).json({ success: false, error: error?.message || 'Failed to generate auth URL' });
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to generate auth URL' });
     }
   };
 
@@ -27,9 +53,11 @@ export class LinkedInController {
   public handleCallback = async (req: Request, res: Response): Promise<void> => {
     try {
       const code = req.query.code as string;
+      const state = req.query.state as string | undefined;
       const error = req.query.error as string;
       const errorDescription = req.query.error_description as string;
       const redirectUri = req.query.redirect_uri as string | undefined;
+      const returnTo = req.query.return_to as string | undefined;
 
       if (error) {
         res.status(400).json({
@@ -44,12 +72,30 @@ export class LinkedInController {
         return;
       }
 
-      const connection = await this.service.handleCallback(code, redirectUri);
+      if (!state) {
+        res.status(400).json({ success: false, error: 'Missing state parameter in LinkedIn callback' });
+        return;
+      }
 
-      // If requested via browser GET navigation, redirect back to Social CRM UI if configured
-      const returnTo = req.query.return_to as string;
-      if (returnTo && returnTo.startsWith('http')) {
-        res.redirect(`${returnTo}?linkedin_connected=true&account=${encodeURIComponent(connection.accountName || '')}`);
+      if (returnTo && !isAllowedReturnToUrl(returnTo)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid return_to URL. Only approved Leaders Performance CRM URLs are allowed.',
+        });
+        return;
+      }
+
+      const connection = await this.service.handleCallback(code, state, redirectUri, returnTo);
+
+      // Redirect back to Social CRM UI only if returnTo passes strict allowlist check
+      const verifiedReturnTo = connection.returnTo;
+      if (verifiedReturnTo && isAllowedReturnToUrl(verifiedReturnTo)) {
+        const sep = verifiedReturnTo.includes('?') ? '&' : '?';
+        res.redirect(
+          `${verifiedReturnTo}${sep}linkedin_connected=true&target=${encodeURIComponent(
+            connection.target
+          )}&account=${encodeURIComponent(connection.accountName || '')}`
+        );
         return;
       }
 
@@ -60,17 +106,27 @@ export class LinkedInController {
       });
     } catch (error: any) {
       console.error('[LinkedInController] handleCallback error:', error);
-      res.status(500).json({ success: false, error: error?.message || 'Failed to process LinkedIn callback' });
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to process LinkedIn callback' });
     }
   };
 
   /**
-   * Retrieves active LinkedIn connection status
+   * Retrieves active LinkedIn connection status (including publishingEnabled)
    * GET /api/v1/social/linkedin/status
    */
   public getStatus = async (req: Request, res: Response): Promise<void> => {
     try {
-      const status = await this.service.getStatus();
+      const isPageRoute = req.path.includes('/page/');
+      const rawTarget = ((req.query.target as string) || '').toLowerCase().trim();
+      const target: LinkedInOAuthTarget | undefined = isPageRoute
+        ? 'page'
+        : rawTarget === 'page' || rawTarget === 'member'
+        ? (rawTarget as LinkedInOAuthTarget)
+        : undefined;
+
+      const status = await this.service.getStatus(target);
       res.status(200).json({ success: true, ...status });
     } catch (error: any) {
       console.error('[LinkedInController] getStatus error:', error);
@@ -84,7 +140,15 @@ export class LinkedInController {
    */
   public disconnect = async (req: Request, res: Response): Promise<void> => {
     try {
-      const result = await this.service.disconnect();
+      const isPageRoute = req.path.includes('/page/');
+      const rawTarget = ((req.query.target as string) || (req.body?.target as string) || '').toLowerCase().trim();
+      const target: LinkedInOAuthTarget | 'all' = isPageRoute
+        ? 'page'
+        : rawTarget === 'page' || rawTarget === 'member'
+        ? (rawTarget as LinkedInOAuthTarget)
+        : 'all';
+
+      const result = await this.service.disconnect(target);
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[LinkedInController] disconnect error:', error);
@@ -98,17 +162,27 @@ export class LinkedInController {
    */
   public publishDirect = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { text, title, mediaUrl } = req.body;
+      if (!isLinkedInPublishingEnabled()) {
+        res.status(403).json({
+          success: false,
+          error: 'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false).',
+        });
+        return;
+      }
+
+      const { text, title, mediaUrl, mediaType } = req.body || {};
       if (!text || !text.trim()) {
         res.status(400).json({ success: false, error: 'Text content is required to publish to LinkedIn' });
         return;
       }
 
-      const result = await this.service.publishDirect({ text, title, mediaUrl });
+      const result = await this.service.publishDirect({ text, title, mediaUrl, mediaType });
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       console.error('[LinkedInController] publishDirect error:', error);
-      res.status(500).json({ success: false, error: error?.message || 'Failed to publish post to LinkedIn' });
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to publish post to LinkedIn' });
     }
   };
 
@@ -116,7 +190,7 @@ export class LinkedInController {
    * Pings LinkedIn API credentials and health status
    * GET /api/v1/social/linkedin/ping
    */
-  public ping = async (req: Request, res: Response): Promise<void> => {
+  public ping = async (_req: Request, res: Response): Promise<void> => {
     try {
       const result = await this.service.ping();
       res.status(200).json({ success: true, ...result });

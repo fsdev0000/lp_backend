@@ -1,11 +1,9 @@
-import { describe, it, expect, jest, beforeAll } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import contentRoutes from '../modules/content/content.routes';
 import { LinkedInAdapter } from '../modules/social/adapters/linkedin.adapter';
-import { ContentService } from '../modules/content/services/content.service';
-import fs from 'fs';
-import path from 'path';
+import { contentPrisma } from '../modules/content/services/content.service';
 
 jest.setTimeout(30000);
 
@@ -13,16 +11,48 @@ const app = express();
 app.use(express.json());
 app.use('/api/v1/content', contentRoutes);
 
+const TEST_API_KEY = process.env.ARTICLES_API_KEY || 'b8f9c1a2d4e7465b90a3f8c2e1d5b';
+
 describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
   const linkedinAdapter = new LinkedInAdapter();
-  const contentService = new ContentService();
+  const mockPostsStore = new Map<string, any>();
+
+  beforeEach(() => {
+    mockPostsStore.clear();
+
+    jest.spyOn(contentPrisma.socialPost, 'deleteMany').mockResolvedValue({ count: 0 } as any);
+    jest.spyOn(contentPrisma.socialAuditLog, 'deleteMany').mockResolvedValue({ count: 0 } as any);
+    jest.spyOn(contentPrisma.socialAuditLog, 'create').mockResolvedValue({ id: 'audit-1' } as any);
+
+    jest.spyOn(contentPrisma.socialPost, 'create').mockImplementation((async ({ data }: any) => {
+      const created = {
+        id: data.id || `post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockPostsStore.set(created.id, created);
+      return created;
+    }) as any);
+  });
 
   describe('1. Upload Endpoint: POST /api/v1/content/media', () => {
+    it('requires authentication and returns 401 when no token is provided', async () => {
+      const dummyPng = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
+      const res = await request(app)
+        .post('/api/v1/content/media')
+        .attach('file', dummyPng, { filename: 'founder_cover.png', contentType: 'image/png' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
     it('accepts PNG image and returns mediaUrl, mediaType="image", fileName, and size', async () => {
       const dummyPng = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 
       const res = await request(app)
         .post('/api/v1/content/media')
+        .set('x-api-key', TEST_API_KEY)
         .attach('file', dummyPng, { filename: 'founder_cover.png', contentType: 'image/png' });
 
       expect(res.status).toBe(200);
@@ -39,6 +69,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
 
       const res = await request(app)
         .post('/api/v1/content/media')
+        .set('x-api-key', TEST_API_KEY)
         .attach('file', dummyJpg, { filename: 'lionel_briefing.jpg', contentType: 'image/jpeg' });
 
       expect(res.status).toBe(200);
@@ -53,6 +84,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
 
       const res = await request(app)
         .post('/api/v1/content/media')
+        .set('x-api-key', TEST_API_KEY)
         .attach('file', dummyMp4, { filename: 'masterclass_teaser.mp4', contentType: 'video/mp4' });
 
       expect(res.status).toBe(200);
@@ -67,6 +99,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
 
       const res = await request(app)
         .post('/api/v1/content/media')
+        .set('x-api-key', TEST_API_KEY)
         .attach('file', dummyPdf, { filename: 'document.pdf', contentType: 'application/pdf' });
 
       expect(res.status).toBe(400);
@@ -75,7 +108,10 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     });
 
     it('rejects requests with no file attached with HTTP 400', async () => {
-      const res = await request(app).post('/api/v1/content/media').send({});
+      const res = await request(app)
+        .post('/api/v1/content/media')
+        .set('x-api-key', TEST_API_KEY)
+        .send({});
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -87,6 +123,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     it('defaults to "article" when only a website link is provided', async () => {
       const res = await request(app)
         .post('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY)
         .send({
           title: 'Article Post Without Explicit mediaType',
           mediaUrl: 'https://leadersperformance.ae/articles/founder-cognitive-load',
@@ -101,6 +138,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     it('infers "image" when an image file URL is provided', async () => {
       const res = await request(app)
         .post('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY)
         .send({
           title: 'Image Post Inferred From Extension',
           mediaUrl: 'https://staging.leadersperformance.ae/uploads/content/images/header.jpg',
@@ -115,6 +153,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     it('infers "video" when a video file URL is provided', async () => {
       const res = await request(app)
         .post('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY)
         .send({
           title: 'Video Post Inferred From Extension',
           mediaUrl: 'https://staging.leadersperformance.ae/uploads/content/videos/clip.mp4',
@@ -129,6 +168,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     it('respects explicitly provided mediaType ("article", "image", "video")', async () => {
       const res = await request(app)
         .post('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY)
         .send({
           title: 'Explicit Article Post',
           mediaUrl: 'https://leadersperformance.ae/thought-leadership',
@@ -144,6 +184,7 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     it('rejects invalid mediaType values with HTTP 400', async () => {
       const res = await request(app)
         .post('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY)
         .send({
           title: 'Invalid Media Type Post',
           mediaType: 'podcast_audio',
@@ -155,59 +196,37 @@ describe('Content Studio Media Upload & LinkedIn Publishing Matrix', () => {
     });
   });
 
-  describe('3. Publishing & Safety Switch', () => {
-    it('does not send live HTTP requests to LinkedIn while LINKEDIN_PUBLISHING_ENABLED is off ("false")', async () => {
+  describe('3. Publishing & Kill Switch Enforcement', () => {
+    it('blocks publishPost with 403 while LINKEDIN_PUBLISHING_ENABLED is "false"', async () => {
       const previous = process.env.LINKEDIN_PUBLISHING_ENABLED;
       process.env.LINKEDIN_PUBLISHING_ENABLED = 'false';
 
       try {
-        const result = await linkedinAdapter.publishPost(
-          'test_token_123',
-          'urn:li:person:12345',
-          {
+        await expect(
+          linkedinAdapter.publishPost('test_token_123', 'urn:li:person:12345', {
             title: 'Safety Test Post',
-            text: 'This should never hit LinkedIn servers while publishing is off.',
+            text: 'This should be blocked while publishing is off.',
             mediaUrl: 'https://leadersperformance.ae/article',
             mediaType: 'article',
-          }
-        );
-
-        expect(result.postUrn).toContain('urn:li:share:safety-dry-run-');
-        expect(result.postUrl).toContain('https://www.linkedin.com/feed/update/');
+          })
+        ).rejects.toThrow('LINKEDIN_PUBLISHING_ENABLED=false');
       } finally {
         process.env.LINKEDIN_PUBLISHING_ENABLED = previous;
       }
     });
 
-    it('simulates image upload safely when publishing switch is off', async () => {
+    it('blocks image and video uploads with 403 when publishing switch is off', async () => {
       const previous = process.env.LINKEDIN_PUBLISHING_ENABLED;
       process.env.LINKEDIN_PUBLISHING_ENABLED = 'false';
 
       try {
-        const urn = await linkedinAdapter.uploadImageToLinkedIn(
-          'test_token_123',
-          'urn:li:person:12345',
-          'https://example.com/test.jpg'
-        );
+        await expect(
+          linkedinAdapter.uploadImageToLinkedIn('test_token_123', 'urn:li:person:12345', 'https://example.com/test.jpg')
+        ).rejects.toThrow('LINKEDIN_PUBLISHING_ENABLED=false');
 
-        expect(urn).toContain('urn:li:image:safety-dry-run-');
-      } finally {
-        process.env.LINKEDIN_PUBLISHING_ENABLED = previous;
-      }
-    });
-
-    it('simulates video upload safely when publishing switch is off', async () => {
-      const previous = process.env.LINKEDIN_PUBLISHING_ENABLED;
-      process.env.LINKEDIN_PUBLISHING_ENABLED = 'false';
-
-      try {
-        const urn = await linkedinAdapter.uploadVideoToLinkedIn(
-          'test_token_123',
-          'urn:li:person:12345',
-          'https://example.com/test.mp4'
-        );
-
-        expect(urn).toContain('urn:li:video:safety-dry-run-');
+        await expect(
+          linkedinAdapter.uploadVideoToLinkedIn('test_token_123', 'urn:li:person:12345', 'https://example.com/test.mp4')
+        ).rejects.toThrow('LINKEDIN_PUBLISHING_ENABLED=false');
       } finally {
         process.env.LINKEDIN_PUBLISHING_ENABLED = previous;
       }

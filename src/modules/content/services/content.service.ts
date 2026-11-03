@@ -2,8 +2,9 @@ import { PrismaClient, SocialPost } from '@prisma/client';
 import { LinkedInAdapter } from '../../social/adapters/linkedin.adapter';
 import { InstagramPublishingService } from './instagramPublishing.service';
 import { generateAuthoritativeSignature } from '../../../utils/approvalSignature';
+import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
 
-const prisma = new PrismaClient();
+export const contentPrisma = new PrismaClient();
 
 export interface CreatePostDto {
   title: string;
@@ -26,223 +27,50 @@ export interface PostFilterDto {
   limit?: number;
 }
 
+const LEGACY_SEED_POST_IDS = ['post-101', 'post-102', 'post-103', 'post-104', 'post-105'];
+const LEGACY_SEED_AUDIT_IDS = ['audit-901', 'audit-902'];
+
+function createHttpError(message: string, statusCode: number): Error & { statusCode: number } {
+  const err = new Error(message) as Error & { statusCode: number };
+  err.statusCode = statusCode;
+  return err;
+}
+
 export class ContentService {
   private linkedin = new LinkedInAdapter();
   private instagramPublishing = new InstagramPublishingService();
-  private static seeded = false;
-
-  public static fallbackPosts: any[] = [
-    {
-      id: 'post-101',
-      title: 'The Silent Cost of Founder Cognitive Overload: Why 90% of CEOs Make Errors After 3 PM',
-      hook: 'You did not build an 8-figure company to be suffocated by your own executive calendar.',
-      platform: 'LINKEDIN',
-      status: 'PUBLISHED',
-      author: 'Lionel Eersteling',
-      scheduledFor: new Date('2026-10-09T08:30:00Z'),
-      publishedAt: new Date('2026-10-09T08:30:14Z'),
-      mediaUrl: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=800&auto=format&fit=crop&q=80',
-      tags: ['#ExecutivePerformance', '#FounderMindset', '#PeakDecisions'],
-      approvalSignature: 'SIG-LIONEL-2026-9812-VERIFIED',
-      approvedBy: 'Lionel Eersteling',
-      approvedAt: new Date('2026-10-08T18:00:00Z'),
-      platformPostId: 'urn:li:share:7123984719234',
-      platformPostUrl: 'https://www.linkedin.com/feed/update/urn:li:share:7123984719234',
-      metrics: { impressions: 38400, reactions: 840, reposts: 72, leads: 24 },
-      createdAt: new Date('2026-10-08T10:00:00Z'),
-    },
-    {
-      id: 'post-102',
-      title: 'Biomarkers of Elite Decision-Making: Heart Rate Variability Under Board Pressure',
-      hook: 'When millions are on the line, physiological control precedes strategic clarity.',
-      platform: 'YOUTUBE',
-      status: 'PENDING_REVIEW',
-      author: 'Lieke (Marketing Ops)',
-      scheduledFor: new Date('2026-10-14T14:00:00Z'),
-      mediaUrl: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop&q=80',
-      tags: ['#HRV', '#ExecutiveHealth', '#MasterclassTeaser'],
-      createdAt: new Date('2026-10-10T12:00:00Z'),
-    },
-    {
-      id: 'post-103',
-      title: 'Why Strategic Rest Beats Brute Force: The 90-Day Executive Reset Framework',
-      hook: 'High output without recovery is just accelerated exhaustion pretending to be ambition.',
-      platform: 'LINKEDIN',
-      status: 'SCHEDULED',
-      author: 'Lionel Eersteling',
-      scheduledFor: new Date('2026-10-12T09:00:00Z'),
-      mediaUrl: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=800&auto=format&fit=crop&q=80',
-      tags: ['#StrategicRecovery', '#LeadershipProtocol'],
-      approvalSignature: 'SIG-LIONEL-2026-4419-VERIFIED',
-      approvedBy: 'Lionel Eersteling',
-      approvedAt: new Date('2026-10-11T03:15:22Z'),
-      createdAt: new Date('2026-10-10T09:00:00Z'),
-    },
-    {
-      id: 'post-104',
-      title: 'The 3 Micro-Habits Every Dubai Founder Implements Before 7:00 AM',
-      hook: 'Win the first hour, dominate the remaining 23.',
-      platform: 'INSTAGRAM',
-      status: 'DRAFT',
-      author: 'Marketing Ops',
-      scheduledFor: new Date('2026-10-16T18:00:00Z'),
-      mediaUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800&auto=format&fit=crop&q=80',
-      tags: ['#DubaiFounders', '#MorningRoutines', '#Discipline'],
-      createdAt: new Date('2026-10-11T07:00:00Z'),
-    },
-    {
-      id: 'post-105',
-      title: 'How to Eliminate Operational Drag in 10-Person C-Suite Teams',
-      hook: 'If your executive team spends 40% of their day in status meetings, your architecture is broken.',
-      platform: 'TIKTOK',
-      status: 'PENDING_REVIEW',
-      author: 'Marketing Ops',
-      scheduledFor: new Date('2026-10-13T16:30:00Z'),
-      mediaUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&auto=format&fit=crop&q=80',
-      tags: ['#Operations', '#ScaleUp', '#Leadership'],
-      createdAt: new Date('2026-10-11T08:00:00Z'),
-    },
-  ];
-
-  public static fallbackAuditLogs: any[] = [
-    {
-      id: 'audit-901',
-      actor: 'Lionel Eersteling (Owner)',
-      action: 'CRYPTOGRAPHIC_APPROVAL_GRANTED',
-      entity: 'ContentPost #post-103',
-      details: 'Generated digital token SIG-LIONEL-2026-4419-VERIFIED. Scheduled for LinkedIn broadcast.',
-      ipAddress: '185.120.44.12 (Dubai, UAE)',
-      timestamp: new Date('2026-10-11T03:15:22Z'),
-    },
-    {
-      id: 'audit-902',
-      actor: 'Lieke (Marketing Ops)',
-      action: 'DRAFT_SUBMITTED_FOR_REVIEW',
-      entity: 'ContentPost #post-102',
-      details: 'Submitted YouTube Masterclass teaser for executive sign-off.',
-      ipAddress: '82.161.92.11 (Amsterdam, NL)',
-      timestamp: new Date('2026-10-11T01:20:05Z'),
-    },
-  ];
+  private static legacyPurged = false;
 
   constructor() {
-    this.ensureInitialSeed().catch((e) => console.warn('[ContentService] Seed notice:', e?.message));
+    this.purgeLegacySeedData().catch(() => {
+      // Ignore if DB is offline during boot
+    });
   }
 
   /**
-   * Ensures the initial Social CRM posts match the frontend baseline
+   * One-time removal of any previously seeded fake posts (post-101..105) and audit logs (audit-901..902)
+   * so fake published metrics (post-101) or past-dated scheduled posts (post-103) never remain in the DB.
    */
-  public async ensureInitialSeed(): Promise<void> {
-    if (ContentService.seeded) return;
+  public async purgeLegacySeedData(): Promise<void> {
+    if (ContentService.legacyPurged) return;
+    ContentService.legacyPurged = true;
     try {
-      const count = await prisma.socialPost.count();
-      if (count === 0) {
-        console.log('[ContentService] Seeding initial Social CRM content posts...');
-        await prisma.socialPost.createMany({
-          data: [
-            {
-              id: 'post-101',
-              title: 'The Silent Cost of Founder Cognitive Overload: Why 90% of CEOs Make Errors After 3 PM',
-              hook: 'You did not build an 8-figure company to be suffocated by your own executive calendar.',
-              platform: 'LINKEDIN',
-              status: 'PUBLISHED',
-              author: 'Lionel Eersteling',
-              scheduledFor: new Date('2026-10-09T08:30:00Z'),
-              publishedAt: new Date('2026-10-09T08:30:14Z'),
-              mediaUrl: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=800&auto=format&fit=crop&q=80',
-              tags: ['#ExecutivePerformance', '#FounderMindset', '#PeakDecisions'],
-              approvalSignature: 'SIG-LIONEL-2026-9812-VERIFIED',
-              approvedBy: 'Lionel Eersteling',
-              approvedAt: new Date('2026-10-08T18:00:00Z'),
-              platformPostId: 'urn:li:share:7123984719234',
-              platformPostUrl: 'https://www.linkedin.com/feed/update/urn:li:share:7123984719234',
-              metrics: { impressions: 38400, reactions: 840, reposts: 72, leads: 24 },
-            },
-            {
-              id: 'post-102',
-              title: 'Biomarkers of Elite Decision-Making: Heart Rate Variability Under Board Pressure',
-              hook: 'When millions are on the line, physiological control precedes strategic clarity.',
-              platform: 'YOUTUBE',
-              status: 'PENDING_REVIEW',
-              author: 'Lieke (Marketing Ops)',
-              scheduledFor: new Date('2026-10-14T14:00:00Z'),
-              mediaUrl: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop&q=80',
-              tags: ['#HRV', '#ExecutiveHealth', '#MasterclassTeaser'],
-            },
-            {
-              id: 'post-103',
-              title: 'Why Strategic Rest Beats Brute Force: The 90-Day Executive Reset Framework',
-              hook: 'High output without recovery is just accelerated exhaustion pretending to be ambition.',
-              platform: 'LINKEDIN',
-              status: 'SCHEDULED',
-              author: 'Lionel Eersteling',
-              scheduledFor: new Date('2026-10-12T09:00:00Z'),
-              mediaUrl: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=800&auto=format&fit=crop&q=80',
-              tags: ['#StrategicRecovery', '#LeadershipProtocol'],
-              approvalSignature: 'SIG-LIONEL-2026-4419-VERIFIED',
-              approvedBy: 'Lionel Eersteling',
-              approvedAt: new Date('2026-10-11T03:15:22Z'),
-            },
-            {
-              id: 'post-104',
-              title: 'The 3 Micro-Habits Every Dubai Founder Implements Before 7:00 AM',
-              hook: 'Win the first hour, dominate the remaining 23.',
-              platform: 'INSTAGRAM',
-              status: 'DRAFT',
-              author: 'Marketing Ops',
-              scheduledFor: new Date('2026-10-16T18:00:00Z'),
-              mediaUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800&auto=format&fit=crop&q=80',
-              tags: ['#DubaiFounders', '#MorningRoutines', '#Discipline'],
-            },
-            {
-              id: 'post-105',
-              title: 'How to Eliminate Operational Drag in 10-Person C-Suite Teams',
-              hook: 'If your executive team spends 40% of their day in status meetings, your architecture is broken.',
-              platform: 'TIKTOK',
-              status: 'PENDING_REVIEW',
-              author: 'Marketing Ops',
-              scheduledFor: new Date('2026-10-13T16:30:00Z'),
-              mediaUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&auto=format&fit=crop&q=80',
-              tags: ['#Operations', '#ScaleUp', '#Leadership'],
-            },
-          ],
-        });
-
-        // Seed initial audit log entries
-        await prisma.socialAuditLog.createMany({
-          data: [
-            {
-              id: 'audit-901',
-              actor: 'Lionel Eersteling (Owner)',
-              action: 'CRYPTOGRAPHIC_APPROVAL_GRANTED',
-              entity: 'ContentPost #post-103',
-              details: 'Generated digital token SIG-LIONEL-2026-4419-VERIFIED. Scheduled for LinkedIn broadcast.',
-              ipAddress: '185.120.44.12 (Dubai, UAE)',
-              timestamp: new Date('2026-10-11T03:15:22Z'),
-            },
-            {
-              id: 'audit-902',
-              actor: 'Lieke (Marketing Ops)',
-              action: 'DRAFT_SUBMITTED_FOR_REVIEW',
-              entity: 'ContentPost #post-102',
-              details: 'Submitted YouTube Masterclass teaser for executive sign-off.',
-              ipAddress: '82.161.92.11 (Amsterdam, NL)',
-              timestamp: new Date('2026-10-11T01:20:05Z'),
-            },
-          ],
-        });
-      }
-      ContentService.seeded = true;
-    } catch (err: any) {
-      console.warn('[ContentService] Seeding skip notice:', err?.message);
+      await contentPrisma.socialPost.deleteMany({
+        where: { id: { in: LEGACY_SEED_POST_IDS } },
+      });
+      await contentPrisma.socialAuditLog.deleteMany({
+        where: { id: { in: LEGACY_SEED_AUDIT_IDS } },
+      });
+    } catch {
+      // Ignore if DB is unreachable
     }
   }
 
   /**
-   * Lists posts matching multi-platform filtering criteria
+   * Lists posts matching multi-platform filtering criteria directly from the database (no seed or memory fallback).
    */
   public async listPosts(filter: PostFilterDto) {
-    await this.ensureInitialSeed();
+    await this.purgeLegacySeedData();
 
     const where: any = {};
     if (filter.platform && filter.platform !== 'ALL') {
@@ -264,77 +92,42 @@ export class ContentService {
     const limit = Math.min(100, Math.max(1, filter.limit || 50));
     const skip = (page - 1) * limit;
 
-    try {
-      const [total, posts] = await Promise.all([
-        prisma.socialPost.count({ where }),
-        prisma.socialPost.findMany({
-          where,
-          orderBy: [{ scheduledFor: 'desc' }, { createdAt: 'desc' }],
-          skip,
-          take: limit,
-        }),
-      ]);
+    const [total, posts] = await Promise.all([
+      contentPrisma.socialPost.count({ where }),
+      contentPrisma.socialPost.findMany({
+        where,
+        orderBy: [{ scheduledFor: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+    ]);
 
-      return {
-        posts,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      };
-    } catch (dbErr: any) {
-      console.warn('[ContentService] Database read fallback to in-memory baseline:', dbErr?.message);
-      // Resilient fallback using baseline posts
-      let filtered = [...ContentService.fallbackPosts];
-      if (filter.platform && filter.platform !== 'ALL') {
-        filtered = filtered.filter((p) => p.platform === filter.platform?.toUpperCase());
-      }
-      if (filter.status && filter.status !== 'ALL') {
-        filtered = filtered.filter((p) => p.status === filter.status?.toUpperCase());
-      }
-      if (filter.search && filter.search.trim()) {
-        const q = filter.search.toLowerCase();
-        filtered = filtered.filter(
-          (p) =>
-            p.title.toLowerCase().includes(q) ||
-            (p.hook && p.hook.toLowerCase().includes(q)) ||
-            (p.body && p.body.toLowerCase().includes(q))
-        );
-      }
-      return {
-        posts: filtered.slice(skip, skip + limit),
-        pagination: {
-          total: filtered.length,
-          page,
-          limit,
-          totalPages: Math.ceil(filtered.length / limit),
-        },
-      };
-    }
+    return {
+      posts,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**
-   * Retrieves single post details
+   * Retrieves single post details from the database.
    */
   public async getPostById(id: string): Promise<SocialPost> {
-    try {
-      const post = await prisma.socialPost.findUnique({ where: { id } });
-      if (post) return post;
-    } catch {}
-
-    const fallback = ContentService.fallbackPosts.find((p) => p.id === id);
-    if (!fallback) {
-      throw new Error(`Social post not found with ID: ${id}`);
+    const post = await contentPrisma.socialPost.findUnique({ where: { id } });
+    if (!post) {
+      throw createHttpError(`Social post not found with ID: ${id}`, 404);
     }
-    return fallback as SocialPost;
+    return post;
   }
 
   /**
    * Resolves and validates mediaType according to CRM requirements:
    * Accepts "image" | "video" | "article".
-   * Defaults to "article" when only a link is given.
+   * Defaults to "article" when only a link is given or when omitted.
    */
   public resolveMediaType(mediaType?: string, mediaUrl?: string): 'image' | 'video' | 'article' {
     if (mediaType && mediaType.trim()) {
@@ -342,7 +135,10 @@ export class ContentService {
       if (['image', 'video', 'article'].includes(normalized)) {
         return normalized as 'image' | 'video' | 'article';
       }
-      throw new Error(`Invalid mediaType: "${mediaType}". Allowed values are "image", "video", or "article".`);
+      throw createHttpError(
+        `Invalid mediaType: "${mediaType}". Allowed values are "image", "video", or "article".`,
+        400
+      );
     }
 
     if (!mediaUrl || !mediaUrl.trim()) {
@@ -368,26 +164,9 @@ export class ContentService {
     const status = dto.requireApproval ? 'PENDING_REVIEW' : 'DRAFT';
     const scheduledFor = dto.scheduledFor ? new Date(dto.scheduledFor) : null;
     const resolvedMediaType = this.resolveMediaType(dto.mediaType, dto.mediaUrl);
-    let post: any;
 
-    try {
-      post = await prisma.socialPost.create({
-        data: {
-          title: dto.title,
-          hook: dto.hook || null,
-          body: dto.body || null,
-          platform: (dto.platform || 'LINKEDIN').toUpperCase(),
-          status,
-          author: dto.author || 'Lieke (Marketing Ops)',
-          scheduledFor,
-          mediaUrl: dto.mediaUrl || null,
-          mediaType: resolvedMediaType,
-          tags: dto.tags || [],
-        },
-      });
-    } catch {
-      post = {
-        id: `post-${Date.now()}`,
+    const post = await contentPrisma.socialPost.create({
+      data: {
         title: dto.title,
         hook: dto.hook || null,
         body: dto.body || null,
@@ -398,11 +177,8 @@ export class ContentService {
         mediaUrl: dto.mediaUrl || null,
         mediaType: resolvedMediaType,
         tags: dto.tags || [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      ContentService.fallbackPosts.unshift(post);
-    }
+      },
+    });
 
     await this.logAudit({
       actor: dto.author || 'Lieke (Marketing Ops)',
@@ -416,10 +192,17 @@ export class ContentService {
   }
 
   /**
-   * Updates an existing post
+   * Updates an existing post.
+   * Workflow rule (6c): Editing an APPROVED or SCHEDULED post (or any post with an approvalSignature)
+   * clears its approval signature and sends it back to PENDING_REVIEW.
+   * Published posts cannot be edited.
    */
   public async updatePost(id: string, updates: Partial<CreatePostDto>, ipAddress?: string): Promise<SocialPost> {
     const existing = await this.getPostById(id);
+
+    if (existing.status === 'PUBLISHED') {
+      throw createHttpError('Cannot edit a post that has already been published.', 400);
+    }
 
     let resolvedMediaType: string | undefined = undefined;
     if (updates.mediaType !== undefined) {
@@ -428,45 +211,42 @@ export class ContentService {
       resolvedMediaType = this.resolveMediaType(undefined, updates.mediaUrl);
     }
 
-    let post: any;
-    try {
-      post = await prisma.socialPost.update({
-        where: { id },
-        data: {
-          ...(updates.title !== undefined ? { title: updates.title } : {}),
-          ...(updates.hook !== undefined ? { hook: updates.hook } : {}),
-          ...(updates.body !== undefined ? { body: updates.body } : {}),
-          ...(updates.platform !== undefined ? { platform: updates.platform.toUpperCase() } : {}),
-          ...(updates.scheduledFor !== undefined ? { scheduledFor: updates.scheduledFor ? new Date(updates.scheduledFor) : null } : {}),
-          ...(updates.mediaUrl !== undefined ? { mediaUrl: updates.mediaUrl } : {}),
-          ...(resolvedMediaType !== undefined ? { mediaType: resolvedMediaType } : {}),
-          ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
-        },
-      });
-    } catch {
-      post = {
-        ...existing,
+    const wasApprovedOrScheduled =
+      existing.status === 'SCHEDULED' ||
+      existing.status === 'APPROVED' ||
+      Boolean(existing.approvalSignature);
+
+    const post = await contentPrisma.socialPost.update({
+      where: { id },
+      data: {
         ...(updates.title !== undefined ? { title: updates.title } : {}),
         ...(updates.hook !== undefined ? { hook: updates.hook } : {}),
         ...(updates.body !== undefined ? { body: updates.body } : {}),
         ...(updates.platform !== undefined ? { platform: updates.platform.toUpperCase() } : {}),
-        ...(updates.scheduledFor !== undefined ? { scheduledFor: updates.scheduledFor ? new Date(updates.scheduledFor) : null } : {}),
+        ...(updates.scheduledFor !== undefined
+          ? { scheduledFor: updates.scheduledFor ? new Date(updates.scheduledFor) : null }
+          : {}),
         ...(updates.mediaUrl !== undefined ? { mediaUrl: updates.mediaUrl } : {}),
         ...(resolvedMediaType !== undefined ? { mediaType: resolvedMediaType } : {}),
         ...(updates.tags !== undefined ? { tags: updates.tags } : {}),
-        updatedAt: new Date(),
-      };
-      const idx = ContentService.fallbackPosts.findIndex((p) => p.id === id);
-      if (idx !== -1) {
-        ContentService.fallbackPosts[idx] = post;
-      }
-    }
+        ...(wasApprovedOrScheduled
+          ? {
+            status: 'PENDING_REVIEW',
+            approvalSignature: null,
+            approvedBy: null,
+            approvedAt: null,
+          }
+          : {}),
+      },
+    });
 
     await this.logAudit({
       actor: 'Lieke (Marketing Ops)',
-      action: 'POST_UPDATED',
+      action: wasApprovedOrScheduled ? 'POST_UPDATED_SENT_TO_REVIEW' : 'POST_UPDATED',
       entity: `ContentPost #${post.id}`,
-      details: `Updated fields on post "${post.title}".`,
+      details: wasApprovedOrScheduled
+        ? `Updated approved/scheduled post "${post.title}". Approval cleared and status reset to PENDING_REVIEW.`
+        : `Updated fields on post "${post.title}".`,
       ipAddress,
     });
 
@@ -474,15 +254,11 @@ export class ContentService {
   }
 
   /**
-   * Deletes a post
+   * Deletes a post from CRM
    */
   public async deletePost(id: string, ipAddress?: string): Promise<{ success: boolean }> {
     const post = await this.getPostById(id);
-    try {
-      await prisma.socialPost.delete({ where: { id } });
-    } catch {
-      ContentService.fallbackPosts = ContentService.fallbackPosts.filter((p) => p.id !== id);
-    }
+    await contentPrisma.socialPost.delete({ where: { id } });
 
     await this.logAudit({
       actor: 'Lieke (Marketing Ops)',
@@ -501,30 +277,36 @@ export class ContentService {
   public async requestApproval(id: string, ipAddress?: string): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
-    try {
-      const updated = await prisma.socialPost.update({
-        where: { id },
-        data: { status: 'PENDING_REVIEW' },
-      });
-
-      await this.logAudit({
-        actor: post.author || 'Lieke (Marketing Ops)',
-        action: 'DRAFT_SUBMITTED_FOR_REVIEW',
-        entity: `ContentPost #${post.id}`,
-        details: `Submitted post "${post.title}" for Mr. Lionel's executive sign-off.`,
-        ipAddress,
-      });
-
-      return updated;
-    } catch {
-      post.status = 'PENDING_REVIEW';
-      return post;
+    if (post.status === 'PUBLISHED') {
+      throw createHttpError('Post is already published.', 400);
     }
+
+    const updated = await contentPrisma.socialPost.update({
+      where: { id },
+      data: {
+        status: 'PENDING_REVIEW',
+        rejectionReason: null,
+        rejectedAt: null,
+      },
+    });
+
+    await this.logAudit({
+      actor: post.author || 'Lieke (Marketing Ops)',
+      action: 'DRAFT_SUBMITTED_FOR_REVIEW',
+      entity: `ContentPost #${post.id}`,
+      details: `Submitted post "${post.title}" for Mr. Lionel's executive sign-off.`,
+      ipAddress,
+    });
+
+    return updated;
   }
 
   /**
    * Mr. Lionel Executive Approval Gate
-   * Cryptographically signs off and schedules or publishes the post
+   * Workflow rules:
+   * - Must be in PENDING_REVIEW status (Item 6a).
+   * - While LINKEDIN_PUBLISHING_ENABLED is false, approve NEVER publishes to LinkedIn (Item 1);
+   *   it only marks the post SCHEDULED and tags metadata.approvedWhilePublishingDisabled = true (Item 4).
    */
   public async approvePost(
     id: string,
@@ -532,6 +314,13 @@ export class ContentService {
     ipAddress?: string
   ): Promise<SocialPost> {
     const post = await this.getPostById(id);
+
+    if (post.status !== 'PENDING_REVIEW') {
+      throw createHttpError(
+        `Cannot approve post in "${post.status}" status. Only posts in "PENDING_REVIEW" status can be approved.`,
+        400
+      );
+    }
 
     const signature =
       approvalData.signature ||
@@ -545,16 +334,27 @@ export class ContentService {
       });
     const approvedBy = approvalData.approvedBy || 'Lionel Eersteling (Owner)';
     const approvedAt = new Date();
+    const publishingEnabled = isLinkedInPublishingEnabled();
 
-    // If scheduled date is already past or immediate, can be dispatched immediately
     const isImmediate = !post.scheduledFor || new Date(post.scheduledFor).getTime() <= Date.now();
     let newStatus = 'SCHEDULED';
     let publishedAt: Date | undefined = undefined;
-    let platformPostId: string | undefined = undefined;
-    let platformPostUrl: string | undefined = undefined;
+    let platformPostId: string | null | undefined = undefined;
+    let platformPostUrl: string | null | undefined = undefined;
 
-    // If post is for LinkedIn and scheduled for now, trigger live dispatch
-    if (post.platform === 'LINKEDIN' && isImmediate) {
+    const existingMetadata =
+      post.metadata && typeof post.metadata === 'object' && !Array.isArray(post.metadata)
+        ? (post.metadata as Record<string, any>)
+        : {};
+
+    const updatedMetadata: Record<string, any> = {
+      ...existingMetadata,
+      approvedWhilePublishingDisabled: !publishingEnabled,
+      approvedAtIso: approvedAt.toISOString(),
+    };
+
+    // Only attempt immediate live dispatch when LINKEDIN_PUBLISHING_ENABLED is explicitly true
+    if (publishingEnabled && post.platform === 'LINKEDIN' && isImmediate) {
       try {
         const dispatchRes = await this.dispatchToLinkedIn(post);
         newStatus = 'PUBLISHED';
@@ -563,57 +363,31 @@ export class ContentService {
         platformPostUrl = dispatchRes.postUrl;
       } catch (err: any) {
         console.warn(`[ContentService] Immediate LinkedIn dispatch deferred: ${err?.message}`);
-        newStatus = 'SCHEDULED'; // Retain in scheduled queue for background retry
-      }
-    } else if (post.platform === 'INSTAGRAM' && isImmediate && post.mediaUrl) {
-      try {
-        const igRes = await this.instagramPublishing.publishToInstagram({
-          postId: post.id,
-          caption: post.body || post.hook || post.title,
-          mediaType: (post.mediaType as any) || 'IMAGE',
-          mediaUrl: post.mediaUrl,
-          approvalSignature: signature,
-          approvedBy,
-          title: post.title,
-          hook: post.hook || undefined,
-        });
-        newStatus = 'PUBLISHED';
-        publishedAt = new Date();
-        platformPostId = igRes.publishedMediaId;
-        platformPostUrl = igRes.permalink;
-      } catch (err: any) {
-        console.warn(`[ContentService] Immediate Instagram dispatch deferred: ${err?.message}`);
         newStatus = 'SCHEDULED';
       }
     }
 
-    let updated: any;
-    try {
-      updated = await prisma.socialPost.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          approvalSignature: signature,
-          approvedBy,
-          approvedAt,
-          ...(publishedAt ? { publishedAt } : {}),
-          ...(platformPostId ? { platformPostId } : {}),
-          ...(platformPostUrl ? { platformPostUrl } : {}),
-        },
-      });
-    } catch {
-      post.status = newStatus;
-      post.approvalSignature = signature;
-      post.approvedBy = approvedBy;
-      post.approvedAt = approvedAt;
-      updated = post;
-    }
+    const updated = await contentPrisma.socialPost.update({
+      where: { id },
+      data: {
+        status: newStatus,
+        approvalSignature: signature,
+        approvedBy,
+        approvedAt,
+        rejectionReason: null,
+        rejectedAt: null,
+        metadata: updatedMetadata,
+        ...(publishedAt ? { publishedAt } : {}),
+        ...(platformPostId !== undefined ? { platformPostId } : {}),
+        ...(platformPostUrl !== undefined ? { platformPostUrl } : {}),
+      },
+    });
 
     await this.logAudit({
       actor: approvedBy,
       action: 'CRYPTOGRAPHIC_APPROVAL_GRANTED',
       entity: `ContentPost #${post.id}`,
-      details: `Generated digital token ${signature}. Status transitioned to ${newStatus}.`,
+      details: `Generated digital token ${signature}. Status transitioned to ${newStatus} (publishingEnabled=${publishingEnabled}).`,
       ipAddress,
     });
 
@@ -626,12 +400,15 @@ export class ContentService {
   public async rejectPost(id: string, reason: string, ipAddress?: string): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
-    const updated = await prisma.socialPost.update({
+    const updated = await contentPrisma.socialPost.update({
       where: { id },
       data: {
         status: 'REJECTED',
         rejectionReason: reason,
         rejectedAt: new Date(),
+        approvalSignature: null,
+        approvedBy: null,
+        approvedAt: null,
       },
     });
 
@@ -648,78 +425,63 @@ export class ContentService {
 
   /**
    * Forces immediate live broadcast to LinkedIn
+   * Workflow rules:
+   * - Returns 403 while LINKEDIN_PUBLISHING_ENABLED is false (Item 1).
+   * - Never signs off by itself when a post has no approval (Item 6b).
+   * - Never marks YouTube/TikTok/unimplemented platforms as PUBLISHED without posting them (Item 6d).
    */
   public async publishPostNow(id: string, ipAddress?: string): Promise<SocialPost> {
-    const post = await this.getPostById(id);
-    const approvedBy = post.approvedBy || 'Lionel Eersteling (Owner)';
-    const signature = post.approvalSignature || `SIG-LIONEL-2026-${Math.floor(1000 + Math.random() * 9000)}-VERIFIED`;
-
-    if (post.platform === 'INSTAGRAM') {
-      if (!post.mediaUrl) {
-        throw new Error('Cannot publish to Instagram without mediaUrl');
-      }
-      const igRes = await this.instagramPublishing.publishToInstagram({
-        postId: post.id,
-        caption: post.body || post.hook || post.title,
-        mediaType: (post.mediaType as any) || 'IMAGE',
-        mediaUrl: post.mediaUrl,
-        approvalSignature: signature,
-        approvedBy,
-        title: post.title,
-        hook: post.hook || undefined,
-      });
-
-      const updated = await prisma.socialPost.update({
-        where: { id },
-        data: {
-          status: 'PUBLISHED',
-          publishedAt: new Date(),
-          approvalSignature: signature,
-          approvedBy,
-          approvedAt: post.approvedAt || new Date(),
-          platformPostId: igRes.publishedMediaId,
-          platformPostUrl: igRes.permalink,
-        },
-      });
-      return updated;
+    if (!isLinkedInPublishingEnabled()) {
+      throw createHttpError(
+        'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
+        403
+      );
     }
 
+    const post = await this.getPostById(id);
+
+    if (post.status === 'PUBLISHED') {
+      throw createHttpError('Post has already been published.', 400);
+    }
+
+    // Item 6b: Never self-sign when a post has no approval
+    if (
+      !post.approvalSignature ||
+      !post.approvedBy ||
+      (post.status !== 'SCHEDULED' && post.status !== 'APPROVED')
+    ) {
+      throw createHttpError(
+        'Post cannot be published without executive approval. Please submit for review and approve first.',
+        400
+      );
+    }
+
+    // Item 6d: Only publish supported live channels; never mark YouTube/TikTok/etc. PUBLISHED without posting
     if (post.platform !== 'LINKEDIN') {
-      // For YouTube, TikTok, mark published and track
-      const updated = await prisma.socialPost.update({
-        where: { id },
-        data: {
-          status: 'PUBLISHED',
-          publishedAt: new Date(),
-          approvalSignature: signature,
-          approvedBy,
-          approvedAt: post.approvedAt || new Date(),
-        },
-      });
-      return updated;
+      throw createHttpError(
+        `Live publishing is not supported for platform "${post.platform}". Only approved LINKEDIN posts can be published via this endpoint.`,
+        400
+      );
     }
 
     // LinkedIn Live Broadcast
     const dispatch = await this.dispatchToLinkedIn(post);
 
-    const updated = await prisma.socialPost.update({
+    const updated = await contentPrisma.socialPost.update({
       where: { id },
       data: {
         status: 'PUBLISHED',
         publishedAt: new Date(),
-        approvalSignature: signature,
-        approvedBy,
-        approvedAt: post.approvedAt || new Date(),
         platformPostId: dispatch.postUrn,
         platformPostUrl: dispatch.postUrl,
       },
     });
 
     await this.logAudit({
-      actor: approvedBy,
+      actor: post.approvedBy,
       action: 'LINKEDIN_BROADCAST_DISPATCHED',
       entity: `ContentPost #${post.id}`,
-      details: `Live post broadcast to LinkedIn feed. URN: ${dispatch.postUrn}`,
+      details: `Live post broadcast to LinkedIn feed. URN: ${dispatch.postUrn || 'none'}`,
       ipAddress,
       metadata: { postUrl: dispatch.postUrl },
     });
@@ -728,13 +490,14 @@ export class ContentService {
   }
 
   /**
-   * Internal helper to dispatch content to LinkedIn API
+   * Internal helper to dispatch content to LinkedIn API using the personal profile connection ('LINKEDIN').
    */
   private async dispatchToLinkedIn(post: SocialPost) {
     const conn = await this.linkedin.getActiveConnection();
     if (!conn || !conn.accessToken || !conn.accountUrn) {
-      throw new Error(
-        'LinkedIn account is not connected. Please connect LinkedIn via /api/v1/social/linkedin/auth-url first.'
+      throw createHttpError(
+        'LinkedIn personal publishing account is not connected. Please connect LinkedIn first.',
+        400
       );
     }
 
@@ -750,63 +513,44 @@ export class ContentService {
    * Retrieves pending posts for the Approval Desk
    */
   public async getApprovalDeskPosts() {
-    await this.ensureInitialSeed();
-    try {
-      return await prisma.socialPost.findMany({
-        where: { status: 'PENDING_REVIEW' },
-        orderBy: { createdAt: 'desc' },
-      });
-    } catch {
-      return ContentService.fallbackPosts.filter((p) => p.status === 'PENDING_REVIEW');
-    }
+    await this.purgeLegacySeedData();
+    return contentPrisma.socialPost.findMany({
+      where: { status: 'PENDING_REVIEW' },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   /**
    * Returns approval queue analytics
    */
   public async getApprovalStats() {
-    await this.ensureInitialSeed();
-    try {
-      const [pending, scheduled, published, rejected, total] = await Promise.all([
-        prisma.socialPost.count({ where: { status: 'PENDING_REVIEW' } }),
-        prisma.socialPost.count({ where: { status: 'SCHEDULED' } }),
-        prisma.socialPost.count({ where: { status: 'PUBLISHED' } }),
-        prisma.socialPost.count({ where: { status: 'REJECTED' } }),
-        prisma.socialPost.count(),
-      ]);
+    await this.purgeLegacySeedData();
+    const [pending, scheduled, published, rejected, total] = await Promise.all([
+      contentPrisma.socialPost.count({ where: { status: 'PENDING_REVIEW' } }),
+      contentPrisma.socialPost.count({ where: { status: 'SCHEDULED' } }),
+      contentPrisma.socialPost.count({ where: { status: 'PUBLISHED' } }),
+      contentPrisma.socialPost.count({ where: { status: 'REJECTED' } }),
+      contentPrisma.socialPost.count(),
+    ]);
 
-      return {
-        pendingReview: pending,
-        scheduled,
-        published,
-        rejected,
-        total,
-      };
-    } catch {
-      const posts = ContentService.fallbackPosts;
-      return {
-        pendingReview: posts.filter((p) => p.status === 'PENDING_REVIEW').length,
-        scheduled: posts.filter((p) => p.status === 'SCHEDULED').length,
-        published: posts.filter((p) => p.status === 'PUBLISHED').length,
-        rejected: posts.filter((p) => p.status === 'REJECTED').length,
-        total: posts.length,
-      };
-    }
+    return {
+      pendingReview: pending,
+      scheduled,
+      published,
+      rejected,
+      total,
+    };
   }
 
   /**
    * Retrieves governance audit logs
    */
   public async getAuditLogs(limit = 50) {
-    await this.ensureInitialSeed();
-    try {
-      return await prisma.socialAuditLog.findMany({
-        orderBy: { timestamp: 'desc' },
-        take: Math.min(100, Math.max(1, limit)),
-      });
-    } catch {
-      return ContentService.fallbackAuditLogs.slice(0, limit);
-    }
+    await this.purgeLegacySeedData();
+    return contentPrisma.socialAuditLog.findMany({
+      orderBy: { timestamp: 'desc' },
+      take: Math.min(100, Math.max(1, limit)),
+    });
   }
 
   /**
@@ -821,7 +565,7 @@ export class ContentService {
     metadata?: any;
   }) {
     try {
-      await prisma.socialAuditLog.create({
+      await contentPrisma.socialAuditLog.create({
         data: {
           actor: params.actor,
           action: params.action,

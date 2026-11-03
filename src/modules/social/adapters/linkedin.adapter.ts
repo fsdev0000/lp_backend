@@ -1,8 +1,17 @@
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
+import {
+  getLinkedInApiVersion,
+  getLinkedInVanityName,
+  isLinkedInPublishingEnabled,
+  LINKEDIN_MEMBER_PLATFORM,
+  LINKEDIN_MEMBER_SCOPES,
+  LINKEDIN_PAGE_PLATFORM,
+  LINKEDIN_PAGE_SCOPES,
+} from '../config/linkedin.config';
 
-const prisma = new PrismaClient();
+export const socialPrisma = new PrismaClient();
 
 export interface LinkedInTokenResponse {
   access_token: string;
@@ -22,6 +31,14 @@ export interface LinkedInUserProfile {
   urn: string;
 }
 
+export interface LinkedInOrganizationProfile {
+  id: string;
+  urn: string;
+  name: string;
+  vanityName: string;
+  logoUrl?: string | null;
+}
+
 export interface LinkedInPostPayload {
   text: string;
   title?: string;
@@ -30,37 +47,75 @@ export interface LinkedInPostPayload {
 }
 
 export interface LinkedInPostResult {
-  postId: string;
-  postUrn: string;
-  postUrl: string;
+  postId: string | null;
+  postUrn: string | null;
+  postUrl: string | null;
+}
+
+export type LinkedInOAuthTarget = 'page' | 'member';
+
+function extractRealLinkedInUrn(raw?: string | null): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const decoded = decodeURIComponent(raw.trim());
+  const match = decoded.match(/(urn:li:(?:share|ugcPost|activity):\d+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  if (decoded.startsWith('urn:li:')) {
+    return decoded;
+  }
+  return null;
 }
 
 export class LinkedInAdapter {
-  private readonly clientId: string;
-  private readonly clientSecret: string;
-  private readonly defaultRedirectUri: string;
+  private getCredentials(target: LinkedInOAuthTarget = 'page') {
+    if (target === 'page') {
+      return {
+        clientId:
+          process.env.LINKEDIN_PAGE_CLIENT_ID?.trim() ||
+          process.env.LINKEDIN_CLIENT_ID?.trim() ||
+          '78ocx3kz1moo0s',
+        clientSecret:
+          process.env.LINKEDIN_PAGE_CLIENT_SECRET?.trim() ||
+          process.env.LINKEDIN_CLIENT_SECRET?.trim() ||
+          '',
+        redirectUri:
+          process.env.LINKEDIN_PAGE_REDIRECT_URI?.trim() ||
+          process.env.LINKEDIN_REDIRECT_URI?.trim() ||
+          'https://staging.leadersperformance.ae/api/v1/social/linkedin/callback',
+      };
+    }
 
-  constructor() {
-    this.clientId = process.env.LINKEDIN_CLIENT_ID || '78ocx3kz1moo0s';
-    this.clientSecret = process.env.LINKEDIN_CLIENT_SECRET || '';
-    this.defaultRedirectUri =
-      process.env.LINKEDIN_REDIRECT_URI || 'https://staging.leadersperformance.ae/api/v1/social/linkedin/callback';
+    return {
+      clientId: process.env.LINKEDIN_CLIENT_ID?.trim() || '78ocx3kz1moo0s',
+      clientSecret: process.env.LINKEDIN_CLIENT_SECRET?.trim() || '',
+      redirectUri:
+        process.env.LINKEDIN_REDIRECT_URI?.trim() ||
+        'https://staging.leadersperformance.ae/api/v1/social/linkedin/callback',
+    };
   }
 
   /**
-   * Generates LinkedIn OAuth 2.0 Authorization URL
+   * Generates LinkedIn OAuth 2.0 Authorization URL.
+   * Defaults to company page read-only analytics scopes (r_organization_social, rw_organization_admin).
    */
-  public getAuthorizationUrl(redirectUri?: string, state?: string, customScopes?: string[]): string {
-    const uri = redirectUri || this.defaultRedirectUri;
+  public getAuthorizationUrl(
+    redirectUri?: string,
+    state?: string,
+    customScopes?: string[],
+    target: LinkedInOAuthTarget = 'page'
+  ): string {
+    const creds = this.getCredentials(target);
+    const uri = redirectUri || creds.redirectUri;
     const authState = state || `state_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const baseScopes = ['openid', 'profile', 'email', 'w_member_social'];
-    const activeScopes = customScopes && customScopes.length > 0 ? customScopes : baseScopes;
-    const scopes = activeScopes.join('%20');
+    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES;
+    const activeScopes = customScopes && customScopes.length > 0 ? customScopes : defaultScopes;
+    const scopes = activeScopes.map((s) => encodeURIComponent(s.trim())).join('%20');
 
     return (
       `https://www.linkedin.com/oauth/v2/authorization` +
       `?response_type=code` +
-      `&client_id=${encodeURIComponent(this.clientId)}` +
+      `&client_id=${encodeURIComponent(creds.clientId)}` +
       `&redirect_uri=${encodeURIComponent(uri)}` +
       `&state=${encodeURIComponent(authState)}` +
       `&scope=${scopes}`
@@ -70,15 +125,20 @@ export class LinkedInAdapter {
   /**
    * Exchanges authorization code for an OAuth access token
    */
-  public async exchangeCodeForToken(code: string, redirectUri?: string): Promise<LinkedInTokenResponse> {
-    const uri = redirectUri || this.defaultRedirectUri;
+  public async exchangeCodeForToken(
+    code: string,
+    redirectUri?: string,
+    target: LinkedInOAuthTarget = 'page'
+  ): Promise<LinkedInTokenResponse> {
+    const creds = this.getCredentials(target);
+    const uri = redirectUri || creds.redirectUri;
     const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
 
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code.trim(),
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
       redirect_uri: uri,
     });
 
@@ -100,7 +160,7 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Retrieves member profile via OpenID UserInfo endpoint
+   * Retrieves member profile via OpenID UserInfo endpoint (used only for personal profile target='member')
    */
   public async fetchUserProfile(accessToken: string): Promise<LinkedInUserProfile> {
     const url = 'https://api.linkedin.com/v2/userinfo';
@@ -132,6 +192,91 @@ export class LinkedInAdapter {
   }
 
   /**
+   * Resolves the LinkedIn Company Page organization profile for Community Management API connections
+   * without requiring OpenID scopes.
+   */
+  public async fetchOrganizationProfile(accessToken: string): Promise<LinkedInOrganizationProfile> {
+    const apiVersion = getLinkedInApiVersion();
+    const vanityName = getLinkedInVanityName();
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      'LinkedIn-Version': apiVersion,
+      'X-Restli-Protocol-Version': '2.0.0',
+    };
+
+    const configuredRaw =
+      process.env.LINKEDIN_ORGANIZATION_URN?.trim() || process.env.LINKEDIN_ORGANIZATION_ID?.trim();
+    const configuredId = configuredRaw ? configuredRaw.replace(/^urn:li:organization:/, '') : null;
+
+    // 1. Try lookup by vanityName (lioneleersteling)
+    try {
+      const vanityUrl = `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(
+        vanityName
+      )}`;
+      const res = await fetch(vanityUrl, { headers });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const org = data.elements?.[0];
+        if (org && org.id) {
+          const id = String(org.id);
+          return {
+            id,
+            urn: `urn:li:organization:${id}`,
+            name: org.localizedName || 'Leaders Performance',
+            vanityName: org.vanityName || vanityName,
+            logoUrl: null,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[LinkedInAdapter] Organization lookup by vanityName notice:', err?.message);
+    }
+
+    // 2. Try organizationAcls to discover administered organization URN
+    try {
+      const aclUrl = 'https://api.linkedin.com/rest/organizationAcls?q=roleAssignee';
+      const aclRes = await fetch(aclUrl, { headers });
+      if (aclRes.ok) {
+        const aclData = (await aclRes.json()) as any;
+        const firstOrgUrn: string | undefined = aclData.elements?.find((el: any) =>
+          typeof el.organization === 'string' && el.organization.startsWith('urn:li:organization:')
+        )?.organization;
+        if (firstOrgUrn) {
+          const id = firstOrgUrn.replace(/^urn:li:organization:/, '');
+          return {
+            id,
+            urn: firstOrgUrn,
+            name: 'Leaders Performance',
+            vanityName,
+            logoUrl: null,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[LinkedInAdapter] Organization ACL lookup notice:', err?.message);
+    }
+
+    // 3. Fallback to configured LINKEDIN_ORGANIZATION_URN / LINKEDIN_ORGANIZATION_ID if present
+    if (configuredId) {
+      return {
+        id: configuredId,
+        urn: `urn:li:organization:${configuredId}`,
+        name: 'Leaders Performance',
+        vanityName,
+        logoUrl: null,
+      };
+    }
+
+    return {
+      id: vanityName,
+      urn: `urn:li:organization:${vanityName}`,
+      name: 'Leaders Performance',
+      vanityName,
+      logoUrl: null,
+    };
+  }
+
+  /**
    * Helper to retrieve media buffer from URL or local file path
    */
   private async getMediaBuffer(mediaUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
@@ -145,7 +290,6 @@ export class LinkedInAdapter {
       return { buffer: Buffer.from(arrayBuffer), contentType };
     }
 
-    // Local file fallback
     const relative = mediaUrl.startsWith('/') ? mediaUrl.slice(1) : mediaUrl;
     const localPath = path.resolve(process.cwd(), relative);
     if (fs.existsSync(localPath)) {
@@ -167,11 +311,15 @@ export class LinkedInAdapter {
    * Step 1: initializeUpload -> Step 2: PUT binary
    */
   public async uploadImageToLinkedIn(accessToken: string, authorUrn: string, mediaUrl: string): Promise<string> {
-    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
-      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is off. Returning simulated image URN.');
-      return `urn:li:image:safety-dry-run-${Date.now()}`;
+    if (!isLinkedInPublishingEnabled()) {
+      const err: any = new Error(
+        'LinkedIn publishing is disabled (LINKEDIN_PUBLISHING_ENABLED=false). Image upload blocked.'
+      );
+      err.statusCode = 403;
+      throw err;
     }
 
+    const apiVersion = getLinkedInApiVersion();
     const { buffer, contentType } = await this.getMediaBuffer(mediaUrl);
 
     // Step 1: Initialize Image Upload
@@ -179,7 +327,7 @@ export class LinkedInAdapter {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'LinkedIn-Version': '202401',
+        'LinkedIn-Version': apiVersion,
         'X-Restli-Protocol-Version': '2.0.0',
         'Content-Type': 'application/json',
       },
@@ -225,11 +373,15 @@ export class LinkedInAdapter {
    * Step 1: initializeUpload -> Step 2: PUT binary chunks -> Step 3: finalizeUpload
    */
   public async uploadVideoToLinkedIn(accessToken: string, authorUrn: string, mediaUrl: string): Promise<string> {
-    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
-      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is off. Returning simulated video URN.');
-      return `urn:li:video:safety-dry-run-${Date.now()}`;
+    if (!isLinkedInPublishingEnabled()) {
+      const err: any = new Error(
+        'LinkedIn publishing is disabled (LINKEDIN_PUBLISHING_ENABLED=false). Video upload blocked.'
+      );
+      err.statusCode = 403;
+      throw err;
     }
 
+    const apiVersion = getLinkedInApiVersion();
     const { buffer } = await this.getMediaBuffer(mediaUrl);
     const fileSizeBytes = buffer.length;
 
@@ -238,7 +390,7 @@ export class LinkedInAdapter {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'LinkedIn-Version': '202401',
+        'LinkedIn-Version': apiVersion,
         'X-Restli-Protocol-Version': '2.0.0',
         'Content-Type': 'application/json',
       },
@@ -295,7 +447,7 @@ export class LinkedInAdapter {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'LinkedIn-Version': '202401',
+        'LinkedIn-Version': apiVersion,
         'X-Restli-Protocol-Version': '2.0.0',
         'Content-Type': 'application/json',
       },
@@ -317,29 +469,29 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Publishes an authoritative post to LinkedIn using the REST API (with UGC fallback)
+   * Publishes an authoritative post to LinkedIn using the REST API (with UGC fallback).
+   * Enforces LINKEDIN_PUBLISHING_ENABLED kill switch and never fabricates fake urn:li:share:<timestamp> IDs.
    */
   public async publishPost(
     accessToken: string,
     authorUrn: string,
     content: LinkedInPostPayload
   ): Promise<LinkedInPostResult> {
-    const cleanUrn = authorUrn.startsWith('urn:li:person:') || authorUrn.startsWith('urn:li:organization:')
-      ? authorUrn
-      : `urn:li:person:${authorUrn}`;
+    if (!isLinkedInPublishingEnabled()) {
+      const err: any = new Error(
+        'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false).'
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const apiVersion = getLinkedInApiVersion();
+    const cleanUrn =
+      authorUrn.startsWith('urn:li:person:') || authorUrn.startsWith('urn:li:organization:')
+        ? authorUrn
+        : `urn:li:person:${authorUrn}`;
     const commentary = `${content.title ? content.title + '\n\n' : ''}${content.text}`;
     const mediaType = (content.mediaType || 'article').toLowerCase();
-
-    // Safety gate: verify publishing switch
-    if (process.env.LINKEDIN_PUBLISHING_ENABLED !== 'true') {
-      console.log('[LinkedInAdapter] Safety gate: LINKEDIN_PUBLISHING_ENABLED is not "true". Post dispatch simulated.');
-      const simulatedPostUrn = `urn:li:share:safety-dry-run-${Date.now()}`;
-      return {
-        postId: simulatedPostUrn,
-        postUrn: simulatedPostUrn,
-        postUrl: `https://www.linkedin.com/feed/update/${encodeURIComponent(simulatedPostUrn)}`,
-      };
-    }
 
     // Upload image or video to LinkedIn first if provided
     let assetUrn: string | null = null;
@@ -351,7 +503,7 @@ export class LinkedInAdapter {
       }
     }
 
-    // 1. Primary: Try modern LinkedIn Posts REST API
+    // 1. Primary: Modern LinkedIn Posts REST API
     try {
       const restUrl = 'https://api.linkedin.com/rest/posts';
       const body: any = {
@@ -368,14 +520,12 @@ export class LinkedInAdapter {
       };
 
       if (assetUrn) {
-        // Send the asset URN in content.media.id
         body.content = {
           media: {
             id: assetUrn,
           },
         };
       } else if (content.mediaUrl && mediaType === 'article') {
-        // Links stay as they are (article card)
         body.content = {
           article: {
             source: content.mediaUrl,
@@ -389,7 +539,7 @@ export class LinkedInAdapter {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'LinkedIn-Version': '202401',
+          'LinkedIn-Version': apiVersion,
           'X-Restli-Protocol-Version': '2.0.0',
           'Content-Type': 'application/json',
         },
@@ -397,15 +547,36 @@ export class LinkedInAdapter {
       });
 
       if (res.ok || res.status === 201) {
-        const postUrn = res.headers.get('x-restli-id') || res.headers.get('location') || `urn:li:share:${Date.now()}`;
-        const postUrl = `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`;
+        let bodyId: string | null = null;
+        try {
+          const text = await res.text();
+          if (text) {
+            const parsed = JSON.parse(text);
+            bodyId = parsed?.id || null;
+          }
+        } catch {
+          // Empty 201 response body is normal for LinkedIn REST Posts API
+        }
+
+        const postUrn =
+          extractRealLinkedInUrn(res.headers.get('x-restli-id')) ||
+          extractRealLinkedInUrn(res.headers.get('x-linkedin-id')) ||
+          extractRealLinkedInUrn(res.headers.get('location')) ||
+          extractRealLinkedInUrn(bodyId);
+
+        const postUrl = postUrn ? `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}` : null;
         return {
           postId: postUrn,
           postUrn,
           postUrl,
         };
       }
-      console.warn('[LinkedInAdapter] REST API failed with status', res.status, await res.text(), '- attempting UGC Posts API fallback');
+      console.warn(
+        '[LinkedInAdapter] REST API failed with status',
+        res.status,
+        await res.text(),
+        '- attempting UGC Posts API fallback'
+      );
     } catch (err: any) {
       console.warn('[LinkedInAdapter] REST API error, trying UGC fallback:', err?.message);
     }
@@ -463,6 +634,7 @@ export class LinkedInAdapter {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
+        'LinkedIn-Version': apiVersion,
         'X-Restli-Protocol-Version': '2.0.0',
         'Content-Type': 'application/json',
       },
@@ -474,9 +646,22 @@ export class LinkedInAdapter {
       throw new Error(`LinkedIn UGC Posts API error ${ugcRes.status}: ${errText}`);
     }
 
-    const ugcData = (await ugcRes.json()) as any;
-    const postUrn = ugcData.id || `urn:li:share:${Date.now()}`;
-    const postUrl = `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`;
+    let ugcId: string | null = null;
+    try {
+      const ugcData = (await ugcRes.json()) as any;
+      ugcId = ugcData?.id || null;
+    } catch {
+      // Ignore empty JSON body
+    }
+
+    // Item 6e: Never save a fake urn:li:share:<timestamp> when LinkedIn doesn't return the post ID
+    const postUrn =
+      extractRealLinkedInUrn(ugcId) ||
+      extractRealLinkedInUrn(ugcRes.headers.get('x-restli-id')) ||
+      extractRealLinkedInUrn(ugcRes.headers.get('x-linkedin-id')) ||
+      extractRealLinkedInUrn(ugcRes.headers.get('location'));
+
+    const postUrl = postUrn ? `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}` : null;
 
     return {
       postId: postUrn,
@@ -486,45 +671,42 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Retrieves active LinkedIn connection state from database
+   * Retrieves active personal member LinkedIn connection ('LINKEDIN') for publishing.
+   * Item 9: Never reads 'LINKEDIN_PAGE' or LINKEDIN_ACCESS_TOKEN env var so connecting the page
+   * for analytics can NEVER give the scheduler or publisher a token it can post with.
    */
   public async getActiveConnection() {
     try {
-      const conn = await prisma.socialAccountConnection.findUnique({
-        where: { platform: 'LINKEDIN' },
+      const conn = await socialPrisma.socialAccountConnection.findUnique({
+        where: { platform: LINKEDIN_MEMBER_PLATFORM },
       });
       if (conn) return conn;
-    } catch {}
-
-    const envToken = process.env.LINKEDIN_ACCESS_TOKEN?.trim();
-    if (envToken) {
-      return {
-        id: 'env-conn',
-        platform: 'LINKEDIN',
-        accountName: 'Leaders Performance',
-        accountUrn: process.env.LINKEDIN_ORGANIZATION_URN || 'urn:li:organization:leaders-performance',
-        accountEmail: null,
-        profilePictureUrl: null,
-        accessToken: envToken,
-        refreshToken: null,
-        tokenExpiresAt: null,
-        refreshTokenExpiresAt: null,
-        scopes: ['r_organization_social', 'rw_organization_admin', 'w_member_social'],
-        status: 'HEALTHY',
-        lastSyncAt: new Date(),
-        followersCount: null,
-        metadata: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any;
+    } catch {
+      // Ignore DB offline error
     }
     return null;
   }
 
   /**
-   * Saves or updates LinkedIn account connection
+   * Retrieves active company page LinkedIn connection ('LINKEDIN_PAGE') for read-only analytics.
+   */
+  public async getActivePageConnection() {
+    try {
+      const conn = await socialPrisma.socialAccountConnection.findUnique({
+        where: { platform: LINKEDIN_PAGE_PLATFORM },
+      });
+      if (conn) return conn;
+    } catch {
+      // Ignore DB offline error
+    }
+    return null;
+  }
+
+  /**
+   * Saves or updates LinkedIn account connection (either 'LINKEDIN' for member posting or 'LINKEDIN_PAGE' for company analytics).
    */
   public async saveConnection(data: {
+    platform?: typeof LINKEDIN_MEMBER_PLATFORM | typeof LINKEDIN_PAGE_PLATFORM;
     accountName: string;
     accountUrn: string;
     accountEmail?: string;
@@ -535,12 +717,14 @@ export class LinkedInAdapter {
     scopes?: string[];
     followersCount?: number | null;
   }) {
-    const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000); // Defaults ~60 days
+    const platform = data.platform || LINKEDIN_MEMBER_PLATFORM;
+    const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? LINKEDIN_PAGE_SCOPES : LINKEDIN_MEMBER_SCOPES;
+    const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000);
 
-    return prisma.socialAccountConnection.upsert({
-      where: { platform: 'LINKEDIN' },
+    return socialPrisma.socialAccountConnection.upsert({
+      where: { platform },
       create: {
-        platform: 'LINKEDIN',
+        platform,
         accountName: data.accountName,
         accountUrn: data.accountUrn,
         accountEmail: data.accountEmail || null,
@@ -548,7 +732,7 @@ export class LinkedInAdapter {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken || null,
         tokenExpiresAt: expiresAt,
-        scopes: data.scopes || ['openid', 'profile', 'email', 'w_member_social'],
+        scopes: data.scopes || defaultScopes,
         status: 'HEALTHY',
         lastSyncAt: new Date(),
         followersCount: data.followersCount !== undefined ? data.followersCount : null,
@@ -561,7 +745,7 @@ export class LinkedInAdapter {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken || undefined,
         tokenExpiresAt: expiresAt,
-        scopes: data.scopes || ['openid', 'profile', 'email', 'w_member_social'],
+        scopes: data.scopes || defaultScopes,
         status: 'HEALTHY',
         lastSyncAt: new Date(),
       },
@@ -569,11 +753,23 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Disconnects LinkedIn account
+   * Disconnects LinkedIn account(s)
    */
-  public async disconnect(): Promise<void> {
-    await prisma.socialAccountConnection.deleteMany({
-      where: { platform: 'LINKEDIN' },
+  public async disconnect(target?: LinkedInOAuthTarget | 'all'): Promise<void> {
+    if (target === 'page') {
+      await socialPrisma.socialAccountConnection.deleteMany({
+        where: { platform: LINKEDIN_PAGE_PLATFORM },
+      });
+      return;
+    }
+    if (target === 'member') {
+      await socialPrisma.socialAccountConnection.deleteMany({
+        where: { platform: LINKEDIN_MEMBER_PLATFORM },
+      });
+      return;
+    }
+    await socialPrisma.socialAccountConnection.deleteMany({
+      where: { platform: { in: [LINKEDIN_MEMBER_PLATFORM, LINKEDIN_PAGE_PLATFORM] } },
     });
   }
 
@@ -583,7 +779,9 @@ export class LinkedInAdapter {
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }> {
     const start = Date.now();
     try {
-      const conn = await this.getActiveConnection();
+      const pageConn = await this.getActivePageConnection();
+      const memberConn = await this.getActiveConnection();
+      const conn = pageConn || memberConn;
 
       if (!conn) {
         return {
@@ -591,6 +789,22 @@ export class LinkedInAdapter {
           latencyMs: Date.now() - start,
           message: 'LinkedIn app configured but account not connected via OAuth yet',
         };
+      }
+
+      if (conn.platform === LINKEDIN_PAGE_PLATFORM && conn.accountUrn) {
+        const res = await fetch(
+          `https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(
+            conn.accountUrn
+          )}?edgeType=CompanyFollowedByMember`,
+          {
+            headers: { Authorization: `Bearer ${conn.accessToken}` },
+          }
+        );
+        const latencyMs = Date.now() - start;
+        if (res.ok) {
+          return { status: 'HEALTHY', latencyMs, message: `Connected page as ${conn.accountName}` };
+        }
+        return { status: 'DEGRADED', latencyMs, message: `Page token validation returned HTTP ${res.status}` };
       }
 
       const res = await fetch('https://api.linkedin.com/v2/userinfo', {

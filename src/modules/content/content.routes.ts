@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { ContentController } from './controllers/content.controller';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
@@ -13,8 +13,26 @@ const upload = multer({
   },
 });
 
+// Protect all /api/v1/content/* endpoints with authentication
+router.use(requireApiKey);
+
 // Media Upload endpoint (multipart/form-data, field "file")
-router.post('/media', requireApiKey, upload.single('file'), controller.uploadMedia);
+router.post(
+  '/media',
+  (req: Request, res: Response, next: NextFunction) => {
+    upload.single('file')(req, res, (err: any) => {
+      if (err) {
+        res.status(400).json({
+          success: false,
+          error: err.message || 'Invalid multipart file upload request',
+        });
+        return;
+      }
+      next();
+    });
+  },
+  controller.uploadMedia
+);
 
 // Approval Desk views & aggregations
 router.get('/approvals/stats', controller.getApprovalStats);

@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { ContentService } from '../services/content.service';
-
 import path from 'path';
+import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
+import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
 
 export class ContentController {
   private service = new ContentService();
@@ -110,7 +110,7 @@ export class ContentController {
       res.status(200).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] getPost error:', error);
-      res.status(404).json({ success: false, error: error?.message || 'Post not found' });
+      res.status(error?.statusCode || 404).json({ success: false, error: error?.message || 'Post not found' });
     }
   };
 
@@ -141,7 +141,10 @@ export class ContentController {
       res.status(201).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] createPost error:', error);
-      const isClientError = error?.message?.includes('Invalid mediaType') || error?.message?.includes('required');
+      const isClientError =
+        error?.statusCode === 400 ||
+        error?.message?.includes('Invalid mediaType') ||
+        error?.message?.includes('required');
       res.status(isClientError ? 400 : 500).json({ success: false, error: error?.message || 'Failed to create post' });
     }
   };
@@ -153,7 +156,7 @@ export class ContentController {
       res.status(200).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] updatePost error:', error);
-      res.status(400).json({ success: false, error: error?.message || 'Failed to update post' });
+      res.status(error?.statusCode || 400).json({ success: false, error: error?.message || 'Failed to update post' });
     }
   };
 
@@ -164,7 +167,7 @@ export class ContentController {
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[ContentController] deletePost error:', error);
-      res.status(400).json({ success: false, error: error?.message || 'Failed to delete post' });
+      res.status(error?.statusCode || 400).json({ success: false, error: error?.message || 'Failed to delete post' });
     }
   };
 
@@ -175,7 +178,7 @@ export class ContentController {
       res.status(200).json({ success: true, message: 'Submitted for Mr. Lionel sign-off', data: post });
     } catch (error: any) {
       console.error('[ContentController] requestApproval error:', error);
-      res.status(400).json({ success: false, error: error?.message || 'Failed to submit for approval' });
+      res.status(error?.statusCode || 400).json({ success: false, error: error?.message || 'Failed to submit for approval' });
     }
   };
 
@@ -191,7 +194,7 @@ export class ContentController {
       });
     } catch (error: any) {
       console.error('[ContentController] approvePost error:', error);
-      res.status(400).json({ success: false, error: error?.message || 'Failed to approve post' });
+      res.status(error?.statusCode || 400).json({ success: false, error: error?.message || 'Failed to approve post' });
     }
   };
 
@@ -207,18 +210,27 @@ export class ContentController {
       res.status(200).json({ success: true, message: 'Revisions requested', data: post });
     } catch (error: any) {
       console.error('[ContentController] rejectPost error:', error);
-      res.status(400).json({ success: false, error: error?.message || 'Failed to reject post' });
+      res.status(error?.statusCode || 400).json({ success: false, error: error?.message || 'Failed to reject post' });
     }
   };
 
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
+      if (!isLinkedInPublishingEnabled()) {
+        res.status(403).json({
+          success: false,
+          error: 'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false).',
+        });
+        return;
+      }
+
       const id = String(req.params.id);
       const post = await this.service.publishPostNow(id, req.ip);
       res.status(200).json({ success: true, message: 'Live dispatch completed successfully', data: post });
     } catch (error: any) {
       console.error('[ContentController] publishNow error:', error);
-      res.status(502).json({ success: false, error: error?.message || 'Failed to broadcast post to social channel' });
+      const status = error?.statusCode || 502;
+      res.status(status).json({ success: false, error: error?.message || 'Failed to broadcast post to social channel' });
     }
   };
 

@@ -6,8 +6,13 @@ import {
 } from './interfaces';
 import { LiveErrorBoundary } from './liveErrorBoundary';
 import { resolveWindow } from '../utils/dateRange';
+import {
+  getLinkedInApiVersion,
+  getLinkedInVanityName,
+  LINKEDIN_PAGE_PLATFORM,
+} from '../../social/config/linkedin.config';
 
-const prisma = new PrismaClient();
+export const analyticsPrisma = new PrismaClient();
 
 interface LinkedInCacheEntry {
   data: LinkedInAnalyticsData;
@@ -17,29 +22,82 @@ interface LinkedInCacheEntry {
 export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
   private static cache: Record<string, LinkedInCacheEntry> = {};
   private static postsCache: { data: LinkedInPostDetailRow[]; cachedAt: number } | null = null;
-  private readonly cacheTtlMs = 60 * 60 * 1000; // 1-hour cache to protect LinkedIn rate limits
-  private readonly defaultApiVersion = '202401';
+  private static resolvedOrgUrn: string | null = null;
+  private readonly cacheTtlMs = 60 * 60 * 1000; // 1-hour cache for connected responses
+
+  /**
+   * Clears in-memory analytics and posts caches (e.g., upon OAuth connection or disconnect).
+   */
+  public static clearCache(): void {
+    this.cache = {};
+    this.postsCache = null;
+    this.resolvedOrgUrn = null;
+  }
 
   /**
    * Resolves the configured organization URN (urn:li:organization:<id>)
    */
-  public getOrganizationUrn(): string | null {
-    const raw = process.env.LINKEDIN_ORGANIZATION_URN || process.env.LINKEDIN_ORGANIZATION_ID;
-    if (!raw || !raw.trim()) return null;
-    const clean = raw.trim();
-    if (clean.startsWith('urn:li:organization:')) {
-      return clean;
+  public getOrganizationUrn(connAccountUrn?: string | null): string | null {
+    const raw =
+      process.env.LINKEDIN_ORGANIZATION_URN?.trim() ||
+      process.env.LINKEDIN_ORGANIZATION_ID?.trim() ||
+      (connAccountUrn && connAccountUrn.startsWith('urn:li:organization:') ? connAccountUrn.trim() : '') ||
+      LinkedInAnalyticsAdapter.resolvedOrgUrn ||
+      '';
+
+    if (!raw) return null;
+    if (raw.startsWith('urn:li:organization:')) {
+      return raw;
     }
-    return `urn:li:organization:${clean}`;
+    return `urn:li:organization:${raw}`;
   }
 
   /**
-   * Retrieves active LinkedIn connection credentials from database
+   * Dynamically resolves the organization URN by vanityName (lioneleersteling) if not set in env
+   */
+  private async resolveOrganizationUrnFromApi(token: string, connAccountUrn?: string | null): Promise<string | null> {
+    const existing = this.getOrganizationUrn(connAccountUrn);
+    if (existing && /^urn:li:organization:\d+$/.test(existing)) {
+      return existing;
+    }
+
+    const vanityName = getLinkedInVanityName();
+    const apiVersion = getLinkedInApiVersion();
+    try {
+      const url = `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(
+        vanityName
+      )}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'LinkedIn-Version': apiVersion,
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const orgId = data?.elements?.[0]?.id;
+        if (orgId) {
+          const urn = `urn:li:organization:${orgId}`;
+          LinkedInAnalyticsAdapter.resolvedOrgUrn = urn;
+          return urn;
+        }
+      }
+    } catch {
+      // Ignore network lookup failure and fall back to existing
+    }
+
+    return existing;
+  }
+
+  /**
+   * Retrieves active LinkedIn Company Page connection ('LINKEDIN_PAGE') from database.
+   * Item 9: Uses dedicated LINKEDIN_PAGE record with read-only scopes, separate from personal posting ('LINKEDIN').
    */
   private async getActiveConnection() {
     try {
-      return await prisma.socialAccountConnection.findUnique({
-        where: { platform: 'LINKEDIN' },
+      return await analyticsPrisma.socialAccountConnection.findUnique({
+        where: { platform: LINKEDIN_PAGE_PLATFORM },
       });
     } catch (e: any) {
       console.warn('[LinkedInAnalyticsAdapter] Database connection notice:', e?.message);
@@ -54,11 +112,13 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
     const win = resolveWindow(range, 1);
     const now = Date.now();
     const cacheKey = win.range;
+    const vanityName = getLinkedInVanityName();
+    const apiVersion = getLinkedInApiVersion();
 
-    // 1. Serve cached metrics if within TTL and not force refreshing
+    // 1. Serve cached metrics ONLY if connected and within TTL
     if (!forceRefresh && LinkedInAnalyticsAdapter.cache[cacheKey]) {
       const cached = LinkedInAnalyticsAdapter.cache[cacheKey];
-      if (now - cached.cachedAt < this.cacheTtlMs) {
+      if (cached.data.connected && now - cached.cachedAt < this.cacheTtlMs) {
         return {
           ...cached.data,
           isCached: true,
@@ -66,20 +126,30 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       }
     }
 
-    const orgUrn = this.getOrganizationUrn();
     const conn = await this.getActiveConnection();
-    const envToken = process.env.LINKEDIN_ACCESS_TOKEN?.trim() || '';
+    const envToken =
+      process.env.LINKEDIN_PAGE_ACCESS_TOKEN?.trim() ||
+      process.env.LINKEDIN_ACCESS_TOKEN?.trim() ||
+      '';
     const token = conn?.accessToken || envToken;
+    const isTokenValid = Boolean(
+      token && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true)
+    );
 
-    const isConnected = !!(token && orgUrn && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true));
+    const orgUrn = isTokenValid
+      ? await this.resolveOrganizationUrnFromApi(token, conn?.accountUrn)
+      : this.getOrganizationUrn(conn?.accountUrn);
 
-    // If company page is not connected or organization is not configured, return clean null-state schema
+    const isConnected = Boolean(isTokenValid && orgUrn);
+
+    // Item 14: Never cache the "not connected" state so connecting the page shows live data immediately
     if (!isConnected || !orgUrn) {
-      const emptyResult: LinkedInAnalyticsData = {
+      delete LinkedInAnalyticsAdapter.cache[cacheKey];
+      return {
         organizationId: orgUrn ? orgUrn.replace(/^urn:li:organization:/, '') : null,
         organizationUrn: orgUrn,
         name: 'Leaders Performance',
-        vanityName: 'leaders-performance',
+        vanityName,
         description: null,
         logoUrl: null,
         connected: false,
@@ -101,20 +171,13 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         isCached: false,
         isFallback: false,
       };
-
-      LinkedInAnalyticsAdapter.cache[cacheKey] = {
-        data: emptyResult,
-        cachedAt: now,
-      };
-
-      return emptyResult;
     }
 
     const startMs = new Date(`${win.startDate}T00:00:00Z`).getTime();
     const endMs = new Date(`${win.endDate}T23:59:59Z`).getTime();
     const headers = {
       Authorization: `Bearer ${token}`,
-      'Linkedin-Version': this.defaultApiVersion,
+      'LinkedIn-Version': apiVersion,
       'X-Restli-Protocol-Version': '2.0.0',
     };
 
@@ -165,6 +228,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       }
 
       // 3. Fetch Share Statistics (Impressions, Clicks, Engagement Rate)
+      // Item 12: Use totalShareStatistics.engagement (or properly parenthesized fallback)
       let impressions: number | null = null;
       let clicks: number | null = null;
       let engagementRate: number | null = null;
@@ -177,17 +241,31 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         const sRes = await fetch(shareStatsUrl, { headers });
         if (sRes.ok) {
           const sData = (await sRes.json()) as any;
+          const elements = sData.elements || [];
           let totalImp = 0;
           let totalClicks = 0;
-          let totalEngagements = 0;
+          let totalInteractions = 0;
+          let weightedEngagementSum = 0;
+          let hasEngagementField = false;
           let hasStats = false;
 
-          for (const item of sData.elements || []) {
+          for (const item of elements) {
             const stats = item.totalShareStatistics;
             if (stats) {
-              totalImp += stats.uniqueImpressionsCount || stats.impressionCount || 0;
-              totalClicks += stats.clickCount || 0;
-              totalEngagements += stats.likeCount || 0 + (stats.commentCount || 0) + (stats.shareCount || 0);
+              const imp = stats.uniqueImpressionsCount || stats.impressionCount || 0;
+              const clk = stats.clickCount || 0;
+              const likes = stats.likeCount || 0;
+              const comments = stats.commentCount || 0;
+              const shares = stats.shareCount || 0;
+
+              totalImp += imp;
+              totalClicks += clk;
+              totalInteractions += likes + comments + shares;
+
+              if (typeof stats.engagement === 'number') {
+                hasEngagementField = true;
+                weightedEngagementSum += imp > 0 ? stats.engagement * imp : stats.engagement;
+              }
               hasStats = true;
             }
           }
@@ -195,8 +273,15 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           if (hasStats) {
             impressions = totalImp;
             clicks = totalClicks;
-            if (impressions > 0) {
-              engagementRate = parseFloat(((totalClicks + totalEngagements) / impressions * 100).toFixed(2));
+            if (
+              elements.length === 1 &&
+              typeof elements[0]?.totalShareStatistics?.engagement === 'number'
+            ) {
+              engagementRate = parseFloat((elements[0].totalShareStatistics.engagement * 100).toFixed(2));
+            } else if (hasEngagementField && impressions > 0) {
+              engagementRate = parseFloat(((weightedEngagementSum / impressions) * 100).toFixed(2));
+            } else if (impressions > 0) {
+              engagementRate = parseFloat((((totalClicks + totalInteractions) / impressions) * 100).toFixed(2));
             }
           }
         }
@@ -248,8 +333,8 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       const result: LinkedInAnalyticsData = {
         organizationId: orgUrn.replace(/^urn:li:organization:/, ''),
         organizationUrn: orgUrn,
-        name: 'Leaders Performance',
-        vanityName: 'leaders-performance',
+        name: conn?.accountName || 'Leaders Performance',
+        vanityName,
         description: 'Executive Coaching, High-Performance Systems & Sovereign Leadership.',
         logoUrl: conn?.profilePictureUrl || null,
         connected: true,
@@ -281,7 +366,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       return result;
     } catch (err: any) {
       await LiveErrorBoundary.logUpstreamError('LINKEDIN' as any, 'getCompanyAnalytics', err);
-      if (LinkedInAnalyticsAdapter.cache[cacheKey]) {
+      if (LinkedInAnalyticsAdapter.cache[cacheKey] && LinkedInAnalyticsAdapter.cache[cacheKey].data.connected) {
         return {
           ...LinkedInAnalyticsAdapter.cache[cacheKey].data,
           isCached: true,
@@ -293,7 +378,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         organizationId: orgUrn ? orgUrn.replace(/^urn:li:organization:/, '') : null,
         organizationUrn: orgUrn,
         name: 'Leaders Performance',
-        vanityName: 'leaders-performance',
+        vanityName,
         description: null,
         logoUrl: null,
         connected: isConnected,
@@ -319,28 +404,45 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
   }
 
   /**
-   * Retrieves the page's recent posts with performance metrics (newest first)
+   * Retrieves the company page's recent posts with per-post performance metrics (newest first).
+   * Item 10: Returns ONLY posts read from the LinkedIn page (never falls back to DB posts).
+   * Item 11: Populates per-post impressions, clicks, reactions, comments, reposts, and engagementRate
+   * via organizationalEntityShareStatistics with shares/ugcPosts params.
    */
   public async getPosts(forceRefresh = false): Promise<LinkedInPostDetailRow[]> {
     const now = Date.now();
 
-    if (!forceRefresh && LinkedInAnalyticsAdapter.postsCache && now - LinkedInAnalyticsAdapter.postsCache.cachedAt < this.cacheTtlMs) {
+    if (
+      !forceRefresh &&
+      LinkedInAnalyticsAdapter.postsCache &&
+      now - LinkedInAnalyticsAdapter.postsCache.cachedAt < this.cacheTtlMs
+    ) {
       return LinkedInAnalyticsAdapter.postsCache.data;
     }
 
-    const orgUrn = this.getOrganizationUrn();
     const conn = await this.getActiveConnection();
+    const envToken =
+      process.env.LINKEDIN_PAGE_ACCESS_TOKEN?.trim() ||
+      process.env.LINKEDIN_ACCESS_TOKEN?.trim() ||
+      '';
+    const token = conn?.accessToken || envToken;
+    const isTokenValid = Boolean(
+      token && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true)
+    );
 
-    if (!conn || !conn.accessToken || !orgUrn) {
-      // If live company page is not connected, query any published LinkedIn posts stored in database
-      const dbPosts = await this.getFallbackDbPosts();
-      return dbPosts;
+    if (!isTokenValid) {
+      return [];
     }
 
-    const token = conn.accessToken;
+    const orgUrn = await this.resolveOrganizationUrnFromApi(token, conn?.accountUrn);
+    if (!orgUrn) {
+      return [];
+    }
+
+    const apiVersion = getLinkedInApiVersion();
     const headers = {
       Authorization: `Bearer ${token}`,
-      'Linkedin-Version': this.defaultApiVersion,
+      'LinkedIn-Version': apiVersion,
       'X-Restli-Protocol-Version': '2.0.0',
     };
 
@@ -350,13 +452,15 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         orgUrn
       )}&q=author&count=20&sortBy=LAST_MODIFIED`;
 
-      let postsRows: LinkedInPostDetailRow[] = [];
+      const postsRows: LinkedInPostDetailRow[] = [];
       const res = await fetch(postsUrl, { headers });
 
       if (res.ok) {
         const data = (await res.json()) as any;
         for (const item of data.elements || []) {
-          const postUrn = item.id || '';
+          const postUrn = String(item.id || '').trim();
+          if (!postUrn.startsWith('urn:li:')) continue;
+
           const commentary = item.commentary || item.title || '';
           const publishedAt = item.publishedAt ? new Date(item.publishedAt).toISOString() : new Date().toISOString();
           const cleanUrl = `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`;
@@ -368,7 +472,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
             text: commentary,
             publishedAt,
             mediaUrl: item.content?.article?.thumbnail || item.content?.media?.id || null,
-            mediaType: item.content?.media ? 'image' : 'text',
+            mediaType: item.content?.media ? 'image' : item.content?.article ? 'article' : 'text',
             impressions: null,
             clicks: null,
             reactions: null,
@@ -380,16 +484,24 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           });
         }
       } else {
-        // Fallback to UGC Posts API
-        const ugcUrl = `https://api.linkedin.com/v2/ugcPosts?q=authors&authors=List(${encodeURIComponent(orgUrn)})&count=20`;
+        // Fallback to UGC Posts API for the organization page
+        const ugcUrl = `https://api.linkedin.com/v2/ugcPosts?q=authors&authors=List(${encodeURIComponent(
+          orgUrn
+        )})&count=20`;
         const ugcRes = await fetch(ugcUrl, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'LinkedIn-Version': apiVersion,
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
         });
 
         if (ugcRes.ok) {
           const ugcData = (await ugcRes.json()) as any;
           for (const item of ugcData.elements || []) {
-            const postUrn = item.id || '';
+            const postUrn = String(item.id || '').trim();
+            if (!postUrn.startsWith('urn:li:')) continue;
+
             const shareContent = item.specificContent?.['com.linkedin.ugc.ShareContent'];
             const text = shareContent?.shareCommentary?.text || '';
             const createdAt = item.created?.time ? new Date(item.created.time).toISOString() : new Date().toISOString();
@@ -415,73 +527,107 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         }
       }
 
-      // If remote returned posts, sort newest first and cache
-      if (postsRows.length > 0) {
-        postsRows.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
-
-        LinkedInAnalyticsAdapter.postsCache = {
-          data: postsRows,
-          cachedAt: now,
-        };
-
-        return postsRows;
+      if (postsRows.length === 0) {
+        return [];
       }
 
-      // Otherwise return database published posts
-      return this.getFallbackDbPosts();
+      // 2. Item 11: Fetch per-post statistics via organizationalEntityShareStatistics with shares / ugcPosts params
+      await this.enrichPostsWithShareStatistics(orgUrn, postsRows, headers);
+
+      postsRows.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+      LinkedInAnalyticsAdapter.postsCache = {
+        data: postsRows,
+        cachedAt: now,
+      };
+
+      return postsRows;
     } catch (err: any) {
       console.warn('[LinkedInAnalyticsAdapter] getPosts notice:', err?.message);
-      return this.getFallbackDbPosts();
+      return [];
     }
   }
 
   /**
-   * Helper to fetch published LinkedIn posts from the database when offline or not yet connected
+   * Queries organizationalEntityShareStatistics with shares=List(...) and ugcPosts=List(...)
+   * to populate per-post impressions, clicks, reactions, comments, reposts, and engagementRate.
    */
-  private async getFallbackDbPosts(): Promise<LinkedInPostDetailRow[]> {
+  private async enrichPostsWithShareStatistics(
+    orgUrn: string,
+    postsRows: LinkedInPostDetailRow[],
+    headers: Record<string, string>
+  ): Promise<void> {
     try {
-      const posts = await prisma.socialPost.findMany({
-        where: {
-          platform: 'LINKEDIN',
-          status: 'PUBLISHED',
-        },
-        orderBy: { publishedAt: 'desc' },
-        take: 20,
-      });
+      const shareUrns = postsRows
+        .map((p) => p.urn)
+        .filter((urn) => urn.startsWith('urn:li:share:'));
+      const ugcPostUrns = postsRows
+        .map((p) => p.urn)
+        .filter((urn) => urn.startsWith('urn:li:ugcPost:'));
 
-      return posts.map((p) => {
-        const metrics: any = p.metrics || {};
-        const impressions = typeof metrics.impressions === 'number' ? metrics.impressions : null;
-        const reactions = typeof metrics.reactions === 'number' ? metrics.reactions : null;
-        const reposts = typeof metrics.reposts === 'number' ? metrics.reposts : null;
-        const clicks = typeof metrics.clicks === 'number' ? metrics.clicks : null;
-        const comments = typeof metrics.comments === 'number' ? metrics.comments : null;
+      if (shareUrns.length === 0 && ugcPostUrns.length === 0) {
+        return;
+      }
+
+      const params: string[] = [
+        'q=organizationalEntity',
+        `organizationalEntity=${encodeURIComponent(orgUrn)}`,
+      ];
+      if (shareUrns.length > 0) {
+        params.push(`shares=List(${shareUrns.map((u) => encodeURIComponent(u)).join(',')})`);
+      }
+      if (ugcPostUrns.length > 0) {
+        params.push(`ugcPosts=List(${ugcPostUrns.map((u) => encodeURIComponent(u)).join(',')})`);
+      }
+
+      const statsUrl = `https://api.linkedin.com/rest/organizationalEntityShareStatistics?${params.join('&')}`;
+      const statsRes = await fetch(statsUrl, { headers });
+      if (!statsRes.ok) {
+        return;
+      }
+
+      const statsData = (await statsRes.json()) as any;
+      const statsByUrn = new Map<string, any>();
+
+      for (const el of statsData.elements || []) {
+        const urn = el.share || el.ugcPost;
+        if (urn && el.totalShareStatistics) {
+          statsByUrn.set(urn, el.totalShareStatistics);
+        }
+      }
+
+      for (const post of postsRows) {
+        const st = statsByUrn.get(post.urn);
+        if (!st) continue;
+
+        const impressions =
+          typeof st.impressionCount === 'number'
+            ? st.impressionCount
+            : typeof st.uniqueImpressionsCount === 'number'
+            ? st.uniqueImpressionsCount
+            : 0;
+        const clicks = typeof st.clickCount === 'number' ? st.clickCount : 0;
+        const reactions = typeof st.likeCount === 'number' ? st.likeCount : 0;
+        const comments = typeof st.commentCount === 'number' ? st.commentCount : 0;
+        const reposts = typeof st.shareCount === 'number' ? st.shareCount : 0;
 
         let engagementRate: number | null = null;
-        if (impressions && impressions > 0 && reactions !== null) {
-          engagementRate = parseFloat((((reactions + (comments || 0) + (reposts || 0)) / impressions) * 100).toFixed(2));
+        if (typeof st.engagement === 'number') {
+          engagementRate = parseFloat((st.engagement * 100).toFixed(2));
+        } else if (impressions > 0) {
+          engagementRate = parseFloat((((clicks + reactions + comments + reposts) / impressions) * 100).toFixed(2));
         }
 
-        return {
-          id: p.id,
-          urn: p.platformPostId || `urn:li:share:${p.id}`,
-          title: p.title,
-          text: p.hook ? `${p.hook}\n\n${p.body || ''}` : p.body || p.title,
-          publishedAt: (p.publishedAt || p.createdAt).toISOString(),
-          mediaUrl: p.mediaUrl,
-          mediaType: p.mediaType,
-          impressions,
-          clicks,
-          reactions,
-          comments,
-          reposts,
-          engagementRate,
-          engagementRateFormatted: engagementRate !== null ? `${engagementRate}%` : null,
-          url: p.platformPostUrl || (p.platformPostId ? `https://www.linkedin.com/feed/update/${encodeURIComponent(p.platformPostId)}` : null),
-        };
-      });
-    } catch {
-      return [];
+        post.impressions = impressions;
+        post.clicks = clicks;
+        post.reactions = reactions;
+        post.comments = comments;
+        post.reposts = reposts;
+        post.engagementRate = engagementRate;
+        post.engagementRateFormatted = engagementRate !== null ? `${engagementRate}%` : null;
+      }
+    } catch (err: any) {
+      console.warn('[LinkedInAnalyticsAdapter] Per-post share statistics notice:', err?.message);
     }
   }
 
@@ -490,14 +636,14 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
    */
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }> {
     const start = Date.now();
-    const orgUrn = this.getOrganizationUrn();
     const conn = await this.getActiveConnection();
+    const orgUrn = this.getOrganizationUrn(conn?.accountUrn);
 
     if (!conn) {
       return {
         status: 'DEGRADED',
         latencyMs: Date.now() - start,
-        message: 'LinkedIn account not connected via OAuth yet',
+        message: 'LinkedIn company page not connected via OAuth yet',
       };
     }
 
@@ -505,14 +651,17 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       return {
         status: 'DEGRADED',
         latencyMs: Date.now() - start,
-        message: 'LinkedIn account connected, but LINKEDIN_ORGANIZATION_URN is not set in environment',
+        message: 'LinkedIn page connected, but LINKEDIN_ORGANIZATION_URN is not set in environment',
       };
     }
 
     try {
-      const res = await fetch(`https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(orgUrn)}?edgeType=CompanyFollowedByMember`, {
-        headers: { Authorization: `Bearer ${conn.accessToken}` },
-      });
+      const res = await fetch(
+        `https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(orgUrn)}?edgeType=CompanyFollowedByMember`,
+        {
+          headers: { Authorization: `Bearer ${conn.accessToken}` },
+        }
+      );
       const latencyMs = Date.now() - start;
 
       if (res.ok) {
