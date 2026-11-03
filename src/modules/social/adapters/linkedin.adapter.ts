@@ -489,9 +489,36 @@ export class LinkedInAdapter {
    * Retrieves active LinkedIn connection state from database
    */
   public async getActiveConnection() {
-    return prisma.socialAccountConnection.findUnique({
-      where: { platform: 'LINKEDIN' },
-    });
+    try {
+      const conn = await prisma.socialAccountConnection.findUnique({
+        where: { platform: 'LINKEDIN' },
+      });
+      if (conn) return conn;
+    } catch {}
+
+    const envToken = process.env.LINKEDIN_ACCESS_TOKEN?.trim();
+    if (envToken) {
+      return {
+        id: 'env-conn',
+        platform: 'LINKEDIN',
+        accountName: 'Leaders Performance',
+        accountUrn: process.env.LINKEDIN_ORGANIZATION_URN || 'urn:li:organization:leaders-performance',
+        accountEmail: null,
+        profilePictureUrl: null,
+        accessToken: envToken,
+        refreshToken: null,
+        tokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+        scopes: ['r_organization_social', 'rw_organization_admin', 'w_member_social'],
+        status: 'HEALTHY',
+        lastSyncAt: new Date(),
+        followersCount: null,
+        metadata: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+    }
+    return null;
   }
 
   /**

@@ -68,8 +68,10 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
 
     const orgUrn = this.getOrganizationUrn();
     const conn = await this.getActiveConnection();
+    const envToken = process.env.LINKEDIN_ACCESS_TOKEN?.trim() || '';
+    const token = conn?.accessToken || envToken;
 
-    const isConnected = !!(conn && conn.accessToken && (!conn.tokenExpiresAt || new Date(conn.tokenExpiresAt).getTime() > now));
+    const isConnected = !!(token && orgUrn && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true));
 
     // If company page is not connected or organization is not configured, return clean null-state schema
     if (!isConnected || !orgUrn) {
@@ -108,7 +110,6 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       return emptyResult;
     }
 
-    const token = conn.accessToken;
     const startMs = new Date(`${win.startDate}T00:00:00Z`).getTime();
     const endMs = new Date(`${win.endDate}T23:59:59Z`).getTime();
     const headers = {
@@ -250,7 +251,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         name: 'Leaders Performance',
         vanityName: 'leaders-performance',
         description: 'Executive Coaching, High-Performance Systems & Sovereign Leadership.',
-        logoUrl: conn.profilePictureUrl || null,
+        logoUrl: conn?.profilePictureUrl || null,
         connected: true,
         followers,
         followerGrowth,
