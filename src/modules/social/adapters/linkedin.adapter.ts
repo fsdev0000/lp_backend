@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import {
+  DEFAULT_LINKEDIN_ORGANIZATION_ID,
   getLinkedInApiVersion,
   getLinkedInVanityName,
   isLinkedInPublishingEnabled,
@@ -205,7 +206,9 @@ export class LinkedInAdapter {
     };
 
     const configuredRaw =
-      process.env.LINKEDIN_ORGANIZATION_URN?.trim() || process.env.LINKEDIN_ORGANIZATION_ID?.trim();
+      process.env.LINKEDIN_ORGANIZATION_URN?.trim() ||
+      process.env.LINKEDIN_ORGANIZATION_ID?.trim() ||
+      DEFAULT_LINKEDIN_ORGANIZATION_ID;
     const configuredId = configuredRaw ? configuredRaw.replace(/^urn:li:organization:/, '') : null;
 
     // 1. Try lookup by vanityName (lioneleersteling)

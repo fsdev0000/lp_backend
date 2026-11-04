@@ -33,6 +33,12 @@ export function getLinkedInVanityName(): string {
 }
 
 /**
+ * Returns the default LinkedIn Organization ID (18948042 for Leaders Performance / lioneleersteling).
+ */
+export const DEFAULT_LINKEDIN_ORGANIZATION_ID = '18948042';
+export const DEFAULT_LINKEDIN_ORGANIZATION_URN = 'urn:li:organization:18948042';
+
+/**
  * Validates OAuth callback return_to URLs to prevent open redirects.
  * Only allows configured Leaders Performance / CRM origins (and localhost in non-production).
  */

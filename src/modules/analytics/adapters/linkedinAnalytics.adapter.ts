@@ -7,6 +7,7 @@ import {
 import { LiveErrorBoundary } from './liveErrorBoundary';
 import { resolveWindow } from '../utils/dateRange';
 import {
+  DEFAULT_LINKEDIN_ORGANIZATION_URN,
   getLinkedInApiVersion,
   getLinkedInVanityName,
   LINKEDIN_PAGE_PLATFORM,
@@ -43,7 +44,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       process.env.LINKEDIN_ORGANIZATION_ID?.trim() ||
       (connAccountUrn && connAccountUrn.startsWith('urn:li:organization:') ? connAccountUrn.trim() : '') ||
       LinkedInAnalyticsAdapter.resolvedOrgUrn ||
-      '';
+      DEFAULT_LINKEDIN_ORGANIZATION_URN;
 
     if (!raw) return null;
     if (raw.startsWith('urn:li:organization:')) {

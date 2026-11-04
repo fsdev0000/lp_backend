@@ -37,12 +37,12 @@ LinkedIn's **Community Management API** cannot share an app with consumer sign-i
 LINKEDIN_PUBLISHING_ENABLED="false"
 LINKEDIN_API_VERSION="202504"
 
-LINKEDIN_PAGE_CLIENT_ID="<from-linkedin-page-app>"
+LINKEDIN_PAGE_CLIENT_ID="78ocx3kz1moo0s"
 LINKEDIN_PAGE_CLIENT_SECRET="<set-in-host-env-only>"
 LINKEDIN_PAGE_REDIRECT_URI="https://staging.leadersperformance.ae/api/v1/social/linkedin/callback"
 
-LINKEDIN_ORGANIZATION_ID="<numeric-org-id>"
-LINKEDIN_ORGANIZATION_URN="urn:li:organization:<numeric-org-id>"
+LINKEDIN_ORGANIZATION_ID="18948042"
+LINKEDIN_ORGANIZATION_URN="urn:li:organization:18948042"
 LINKEDIN_ORGANIZATION_VANITY_NAME="lioneleersteling"
 ```
 
@@ -51,12 +51,12 @@ LINKEDIN_ORGANIZATION_VANITY_NAME="lioneleersteling"
 LINKEDIN_PUBLISHING_ENABLED="false"
 LINKEDIN_API_VERSION="202504"
 
-LINKEDIN_PAGE_CLIENT_ID="<from-linkedin-page-app>"
+LINKEDIN_PAGE_CLIENT_ID="78ocx3kz1moo0s"
 LINKEDIN_PAGE_CLIENT_SECRET="<set-in-local-env-only>"
 LINKEDIN_PAGE_REDIRECT_URI="http://localhost:4000/api/v1/social/linkedin/callback"
 
-LINKEDIN_ORGANIZATION_ID="<numeric-org-id>"
-LINKEDIN_ORGANIZATION_URN="urn:li:organization:<numeric-org-id>"
+LINKEDIN_ORGANIZATION_ID="18948042"
+LINKEDIN_ORGANIZATION_URN="urn:li:organization:18948042"
 LINKEDIN_ORGANIZATION_VANITY_NAME="lioneleersteling"
 ```
 
