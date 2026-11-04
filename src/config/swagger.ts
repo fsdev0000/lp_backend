@@ -63,7 +63,15 @@ const swaggerOptions = {
       },
       {
         name: 'LinkedIn Social CRM',
-        description: 'LinkedIn OAuth 2.0 connection lifecycle, authorization URL generation, member profile synchronization, and automated feed broadcasting.',
+        description: 'LinkedIn OAuth 2.0 connection lifecycle (member & read-only company page), Community Management API v202504 analytics (Organization ID 18948042 / vanityName lioneleersteling), and kill-switch-protected publishing.',
+      },
+      {
+        name: 'Instagram Social CRM',
+        description: 'Meta Instagram Professional account OAuth 2.0 connection lifecycle, Graph API analytics, and recent media telemetry.',
+      },
+      {
+        name: 'TikTok Social CRM',
+        description: 'TikTok Login Kit, Display API v2 profile/video telemetry (@lioneleersteling), Content Posting API v2 (draft upload & direct post with kill switch), and webhooks.',
       },
     ],
     paths: {
@@ -1702,10 +1710,13 @@ const swaggerOptions = {
       '/social/linkedin/auth-url': {
         get: {
           summary: 'Generate LinkedIn OAuth 2.0 authorization URL',
-          description: 'Builds OAuth URL with client ID, state token, and scopes (openid, profile, email, w_member_social).',
+          description: 'Builds OAuth URL with signed CSRF state token, target mode (`member` or `page`), and scopes. When `target=page`, requests read-only Community Management scopes (`r_organization_social`, `rw_organization_admin`, `r_basicprofile`).',
           tags: ['LinkedIn Social CRM'],
           parameters: [
+            { name: 'target', in: 'query', schema: { type: 'string', enum: ['member', 'page'], default: 'member' }, description: 'Connection target (`member` or `page`)' },
+            { name: 'scopes', in: 'query', schema: { type: 'string' }, description: 'Optional space- or comma-separated OAuth scopes override' },
             { name: 'redirect_uri', in: 'query', schema: { type: 'string' } },
+            { name: 'return_to', in: 'query', schema: { type: 'string' }, description: 'Allowlisted post-OAuth redirect URL' },
             { name: 'state', in: 'query', schema: { type: 'string' } },
           ],
           responses: {
@@ -1719,6 +1730,7 @@ const swaggerOptions = {
                       success: { type: 'boolean', example: true },
                       url: { type: 'string', example: 'https://www.linkedin.com/oauth/v2/authorization?...' },
                       clientId: { type: 'string', example: '78ocx3kz1moo0s' },
+                      target: { type: 'string', example: 'member' },
                       scopes: { type: 'array', items: { type: 'string' } },
                     },
                   },
@@ -1729,10 +1741,25 @@ const swaggerOptions = {
         },
       },
 
+      '/social/linkedin/page/auth-url': {
+        get: {
+          summary: 'Generate LinkedIn Company Page OAuth 2.0 authorization URL (Read-Only)',
+          description: 'Builds OAuth URL specifically for `LINKEDIN_PAGE` connection (`urn:li:organization:18948042` / `lioneleersteling`) with read-only scopes (`r_organization_social`, `rw_organization_admin`, `r_basicprofile`). Never requests `w_organization_social` while publishing is disabled.',
+          tags: ['LinkedIn Social CRM'],
+          parameters: [
+            { name: 'redirect_uri', in: 'query', schema: { type: 'string' } },
+            { name: 'return_to', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: { description: 'Company page OAuth authorization URL ready for redirection' },
+          },
+        },
+      },
+
       '/social/linkedin/callback': {
         get: {
           summary: 'OAuth 2.0 callback receiver',
-          description: 'Exchanges authorization code for access token, retrieves member profile, and saves connection.',
+          description: 'Verifies signed CSRF `state` and allowlisted `return_to`, exchanges authorization code for access token, and saves `LINKEDIN` or `LINKEDIN_PAGE` connection.',
           tags: ['LinkedIn Social CRM'],
           parameters: [
             { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
@@ -1742,7 +1769,7 @@ const swaggerOptions = {
           ],
           responses: {
             200: { description: 'Account connected successfully' },
-            400: { description: 'Authorization code invalid or expired' },
+            400: { description: 'Authorization code or CSRF state invalid/expired' },
           },
         },
       },
@@ -1750,8 +1777,11 @@ const swaggerOptions = {
       '/social/linkedin/status': {
         get: {
           summary: 'Get LinkedIn connection status',
-          description: 'Returns active account connection details, member URN, follower count, and token lifespan.',
+          description: 'Returns active account connection details, member/organization URN, publishing kill-switch state, and token lifespan. Never returns hardcoded sample follower counts.',
           tags: ['LinkedIn Social CRM'],
+          parameters: [
+            { name: 'target', in: 'query', schema: { type: 'string', enum: ['member', 'page'] } },
+          ],
           responses: {
             200: {
               description: 'Connection status details',
@@ -1762,17 +1792,31 @@ const swaggerOptions = {
                     properties: {
                       success: { type: 'boolean', example: true },
                       connected: { type: 'boolean', example: true },
+                      pageConnected: { type: 'boolean', example: true },
+                      memberConnected: { type: 'boolean', example: true },
+                      publishingEnabled: { type: 'boolean', example: false },
                       status: { type: 'string', example: 'CONNECTED' },
                       accountName: { type: 'string', example: 'Lionel Eersteling' },
-                      accountUrn: { type: 'string', example: 'urn:li:person:abcdef123' },
+                      accountUrn: { type: 'string', example: 'urn:li:organization:18948042' },
+                      organizationId: { type: 'string', example: '18948042' },
+                      vanityName: { type: 'string', example: 'lioneleersteling' },
                       tokenExpiresIn: { type: 'string', example: '60 days' },
-                      followersCount: { type: 'number', example: 48920 },
+                      followersCount: { type: 'number', nullable: true, example: null },
                     },
                   },
                 },
               },
             },
           },
+        },
+      },
+
+      '/social/linkedin/page/status': {
+        get: {
+          summary: 'Get LinkedIn Company Page connection status',
+          description: 'Returns status for the dedicated `LINKEDIN_PAGE` connection (`urn:li:organization:18948042`).',
+          tags: ['LinkedIn Social CRM'],
+          responses: { 200: { description: 'Company page connection status' } },
         },
       },
 
@@ -1785,10 +1829,19 @@ const swaggerOptions = {
         },
       },
 
+      '/social/linkedin/page/disconnect': {
+        post: {
+          summary: 'Disconnect LinkedIn Company Page integration',
+          description: 'Revokes active `LINKEDIN_PAGE` credentials and flags connection state as DISCONNECTED.',
+          tags: ['LinkedIn Social CRM'],
+          responses: { 200: { description: 'Company page disconnected successfully' } },
+        },
+      },
+
       '/social/linkedin/share': {
         post: {
           summary: 'Publish direct message to LinkedIn feed',
-          description: 'Publishes text/media post directly to the authenticated member profile.',
+          description: 'Publishes text/media post to LinkedIn. Blocked with 403 Forbidden while `LINKEDIN_PUBLISHING_ENABLED=false`.',
           tags: ['LinkedIn Social CRM'],
           requestBody: {
             required: true,
@@ -1801,6 +1854,7 @@ const swaggerOptions = {
                     text: { type: 'string', example: 'Sharing executive insights from the latest masterclass cohort.' },
                     title: { type: 'string', example: 'Masterclass Cohort #4 Key Takeaways' },
                     mediaUrl: { type: 'string' },
+                    mediaType: { type: 'string', enum: ['NONE', 'IMAGE', 'VIDEO', 'ARTICLE'], default: 'NONE' },
                   },
                 },
               },
@@ -1827,6 +1881,7 @@ const swaggerOptions = {
                 },
               },
             },
+            403: { description: 'LinkedIn publishing is disabled by kill switch (LINKEDIN_PUBLISHING_ENABLED=false)' },
           },
         },
       },
@@ -1860,7 +1915,7 @@ const swaggerOptions = {
       '/analytics/social/linkedin': {
         get: {
           summary: 'Retrieve LinkedIn Company Page Analytics',
-          description: 'Returns followers, follower growth, page impressions, clicks, engagement rate, page views, and GA4 website visitors. Never returns estimates or sample numbers (returns null if unverified/unconnected).',
+          description: 'Returns followers, follower growth, page impressions, clicks, engagement rate, page views, and GA4 website visitors for Organization ID `18948042` (`vanityName: lioneleersteling`) via LinkedIn Community Management API version `202504`. Never returns estimates or sample numbers (returns null if unverified/unconnected).',
           tags: ['Analytics & Performance', 'LinkedIn Social CRM'],
           parameters: [
             {
@@ -1890,8 +1945,9 @@ const swaggerOptions = {
                       data: {
                         type: 'object',
                         properties: {
-                          organizationId: { type: 'string', nullable: true },
-                          organizationUrn: { type: 'string', nullable: true },
+                          organizationId: { type: 'string', nullable: true, example: '18948042' },
+                          organizationUrn: { type: 'string', nullable: true, example: 'urn:li:organization:18948042' },
+                          vanityName: { type: 'string', example: 'lioneleersteling' },
                           name: { type: 'string', example: 'Leaders Performance' },
                           connected: { type: 'boolean', example: false },
                           followers: { type: 'number', nullable: true },
@@ -2093,6 +2149,156 @@ const swaggerOptions = {
             200: {
               description: 'List of recent Instagram media items',
             },
+          },
+        },
+      },
+
+      '/social/tiktok/auth-url': {
+        get: {
+          summary: 'Generate TikTok Login Kit OAuth 2.0 Authorization URL',
+          description: 'Builds TikTok v2 OAuth authorization URL with signed CSRF state token and scopes (`user.info.basic`, `user.info.profile`, `user.info.stats`, `video.list`, `video.upload`, `video.publish`).',
+          tags: ['TikTok Social CRM'],
+          parameters: [
+            { name: 'redirect_uri', in: 'query', schema: { type: 'string' }, description: 'Optional override for registered HTTPS callback URI' },
+            { name: 'return_to', in: 'query', schema: { type: 'string' }, description: 'Allowlisted post-OAuth redirect URL' },
+            { name: 'scopes', in: 'query', schema: { type: 'string' }, description: 'Optional comma-separated TikTok scopes override' },
+          ],
+          responses: {
+            200: {
+              description: 'TikTok OAuth authorization URL ready for redirection',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      url: { type: 'string', example: 'https://www.tiktok.com/v2/auth/authorize/?client_key=awreenjfjswfnoze&...' },
+                      clientKey: { type: 'string', example: 'awreenjfjswfnoze' },
+                      scopes: { type: 'array', items: { type: 'string' } },
+                      publishingEnabled: { type: 'boolean', example: false },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/tiktok/callback': {
+        get: {
+          summary: 'TikTok OAuth 2.0 Callback Receiver',
+          description: 'Verifies signed CSRF state, exchanges authorization code for TikTok access & refresh tokens, fetches `@lioneleersteling` profile stats, and persists connection.',
+          tags: ['TikTok Social CRM'],
+          parameters: [
+            { name: 'code', in: 'query', required: true, schema: { type: 'string' } },
+            { name: 'state', in: 'query', schema: { type: 'string' } },
+            { name: 'redirect_uri', in: 'query', schema: { type: 'string' } },
+            { name: 'return_to', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: { description: 'TikTok account connected successfully' },
+            400: { description: 'Invalid or expired authorization code / CSRF state' },
+          },
+        },
+      },
+
+      '/social/tiktok/status': {
+        get: {
+          summary: 'Retrieve TikTok Connection Status',
+          description: 'Returns current TikTok connection state (`@lioneleersteling`), open_id, follower/likes/video stats, token lifespan, and `publishingEnabled` kill-switch state.',
+          tags: ['TikTok Social CRM'],
+          responses: {
+            200: {
+              description: 'TikTok connection status (never exposes raw tokens)',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      connected: { type: 'boolean', example: true },
+                      publishingEnabled: { type: 'boolean', example: false },
+                      status: { type: 'string', example: 'CONNECTED' },
+                      username: { type: 'string', example: 'lioneleersteling' },
+                      accountName: { type: 'string', example: 'Lionel Eersteling' },
+                      openId: { type: 'string', nullable: true },
+                      followersCount: { type: 'number', nullable: true, example: null },
+                      likesCount: { type: 'number', nullable: true, example: null },
+                      videoCount: { type: 'number', nullable: true, example: null },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/social/tiktok/analytics': {
+        get: {
+          summary: 'Retrieve TikTok Profile & Video Telemetry',
+          description: 'Fetches real-time TikTok profile statistics (`follower_count`, `likes_count`, `video_count`) and recent public video metrics (`view_count`, `like_count`, `comment_count`, `share_count`) via TikTok Display API v2.',
+          tags: ['Analytics & Performance', 'TikTok Social CRM'],
+          responses: {
+            200: {
+              description: 'TikTok profile and video analytics payload',
+            },
+          },
+        },
+      },
+
+      '/social/tiktok/publish': {
+        post: {
+          summary: 'Publish or Upload Video to TikTok',
+          description: 'Initiates a TikTok Content Posting API v2 video transfer (`PULL_FROM_URL`) as either a creator draft (`mode: "DRAFT"`) or direct post (`mode: "DIRECT_POST"`). Blocked with 403 Forbidden while `TIKTOK_PUBLISHING_ENABLED=false`.',
+          tags: ['TikTok Social CRM'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['videoUrl'],
+                  properties: {
+                    videoUrl: { type: 'string', example: 'https://staging.leadersperformance.ae/uploads/reel.mp4' },
+                    title: { type: 'string', example: 'Discipline is the foundation of executive performance. #leadership' },
+                    mode: { type: 'string', enum: ['DRAFT', 'DIRECT_POST'], default: 'DRAFT' },
+                    privacyLevel: {
+                      type: 'string',
+                      enum: ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'],
+                      default: 'PUBLIC_TO_EVERYONE',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'TikTok video upload/publish initiated (`publishId` returned)' },
+            403: { description: 'TikTok publishing is disabled by kill switch (TIKTOK_PUBLISHING_ENABLED=false)' },
+          },
+        },
+      },
+
+      '/social/tiktok/disconnect': {
+        post: {
+          summary: 'Disconnect TikTok Account',
+          description: 'Marks the active TikTok connection as DISCONNECTED and clears stored OAuth tokens.',
+          tags: ['TikTok Social CRM'],
+          responses: {
+            200: { description: 'TikTok account disconnected' },
+          },
+        },
+      },
+
+      '/social/tiktok/webhook': {
+        post: {
+          summary: 'TikTok Developer Webhook Receiver',
+          description: 'Receives asynchronous TikTok Content Posting API and account event callbacks (`https://staging.leadersperformance.ae/api/v1/social/tiktok/webhook`).',
+          tags: ['TikTok Social CRM', 'Webhooks'],
+          responses: {
+            200: { description: 'Webhook event acknowledged' },
           },
         },
       },
