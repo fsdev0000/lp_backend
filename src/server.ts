@@ -194,6 +194,20 @@ app.use('/api/v1/social/instagram', instagramRoutes);
 app.use('/api/v1/integrations/instagram', instagramRoutes);
 app.use('/api/integrations/instagram', instagramRoutes);
 
+import tiktokRoutes from './modules/social/tiktok.routes';
+app.use('/api/social/tiktok', tiktokRoutes);
+app.use('/api/v1/social/tiktok', tiktokRoutes);
+app.use('/api/v1/integrations/tiktok', tiktokRoutes);
+app.use('/api/integrations/tiktok', tiktokRoutes);
+
+// TikTok Developer Portal URL verification handler
+app.get('/tiktok:token.txt', (req, res) => {
+  const verificationContent =
+    process.env.TIKTOK_SITE_VERIFICATION?.trim() ||
+    `tiktok-developers-site-verification=${req.params.token}`;
+  res.type('text/plain').send(verificationContent);
+});
+
 // Stripe Webhook Endpoint (Universal)
 app.post('/api/v1/webhooks/stripe', handleStripeWebhook);
 app.post('/api/webhooks/stripe', handleStripeWebhook);
