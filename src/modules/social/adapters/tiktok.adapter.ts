@@ -56,8 +56,14 @@ export interface TikTokVideoItem {
 export class TikTokAdapter {
   private getCredentials() {
     return {
-      clientKey: process.env.TIKTOK_CLIENT_KEY?.trim() || 'awreenjfjswfnoze',
-      clientSecret: process.env.TIKTOK_CLIENT_SECRET?.trim() || '',
+      clientKey:
+        process.env.TIKTOK_CLIENT_KEY?.trim() ||
+        process.env.TIKTOK_SANDBOX_CLIENT_KEY?.trim() ||
+        'sbawhyubzo4xr8qelx',
+      clientSecret:
+        process.env.TIKTOK_CLIENT_SECRET?.trim() ||
+        process.env.TIKTOK_SANDBOX_CLIENT_SECRET?.trim() ||
+        'v3vrynbj40NSJX8LF5Y5h0nRgi0bO6Zh',
       redirectUri:
         process.env.TIKTOK_REDIRECT_URI?.trim() ||
         'https://staging.leadersperformance.ae/api/v1/social/tiktok/callback',

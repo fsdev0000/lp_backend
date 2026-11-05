@@ -62,7 +62,10 @@ export class TikTokService {
       url,
       state: authState,
       platform: TIKTOK_PLATFORM,
-      clientKey: process.env.TIKTOK_CLIENT_KEY?.trim() || 'awreenjfjswfnoze',
+      clientKey:
+        process.env.TIKTOK_CLIENT_KEY?.trim() ||
+        process.env.TIKTOK_SANDBOX_CLIENT_KEY?.trim() ||
+        'sbawhyubzo4xr8qelx',
       scopes: activeScopes,
     };
   }
