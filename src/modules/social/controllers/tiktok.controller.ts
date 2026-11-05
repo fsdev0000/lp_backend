@@ -19,6 +19,10 @@ export class TikTokController {
       }
 
       const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, returnTo);
+      if (req.query.redirect === 'true' || req.query.auto === 'true' || req.accepts('html')) {
+        res.redirect(302, result.url);
+        return;
+      }
       res.status(200).json({ success: true, ...result });
     } catch (error: any) {
       res

@@ -8,6 +8,7 @@ import { getSupabaseClient } from '../services/supabaseStorageService';
 export async function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
   const authHeader = req.headers.authorization as string | undefined;
+  const queryKey = (req.query.api_key || req.query.apiKey || req.query.token) as string | undefined;
 
   const validKeys = [
     process.env.ADMIN_API_KEY,
@@ -25,8 +26,11 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     validKeys.push('b8f9c1a2d4e7465b90a3f8c2e1d5b');
   }
 
-  // 1. Check x-api-key header
+  // 1. Check x-api-key header or query param
   if (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) {
+    return next();
+  }
+  if (queryKey && validKeys.includes(queryKey.trim())) {
     return next();
   }
 
