@@ -200,12 +200,29 @@ app.use('/api/v1/social/tiktok', tiktokRoutes);
 app.use('/api/v1/integrations/tiktok', tiktokRoutes);
 app.use('/api/integrations/tiktok', tiktokRoutes);
 
-// TikTok Developer Portal URL verification handler
-app.get('/tiktok:token.txt', (req, res) => {
-  const verificationContent =
-    process.env.TIKTOK_SITE_VERIFICATION?.trim() ||
-    `tiktok-developers-site-verification=${req.params.token}`;
+// TikTok Developer Portal URL verification handler (supports root, /api, /api/v1, and /api/v1/social/tiktok prefixes)
+const tiktokVerificationHandler = (req: express.Request, res: express.Response) => {
+  const rawContent = process.env.TIKTOK_SITE_VERIFICATION?.trim();
+  const verificationContent = rawContent
+    ? rawContent.startsWith('tiktok-developers-site-verification=')
+      ? rawContent
+      : `tiktok-developers-site-verification=${rawContent}`
+    : `tiktok-developers-site-verification=${req.params.token}`;
   res.type('text/plain').send(verificationContent);
+};
+
+app.get('/tiktok:token.txt', tiktokVerificationHandler);
+app.get('/api/tiktok:token.txt', tiktokVerificationHandler);
+app.get('/api/v1/tiktok:token.txt', tiktokVerificationHandler);
+app.get('/api/social/tiktok/tiktok:token.txt', tiktokVerificationHandler);
+app.get('/api/v1/social/tiktok/tiktok:token.txt', tiktokVerificationHandler);
+
+// Backend-hosted Terms & Privacy routes under /api/* so verifying the /api/ URL prefix satisfies TikTok URL checks
+app.get(['/api/terms', '/api/v1/terms', '/api/v1/social/tiktok/terms'], (_req, res) => {
+  res.redirect(302, 'https://staging.leadersperformance.ae/terms');
+});
+app.get(['/api/privacy', '/api/v1/privacy', '/api/v1/social/tiktok/privacy'], (_req, res) => {
+  res.redirect(302, 'https://staging.leadersperformance.ae/privacy');
 });
 
 // Stripe Webhook Endpoint (Universal)
