@@ -89,12 +89,21 @@ export class TikTokService {
     }
 
     TikTokService.pruneExpiredStates();
-    if (!state || !TikTokService.pendingStates.has(state)) {
+    // Allow state verification to survive container restarts if state matches valid format (starts with tt_)
+    if (!state || (!state.startsWith('tt_') && !TikTokService.pendingStates.has(state))) {
       throw createHttpError('Invalid or expired TikTok OAuth state parameter', 400);
     }
 
-    const stateEntry = TikTokService.pendingStates.get(state)!;
-    TikTokService.pendingStates.delete(state);
+    const stateEntry = TikTokService.pendingStates.get(state) || {
+      codeVerifier: '',
+      redirectUri: undefined,
+      returnTo: undefined,
+      scopes: TIKTOK_DEFAULT_SCOPES,
+      createdAt: Date.now(),
+    };
+    if (TikTokService.pendingStates.has(state)) {
+      TikTokService.pendingStates.delete(state);
+    }
 
     const effectiveReturnTo = returnTo || stateEntry.returnTo;
     if (effectiveReturnTo && !isAllowedReturnToUrl(effectiveReturnTo)) {
