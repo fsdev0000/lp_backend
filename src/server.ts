@@ -216,6 +216,19 @@ app.get('/api/tiktok:token.txt', tiktokVerificationHandler);
 app.get('/api/v1/tiktok:token.txt', tiktokVerificationHandler);
 app.get('/api/social/tiktok/tiktok:token.txt', tiktokVerificationHandler);
 app.get('/api/v1/social/tiktok/tiktok:token.txt', tiktokVerificationHandler);
+app.get(
+  [
+    '/tiktokM8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+    '/tiktok_M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+    '/api/tiktokM8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+    '/api/tiktok_M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+    '/api/v1/tiktokM8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+    '/api/v1/tiktok_M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV.txt',
+  ],
+  (_req, res) => {
+    res.type('text/plain').send('tiktok-developers-site-verification=M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV');
+  }
+);
 
 // Backend-hosted Terms & Privacy routes under /api/* so verifying the /api/ URL prefix satisfies TikTok URL checks
 app.get(['/api/terms', '/api/v1/terms', '/api/v1/social/tiktok/terms'], (_req, res) => {
