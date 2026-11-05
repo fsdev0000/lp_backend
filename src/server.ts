@@ -200,6 +200,26 @@ app.use('/api/v1/social/tiktok', tiktokRoutes);
 app.use('/api/v1/integrations/tiktok', tiktokRoutes);
 app.use('/api/integrations/tiktok', tiktokRoutes);
 
+// Universal TikTok Developer signature file verification handler
+// Catches ANY request containing tiktok verification token with or without trailing slash
+app.use((req, res, next) => {
+  const p = req.path || '';
+  if (
+    p.includes('M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV') ||
+    (p.includes('tiktok') && p.includes('.txt'))
+  ) {
+    const rawContent = process.env.TIKTOK_SITE_VERIFICATION?.trim();
+    const verificationContent = rawContent
+      ? rawContent.startsWith('tiktok-developers-site-verification=')
+        ? rawContent
+        : `tiktok-developers-site-verification=${rawContent}`
+      : 'tiktok-developers-site-verification=M8l9oAyxWhM5ocXLCepRfVuqatZ1dBJV';
+    res.type('text/plain').send(verificationContent);
+    return;
+  }
+  next();
+});
+
 // TikTok Developer Portal URL verification handler (supports root, /api, /api/v1, and /api/v1/social/tiktok prefixes)
 const tiktokVerificationHandler = (req: express.Request, res: express.Response) => {
   const rawContent = process.env.TIKTOK_SITE_VERIFICATION?.trim();
