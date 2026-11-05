@@ -18,7 +18,9 @@ export class TikTokController {
         parsedScopes = rawScopes.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
       }
 
-      const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, returnTo);
+      const clientKey = (req.query.client_key || req.query.clientKey) as string | undefined;
+
+      const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, returnTo, clientKey);
       if (req.query.redirect === 'true' || req.query.auto === 'true' || req.accepts('html')) {
         res.redirect(302, result.url);
         return;

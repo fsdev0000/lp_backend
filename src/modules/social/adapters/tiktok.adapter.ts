@@ -87,17 +87,19 @@ export class TikTokAdapter {
     redirectUri?: string,
     state?: string,
     scopes?: string[],
-    codeChallenge?: string
+    codeChallenge?: string,
+    clientKeyOverride?: string
   ): string {
     const creds = this.getCredentials();
     const uri = redirectUri || creds.redirectUri;
     const authState = state || `tt_${randomBytes(16).toString('hex')}`;
     const activeScopes = scopes && scopes.length > 0 ? scopes : TIKTOK_DEFAULT_SCOPES;
     const scopeParam = activeScopes.map((s) => s.trim()).join(',');
+    const activeClientKey = clientKeyOverride?.trim() || creds.clientKey;
 
     let url =
       `https://www.tiktok.com/v2/auth/authorize/` +
-      `?client_key=${encodeURIComponent(creds.clientKey)}` +
+      `?client_key=${encodeURIComponent(activeClientKey)}` +
       `&response_type=code` +
       `&scope=${encodeURIComponent(scopeParam)}` +
       `&redirect_uri=${encodeURIComponent(uri)}` +

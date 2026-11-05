@@ -36,7 +36,13 @@ export class TikTokService {
     }
   }
 
-  public getAuthUrl(redirectUri?: string, state?: string, scopes?: string[], returnTo?: string) {
+  public getAuthUrl(
+    redirectUri?: string,
+    state?: string,
+    scopes?: string[],
+    returnTo?: string,
+    clientKeyOverride?: string
+  ) {
     if (returnTo && !isAllowedReturnToUrl(returnTo)) {
       throw createHttpError(
         'Invalid return_to URL. Only approved Leaders Performance CRM URLs are permitted.',
@@ -57,12 +63,19 @@ export class TikTokService {
       createdAt: Date.now(),
     });
 
-    const url = this.adapter.getAuthorizationUrl(redirectUri, authState, activeScopes, codeChallenge);
+    const url = this.adapter.getAuthorizationUrl(
+      redirectUri,
+      authState,
+      activeScopes,
+      codeChallenge,
+      clientKeyOverride
+    );
     return {
       url,
       state: authState,
       platform: TIKTOK_PLATFORM,
       clientKey:
+        clientKeyOverride?.trim() ||
         process.env.TIKTOK_CLIENT_KEY?.trim() ||
         process.env.TIKTOK_SANDBOX_CLIENT_KEY?.trim() ||
         'sbawhyubzo4xr8qelx',
