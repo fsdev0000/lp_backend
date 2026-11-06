@@ -108,6 +108,8 @@ export class LinkedInSchedulerJob {
             data: {
               status: 'FAILED',
               approvalSignature: null,
+              approvedAt: null,
+              approvedBy: null,
               rejectionReason:
                 'Scheduled time already passed while publishing was disabled — needs re-approval before publishing.',
             },

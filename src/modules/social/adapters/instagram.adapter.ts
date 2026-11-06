@@ -214,9 +214,9 @@ export class InstagramAdapter {
           'instagram_manage_messages',
           'ads_management',
         ],
-        status: 'HEALTHY',
-        lastSyncAt: new Date(),
-        followersCount: 51,
+        status: 'INITIALIZED',
+        lastSyncAt: null,
+        followersCount: null,
         metadata: {
           username: process.env.INSTAGRAM_USERNAME || 'lioneleersteling',
           accountId: this.accountId,

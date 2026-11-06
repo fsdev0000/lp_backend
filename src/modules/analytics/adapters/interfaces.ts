@@ -409,12 +409,19 @@ export interface ILinkedInAnalyticsAdapter {
 
 export interface InstagramWebsiteVisitors {
   range: string;
-  totalVisitors: number;
-  leadersPerformance: number;
-  lionelEersteling: number;
-  conversions: number;
-  leads: number;
-  breakdown: Array<{ landingPage: string; visitors: number }>;
+  startDate: string;
+  endDate: string;
+  total: number | null;
+  bySite: Array<{
+    domain: string;
+    users: number | null;
+  }>;
+  totalVisitors?: number | null;
+  leadersPerformance?: number | null;
+  lionelEersteling?: number | null;
+  conversions?: number;
+  leads?: number;
+  breakdown?: Array<{ landingPage: string; visitors: number }>;
 }
 
 export interface InstagramPostDetailRow {

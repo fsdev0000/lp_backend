@@ -1033,25 +1033,48 @@ export class Ga4Adapter implements IGa4Adapter {
 
   public async getInstagramWebsiteVisitors(range = '7d'): Promise<InstagramWebsiteVisitors> {
     const win = resolveWindow(range, 1);
+    const sites = ['leadersperformance.ae', 'lioneleersteling.com'];
+    const bySite: Array<{ domain: string; users: number | null }> = [];
     let lpVisitors = 0;
-    let lioneleerstelingVisitors = 0;
+    let lioneleerstelingVisitors: number | null = null;
     let totalConversions = 0;
     const breakdownMap = new Map<string, number>();
 
-    const sites = [
-      { domain: 'leadersperformance.ae', isLp: true },
-      { domain: 'lioneleersteling.com', isLp: false },
-    ];
-
     for (const site of sites) {
-      const target = this.resolveGa4Target(site.domain);
-      const propertyId = target.propertyId || (site.isLp ? this.propertyId : null);
+      const target = this.resolveGa4Target(site);
+      const propertyId = target.propertyId || (site.includes('leadersperformance') ? this.propertyId : null);
 
       if (!this.client || !propertyId) {
+        bySite.push({ domain: site, users: null });
         continue;
       }
 
       try {
+        let isTracked = target.propertyId !== null;
+        if (!isTracked && this.propertyId) {
+          const [hostRes] = await this.client.runReport({
+            property: `properties/${propertyId}`,
+            dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+            dimensionFilter: {
+              filter: {
+                fieldName: 'hostName',
+                stringFilter: {
+                  matchType: 'CONTAINS' as const,
+                  value: site,
+                },
+              },
+            },
+            metrics: [{ name: 'activeUsers' }],
+          });
+          const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
+          isTracked = totalHostUsers > 0;
+        }
+
+        if (!isTracked) {
+          bySite.push({ domain: site, users: null });
+          continue;
+        }
+
         const dimensionFilter = {
           andGroup: {
             expressions: [
@@ -1060,7 +1083,7 @@ export class Ga4Adapter implements IGa4Adapter {
                   fieldName: 'hostName',
                   stringFilter: {
                     matchType: 'CONTAINS' as const,
-                    value: site.domain,
+                    value: site,
                   },
                 },
               },
@@ -1100,23 +1123,32 @@ export class Ga4Adapter implements IGa4Adapter {
           metrics: [{ name: 'activeUsers' }, { name: 'conversions' }],
         });
 
+        let siteUsers = 0;
         for (const row of igRes.rows || []) {
           const path = row.dimensionValues?.[0]?.value || '/';
           const users = parseInt(row.metricValues?.[0]?.value || '0', 10);
           const conversions = parseInt(row.metricValues?.[1]?.value || '0', 10);
 
-          if (site.isLp) {
-            lpVisitors += users;
-          } else {
-            lioneleerstelingVisitors += users;
-          }
+          siteUsers += users;
           totalConversions += conversions;
           breakdownMap.set(path, (breakdownMap.get(path) || 0) + users);
         }
+
+        if (site.includes('leadersperformance')) {
+          lpVisitors = siteUsers;
+        } else {
+          lioneleerstelingVisitors = siteUsers;
+        }
+
+        bySite.push({ domain: site, users: siteUsers });
       } catch (err: any) {
         await LiveErrorBoundary.logUpstreamError('GA4', 'getInstagramWebsiteVisitors', err);
+        bySite.push({ domain: site, users: null });
       }
     }
+
+    const nonNullUsers = bySite.map((s) => s.users).filter((u): u is number => u !== null);
+    const total = nonNullUsers.length > 0 ? nonNullUsers.reduce((a, b) => a + b, 0) : null;
 
     const breakdown = Array.from(breakdownMap.entries())
       .map(([landingPage, visitors]) => ({ landingPage, visitors }))
@@ -1125,7 +1157,11 @@ export class Ga4Adapter implements IGa4Adapter {
 
     return {
       range: win.range,
-      totalVisitors: lpVisitors + lioneleerstelingVisitors,
+      startDate: win.startDate,
+      endDate: win.endDate,
+      total,
+      bySite,
+      totalVisitors: total,
       leadersPerformance: lpVisitors,
       lionelEersteling: lioneleerstelingVisitors,
       conversions: totalConversions,

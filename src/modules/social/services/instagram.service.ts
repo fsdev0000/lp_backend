@@ -94,7 +94,7 @@ export class InstagramService {
   public async getStatus() {
     try {
       const conn = await this.adapter.getActiveConnection();
-      if (!conn) {
+      if (!conn || !conn.accessToken) {
         return {
           connected: false,
           status: 'DISCONNECTED',
@@ -109,25 +109,34 @@ export class InstagramService {
         };
       }
 
+      // Check the token with Meta Graph API as /ping does (Item 4a)
+      const pingRes = await this.adapter.ping();
+      const isHealthy = pingRes.status === 'HEALTHY';
       const meta = (conn.metadata as any) || {};
-      const isExpired = conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() < Date.now();
       const isSystemToken = meta.tokenType === 'SYSTEM_USER' || !conn.tokenExpiresAt;
+      const isExpired = conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() < Date.now();
 
-      const tokenHealth = isExpired ? 'EXPIRED' : 'HEALTHY';
+      let tokenHealth = 'HEALTHY';
+      if (isExpired) {
+        tokenHealth = 'EXPIRED';
+      } else if (!isHealthy) {
+        tokenHealth = pingRes.message.toLowerCase().includes('blocked') ? 'BLOCKED' : 'INVALID';
+      }
 
       return {
-        connected: !isExpired,
-        status: isExpired ? 'EXPIRED' : conn.status || 'HEALTHY',
-        username: meta.username || process.env.INSTAGRAM_USERNAME || 'lioneleersteling',
-        accountId: meta.accountId || process.env.INSTAGRAM_ACCOUNT_ID || '17841427503988004',
+        connected: isHealthy && !isExpired,
+        status: isHealthy ? 'HEALTHY' : pingRes.status === 'DEGRADED' ? 'DEGRADED' : 'DOWN',
+        username: pingRes.account?.username || meta.username || process.env.INSTAGRAM_USERNAME || 'lioneleersteling',
+        accountId: pingRes.account?.id || meta.accountId || process.env.INSTAGRAM_ACCOUNT_ID || '17841427503988004',
         accountName: conn.accountName,
         accountType: 'INSTAGRAM_PROFESSIONAL',
-        followersCount: conn.followersCount ?? null,
+        followersCount: isHealthy ? (pingRes.account?.followersCount ?? conn.followersCount ?? null) : null,
         tokenHealth,
         tokenExpiresAt: isSystemToken ? 'PERMANENT' : conn.tokenExpiresAt,
         tokenType: isSystemToken ? 'SYSTEM_USER' : 'USER_ACCESS_TOKEN',
-        lastSyncAt: conn.lastSyncAt,
+        lastSyncAt: isHealthy ? (conn.lastSyncAt || new Date()) : null,
         scopes: conn.scopes,
+        message: pingRes.message,
       };
     } catch (error: any) {
       console.warn('[InstagramService] Failed to check status:', error?.message);

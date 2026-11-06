@@ -61,6 +61,27 @@ export class ContentService {
       await contentPrisma.socialAuditLog.deleteMany({
         where: { id: { in: LEGACY_SEED_AUDIT_IDS } },
       });
+
+      // Item 4f: Migrate legacy posts saved before 0d3d43e that defaulted to mediaType="image" even when mediaUrl is a web page
+      const legacyPosts = await contentPrisma.socialPost.findMany({
+        where: {
+          mediaType: 'image',
+          mediaUrl: { not: null },
+        },
+      });
+
+      for (const p of legacyPosts) {
+        if (p.mediaUrl) {
+          const cleanUrl = p.mediaUrl.trim().toLowerCase().split('?')[0];
+          const isDirectMedia = /\.(jpg|jpeg|png|gif|webp|svg|mp4|mov|webm)$/i.test(cleanUrl);
+          if (!isDirectMedia && (p.mediaUrl.startsWith('http://') || p.mediaUrl.startsWith('https://'))) {
+            await contentPrisma.socialPost.update({
+              where: { id: p.id },
+              data: { mediaType: 'article' },
+            });
+          }
+        }
+      }
     } catch {
       // Ignore if DB is unreachable
     }
@@ -322,16 +343,15 @@ export class ContentService {
       );
     }
 
-    const signature =
-      approvalData.signature ||
-      generateAuthoritativeSignature({
-        id: post.id,
-        title: post.title,
-        hook: post.hook,
-        body: post.body,
-        platform: post.platform,
-        mediaUrl: post.mediaUrl,
-      });
+    // Item 4e: Authoritative digital signature is always generated on the server; client-supplied signatures are ignored
+    const signature = generateAuthoritativeSignature({
+      id: post.id,
+      title: post.title,
+      hook: post.hook,
+      body: post.body,
+      platform: post.platform,
+      mediaUrl: post.mediaUrl,
+    });
     const approvedBy = approvalData.approvedBy || 'Lionel Eersteling (Owner)';
     const approvedAt = new Date();
     const publishingEnabled = isLinkedInPublishingEnabled();
@@ -341,6 +361,8 @@ export class ContentService {
     let publishedAt: Date | undefined = undefined;
     let platformPostId: string | null | undefined = undefined;
     let platformPostUrl: string | null | undefined = undefined;
+    let rejectionReason: string | null = null;
+    let scheduledFor = post.scheduledFor;
 
     const existingMetadata =
       post.metadata && typeof post.metadata === 'object' && !Array.isArray(post.metadata)
@@ -362,9 +384,14 @@ export class ContentService {
         platformPostId = dispatchRes.postUrn;
         platformPostUrl = dispatchRes.postUrl;
       } catch (err: any) {
-        console.warn(`[ContentService] Immediate LinkedIn dispatch deferred: ${err?.message}`);
-        newStatus = 'SCHEDULED';
+        console.warn(`[ContentService] Immediate LinkedIn dispatch failed: ${err?.message}`);
+        // Item 4h: If immediate publish fails, mark as FAILED so it doesn't get stuck in SCHEDULED with scheduledFor null
+        newStatus = 'FAILED';
+        rejectionReason = `Immediate LinkedIn dispatch failed: ${err?.message || 'Platform error'}`;
       }
+    } else if (!scheduledFor) {
+      // Ensure scheduledFor is populated if post was approved without a specific time, allowing scheduler pickup
+      scheduledFor = approvedAt;
     }
 
     const updated = await contentPrisma.socialPost.update({
@@ -374,7 +401,8 @@ export class ContentService {
         approvalSignature: signature,
         approvedBy,
         approvedAt,
-        rejectionReason: null,
+        scheduledFor,
+        rejectionReason,
         rejectedAt: null,
         metadata: updatedMetadata,
         ...(publishedAt ? { publishedAt } : {}),

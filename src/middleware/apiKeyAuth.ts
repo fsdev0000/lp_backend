@@ -16,15 +16,9 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     process.env.ARTICLES_API_KEY,
     process.env.NEWSLETTER_SEND_API_KEY,
     process.env.NEWSLETTER_API_KEY,
-    process.env.APPROVAL_SECRET,
   ]
     .map((k) => k?.trim())
     .filter(Boolean) as string[];
-
-  // Fallback to default configured system API key if no env keys are provided
-  if (validKeys.length === 0) {
-    validKeys.push('b8f9c1a2d4e7465b90a3f8c2e1d5b');
-  }
 
   // 1. Check x-api-key header or query param
   if (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) {
@@ -62,13 +56,29 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     }
 
     // 3. If token looks like a Supabase JWT (3 dot-separated parts), verify via Supabase Auth
+    // Security: Only grant access to CRM staff/admin users, preventing general Supabase users from accessing CRM APIs
     if (token && token.split('.').length === 3) {
       try {
         const supabase = await getSupabaseClient();
         const { data, error } = await supabase.auth.getUser(token);
         if (!error && data?.user) {
-          (req as any).user = data.user;
-          return next();
+          const user = data.user;
+          const role = (user.app_metadata?.role || user.user_metadata?.role || '').toLowerCase();
+          const email = (user.email || '').toLowerCase();
+          const isStaff =
+            ['admin', 'staff', 'crm', 'editor'].includes(role) ||
+            email.endsWith('@leadersperformance.ae') ||
+            (process.env.CRM_ADMIN_EMAIL && email === process.env.CRM_ADMIN_EMAIL.toLowerCase());
+
+          if (isStaff) {
+            (req as any).user = user;
+            return next();
+          } else {
+            return res.status(403).json({
+              success: false,
+              error: 'Forbidden: User is not authorized to access Social CRM resources.',
+            });
+          }
         }
       } catch {
         // Ignore Supabase auth lookup errors and fall through to 401

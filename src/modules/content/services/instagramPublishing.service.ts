@@ -70,6 +70,13 @@ export class InstagramPublishingService {
       throw new Error(err);
     }
 
+    // 2. Strict Kill Switch: Nothing may be posted to Instagram while INSTAGRAM_PUBLISHING_ENABLED is false (Item 4d)
+    if (process.env.INSTAGRAM_PUBLISHING_ENABLED !== 'true') {
+      const err = 'Instagram publishing is currently disabled (INSTAGRAM_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.';
+      console.warn('[InstagramPublishingService]', err);
+      throw new Error(err);
+    }
+
     // 2. Resolve Active Connection Token
     const conn = await this.adapter.getActiveConnection();
     const token = conn?.accessToken || this.defaultToken;

@@ -16,6 +16,9 @@ import {
 
 jest.setTimeout(45000);
 
+const TEST_API_KEY = 'test-admin-key-instagram';
+process.env.ADMIN_API_KEY = TEST_API_KEY;
+
 const app = express();
 app.use(express.json());
 app.use('/api/v1/social/instagram', instagramRoutes);
@@ -28,8 +31,16 @@ describe('Meta Instagram Integration Suite', () => {
   const publishingService = new InstagramPublishingService();
 
   describe('Module A: OAuth & Connection Lifecycle', () => {
+    it('Security: rejects unauthenticated requests to Instagram endpoints with HTTP 401', async () => {
+      const res = await request(app).get('/api/v1/social/instagram/status');
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
     it('GET /api/v1/social/instagram/auth-url - generates secure CSRF OAuth URL with Unified Login config', async () => {
-      const res = await request(app).get('/api/v1/social/instagram/auth-url');
+      const res = await request(app)
+        .get('/api/v1/social/instagram/auth-url')
+        .set('x-api-key', TEST_API_KEY);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.url).toContain('https://www.facebook.com/v21.0/dialog/oauth');
@@ -47,7 +58,9 @@ describe('Meta Instagram Integration Suite', () => {
     });
 
     it('GET /api/v1/social/instagram/status - returns connection status and never exposes access token', async () => {
-      const res = await request(app).get('/api/v1/social/instagram/status');
+      const res = await request(app)
+        .get('/api/v1/social/instagram/status')
+        .set('x-api-key', TEST_API_KEY);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(typeof res.body.connected).toBe('boolean');
@@ -62,7 +75,9 @@ describe('Meta Instagram Integration Suite', () => {
     });
 
     it('GET /api/v1/social/instagram/ping - confirms Meta Graph API connectivity and measures response latency', async () => {
-      const res = await request(app).get('/api/v1/social/instagram/ping');
+      const res = await request(app)
+        .get('/api/v1/social/instagram/ping')
+        .set('x-api-key', TEST_API_KEY);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(['HEALTHY', 'DEGRADED']).toContain(res.body.status);
@@ -76,6 +91,7 @@ describe('Meta Instagram Integration Suite', () => {
     it('POST /api/v1/social/instagram/disconnect - successfully clears integration state', async () => {
       const res = await request(app)
         .post('/api/v1/social/instagram/disconnect')
+        .set('x-api-key', TEST_API_KEY)
         .send({ actor: 'Lionel Eersteling (Owner)' });
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -175,6 +191,38 @@ describe('Meta Instagram Integration Suite', () => {
           approvedBy: 'Hacker',
         })
       ).rejects.toThrow('Publishing aborted by executive guard');
+    });
+
+    it('Publishing Service - enforces INSTAGRAM_PUBLISHING_ENABLED kill switch', async () => {
+      const prev = process.env.INSTAGRAM_PUBLISHING_ENABLED;
+      process.env.INSTAGRAM_PUBLISHING_ENABLED = 'false';
+      try {
+        const post = {
+          id: 'test-kill-switch-ig',
+          caption: 'Kill switch test caption',
+          mediaUrl: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf',
+        };
+        const validSig = generateAuthoritativeSignature({
+          id: post.id,
+          title: post.caption.slice(0, 50),
+          hook: null,
+          body: post.caption,
+          platform: 'INSTAGRAM',
+          mediaUrl: post.mediaUrl,
+        });
+
+        await expect(
+          publishingService.publishToInstagram({
+            postId: post.id,
+            caption: post.caption,
+            mediaUrl: post.mediaUrl,
+            approvalSignature: validSig,
+            approvedBy: 'Lionel Eersteling (Owner)',
+          })
+        ).rejects.toThrow('INSTAGRAM_PUBLISHING_ENABLED=false');
+      } finally {
+        process.env.INSTAGRAM_PUBLISHING_ENABLED = prev;
+      }
     });
   });
 

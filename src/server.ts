@@ -172,6 +172,10 @@ app.use('/books', booksRouter);
 app.use('/api/books', booksRouter);
 app.use('/api/v1/books', booksRouter);
 
+import { authRouter } from './api/routes/auth.routes';
+app.use('/api/auth', authRouter);
+app.use('/api/v1/auth', authRouter);
+
 import { analyticsRoutes } from './modules/analytics/analytics.routes';
 import { clarityRoutes } from './modules/analytics/clarity.routes';
 import { RealtimePollingJob } from './modules/analytics/jobs/realtimePollingJob';

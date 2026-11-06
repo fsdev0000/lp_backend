@@ -70,11 +70,91 @@ const swaggerOptions = {
         description: 'Meta Instagram Professional account OAuth 2.0 connection lifecycle, Graph API analytics, and recent media telemetry.',
       },
       {
+        name: 'Authentication',
+        description: 'CRM Staff and Admin authentication: sign-in with password returning JWT or API token for Content Studio, Approvals, and Integrations.',
+      },
+      {
         name: 'TikTok Social CRM',
         description: 'TikTok Login Kit, Display API v2 profile/video telemetry (@lioneleersteling), Content Posting API v2 (draft upload & direct post with kill switch), and webhooks.',
       },
     ],
     paths: {
+      '/auth/login': {
+        post: {
+          summary: 'CRM Staff and Admin Login',
+          description: 'Authenticates CRM staff credentials against Supabase Auth (or CRM admin credentials) and returns a user profile and Bearer token that protected /content/*, /social/linkedin/*, and /social/instagram/* endpoints accept.',
+          tags: ['Authentication'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['email', 'password'],
+                  properties: {
+                    email: { type: 'string', example: 'staff@leadersperformance.ae' },
+                    password: { type: 'string', example: 'SuperSecretPassword123!' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Successfully authenticated. Returns user profile and access token.',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      user: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', example: 'usr_81a4b2c' },
+                          email: { type: 'string', example: 'staff@leadersperformance.ae' },
+                          name: { type: 'string', example: 'Lionel Eersteling' },
+                          role: { type: 'string', example: 'admin' },
+                        },
+                      },
+                      token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsIn...' },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Invalid email or password' },
+            403: { description: 'User account is not authorized as CRM staff' },
+          },
+        },
+      },
+
+      '/auth/me': {
+        get: {
+          summary: 'Get Current Authenticated Staff Profile',
+          description: 'Validates current Bearer token or x-api-key and returns the authenticated CRM staff user profile.',
+          tags: ['Authentication'],
+          security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }],
+          responses: {
+            200: {
+              description: 'Authenticated staff details',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      user: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Missing or invalid authentication token' },
+          },
+        },
+      },
+
       '/health': {
         get: {
           summary: 'Health check endpoint',
@@ -2237,12 +2317,90 @@ const swaggerOptions = {
 
       '/social/tiktok/analytics': {
         get: {
-          summary: 'Retrieve TikTok Profile & Video Telemetry',
-          description: 'Fetches real-time TikTok profile statistics (`follower_count`, `likes_count`, `video_count`) and recent public video metrics (`view_count`, `like_count`, `comment_count`, `share_count`) via TikTok Display API v2.',
+          summary: 'Retrieve TikTok Profile & Video Telemetry (Includes 7-Day Performance)',
+          description: 'Fetches real-time TikTok profile statistics (`follower_count`, `likes_count`, `video_count`), 7-day velocity stats (3.8K views, 71 likes, 11 shares, traffic sources: Search 51.1%, FYP 41.6%), and recent public video metrics via TikTok Display API v2.',
           tags: ['Analytics & Performance', 'TikTok Social CRM'],
+          parameters: [
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '7d' },
+              description: 'Date window for analytics metrics',
+            },
+          ],
           responses: {
             200: {
-              description: 'TikTok profile and video analytics payload',
+              description: 'TikTok profile telemetry, 7-day performance metrics, and video performance catalog',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          connected: { type: 'boolean', example: true },
+                          username: { type: 'string', example: 'lioneleersteling' },
+                          profileUrl: { type: 'string', example: 'https://www.tiktok.com/@lioneleersteling' },
+                          displayName: { type: 'string', example: 'Lionel Eersteling' },
+                          avatarUrl: { type: 'string', example: 'https://p16-common-sign.tiktokcdn-eu.com/...' },
+                          followers: { type: 'number', example: 48886 },
+                          following: { type: 'number', example: 33 },
+                          likes: { type: 'number', example: 753777 },
+                          videoCount: { type: 'number', example: 1192 },
+                          performance7d: {
+                            type: 'object',
+                            properties: {
+                              timeframe: { type: 'string', example: 'Last 7 days' },
+                              videoViews: { type: 'number', example: 3800 },
+                              videoViewsGrowth: { type: 'string', example: '+12.2%' },
+                              profileViews: { type: 'number', example: 35 },
+                              profileViewsGrowth: { type: 'string', example: '-10.3%' },
+                              likes: { type: 'number', example: 71 },
+                              likesGrowth: { type: 'string', example: '+1.4%' },
+                              comments: { type: 'number', example: 1 },
+                              shares: { type: 'number', example: 11 },
+                              sharesGrowth: { type: 'string', example: '+22.2%' },
+                              estimatedRewards: { type: 'string', example: '$0.00' },
+                              trafficSources: {
+                                type: 'object',
+                                properties: {
+                                  search: { type: 'string', example: '51.1%' },
+                                  forYou: { type: 'string', example: '41.6%' },
+                                  following: { type: 'string', example: '3.7%' },
+                                  personalProfile: { type: 'string', example: '3.6%' },
+                                  sound: { type: 'string', example: '0.0%' },
+                                },
+                              },
+                            },
+                          },
+                          videos: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                id: { type: 'string', example: '7703644487695797536' },
+                                title: { type: 'string', example: 'Een patroon herken je niet aan wat iemand zegt...' },
+                                description: { type: 'string', example: 'Een patroon herken je niet aan wat iemand zegt...' },
+                                publishedAt: { type: 'string', example: '2026-11-02T18:35:09.000Z' },
+                                durationSeconds: { type: 'number', example: 18 },
+                                coverImageUrl: { type: 'string' },
+                                shareUrl: { type: 'string' },
+                                views: { type: 'number', example: 738 },
+                                likes: { type: 'number', example: 12 },
+                                comments: { type: 'number', example: 0 },
+                                shares: { type: 'number', example: 1 },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
         },
