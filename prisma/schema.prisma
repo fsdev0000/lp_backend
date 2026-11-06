@@ -772,3 +772,39 @@ model CmsMediaAsset {
   @@index([folder])
   @@map("cms_media_assets")
 }
+
+
+// ============================================================================
+// CMS SYSTEM: LOCALIZED INLINE TEXT DICTIONARY & REVISIONS
+// ============================================================================
+
+model CmsText {
+  id             String    @id @default(uuid())
+  key            String
+  locale         String    @default("en")
+  hasDraft       Boolean   @default(false) @map("has_draft")
+  draftValue     String?   @db.Text @map("draft_value")
+  publishedValue String?   @db.Text @map("published_value")
+  updatedBy      String?   @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  publishedBy    String?   @map("published_by")
+  publishedAt    DateTime? @map("published_at")
+
+  @@unique([key, locale])
+  @@index([locale])
+  @@map("cms_texts")
+}
+
+model CmsTextRevision {
+  id         String   @id @default(uuid())
+  key        String
+  locale     String   @default("en")
+  value      String?  @db.Text
+  action     String   // SAVE_DRAFT | DISCARD | PUBLISH
+  actorEmail String   @map("actor_email")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([key, locale])
+  @@index([createdAt])
+  @@map("cms_text_revisions")
+}

@@ -2486,6 +2486,52 @@ const swaggerOptions = {
         },
       },
 
+      '/cms/texts': {
+        get: {
+          summary: 'Get Published CMS Texts (Inline Editor)',
+          description: 'Returns published website text strings dictionary along with version metadata. Always sends Cache-Control: no-cache with ETag for conditional revalidation.',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'query',
+              name: 'locale',
+              schema: { type: 'string', default: 'en' },
+              description: 'Language locale code (only "en" is currently supported)',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Published texts dictionary and version metadata',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          version: { type: 'integer', example: 1 },
+                          publishedAt: { type: 'string', example: '2026-11-06T12:00:00.000Z' },
+                          texts: {
+                            type: 'object',
+                            additionalProperties: { type: 'string' },
+                            example: {
+                              'home.hero.title': 'Ambition creates pressure.',
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: 'Unsupported locale' },
+          },
+        },
+      },
+
       '/cms/pages/{slug}': {
         get: {
           summary: 'Get Published Page Document & Sections',
@@ -2898,6 +2944,129 @@ const swaggerOptions = {
           },
           responses: {
             200: { description: 'Updated setting' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/texts': {
+        get: {
+          summary: 'List All CMS Texts with Draft Status (Admin)',
+          description: 'Returns all text rows for a given locale including hasDraft, draftValue, and publishedValue flags.',
+          tags: ['CMS & Page Content'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              in: 'query',
+              name: 'locale',
+              schema: { type: 'string', default: 'en' },
+              description: 'Language locale code (default: en)',
+            },
+          ],
+          responses: {
+            200: { description: 'List of text entries' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+        put: {
+          summary: 'Save Text Draft (Admin)',
+          description: 'Saves or updates draft text for a key without affecting the live website until published.',
+          tags: ['CMS & Page Content'],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['key', 'value'],
+                  properties: {
+                    key: { type: 'string', example: 'home.hero.title' },
+                    locale: { type: 'string', default: 'en' },
+                    value: { type: 'string', nullable: true, example: 'Ambition creates <gold>pressure</gold>.' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Draft text saved successfully' },
+            400: { description: 'Validation failed' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/texts/discard': {
+        post: {
+          summary: 'Discard Text Drafts (Admin)',
+          description: 'Discards uncommitted drafts for specified keys, reverting them to their currently published values.',
+          tags: ['CMS & Page Content'],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['keys'],
+                  properties: {
+                    keys: { type: 'array', items: { type: 'string' }, example: ['home.hero.title'] },
+                    locale: { type: 'string', default: 'en' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Drafts discarded successfully' },
+            400: { description: 'Validation failed' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/texts/publish': {
+        post: {
+          summary: 'Publish Text Drafts & Evict Cache (Admin)',
+          description: 'Publishes drafts (all or specific keys), increments text version, writes revisions, and purges texts cache tags.',
+          tags: ['CMS & Page Content'],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    keys: { type: 'array', items: { type: 'string' }, description: 'Omit or leave empty to publish all drafts' },
+                    locale: { type: 'string', default: 'en' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Texts published successfully and cache purged' },
+            400: { description: 'Validation failed' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/texts/history': {
+        get: {
+          summary: 'Get Text Revision History (Admin)',
+          description: 'Returns chronological audit history of all draft saves, discards, and publishes for a key.',
+          tags: ['CMS & Page Content'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { in: 'query', name: 'key', required: true, schema: { type: 'string' } },
+            { in: 'query', name: 'locale', schema: { type: 'string', default: 'en' } },
+          ],
+          responses: {
+            200: { description: 'Revision history entries' },
+            400: { description: 'Key parameter required' },
             401: { description: 'Unauthorized' },
           },
         },

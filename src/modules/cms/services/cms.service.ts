@@ -173,6 +173,38 @@ export class CmsService {
     return res;
   }
 
+  // ============================================================================
+  // CMS TEXTS SERVICES (Section 4)
+  // ============================================================================
+
+  public async getPublishedTexts(locale: string = 'en') {
+    return this.repository.findPublishedTexts(locale);
+  }
+
+  public async getAllTexts(locale: string = 'en') {
+    return this.repository.findAllTexts(locale);
+  }
+
+  public async saveTextDraft(key: string, locale: string, value: string | null, actorEmail: string) {
+    return this.repository.upsertTextDraft(key, locale, value, actorEmail);
+  }
+
+  public async discardTextDrafts(keys: string[], locale: string, actorEmail: string) {
+    return this.repository.discardTextDrafts(keys, locale, actorEmail);
+  }
+
+  public async publishTextDrafts(keys: string[] | undefined, locale: string, actorEmail: string) {
+    const result = await this.repository.publishTextDrafts(keys, locale, actorEmail);
+    // Invalidate cache immediately on publish
+    cmsCache.invalidateTag('texts');
+    cmsCache.invalidateTag(`texts:${locale}`);
+    return result;
+  }
+
+  public async getTextHistory(key: string, locale: string = 'en') {
+    return this.repository.findTextHistory(key, locale);
+  }
+
   public purgeCache(tagOrKey?: string) {
     if (!tagOrKey || tagOrKey === 'all') {
       cmsCache.clear();

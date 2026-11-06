@@ -174,7 +174,7 @@ export class CmsRepository {
         data: {
           title: input.title,
           description: input.description,
-          status: input.status as CmsPageStatus,
+          status: input.status ? (input.status as CmsPageStatus) : existing.status, // Fix 2c: Preserve status
           version: existing.version + 1,
           seoTitle: input.seoTitle,
           metaDescription: input.metaDescription,
@@ -193,7 +193,7 @@ export class CmsRepository {
         slug: input.slug,
         title: input.title,
         description: input.description,
-        status: input.status as CmsPageStatus,
+        status: (input.status as CmsPageStatus) || CmsPageStatus.DRAFT,
         version: 1,
         seoTitle: input.seoTitle,
         metaDescription: input.metaDescription,
@@ -236,10 +236,14 @@ export class CmsRepository {
 
   public async publishPage(slug: string) {
     await this.ensureTables();
+    const existing = await prisma.cmsPage.findUnique({ where: { slug } });
+    const nextVersion = existing ? existing.version + 1 : 1; // Fix 2e: Increment version
+
     return prisma.cmsPage.update({
       where: { slug },
       data: {
         status: CmsPageStatus.PUBLISHED,
+        version: nextVersion,
         publishedAt: new Date(),
       },
       include: {
@@ -411,6 +415,270 @@ export class CmsRepository {
       update: {
         value: input.value as any,
       },
+    });
+  }
+
+  // ============================================================================
+  // CMS TEXTS & REVISIONS (Section 4)
+  // ============================================================================
+
+  public async getTextVersionConfig(locale: string = 'en') {
+    const configKey = `cms_texts_version_${locale}`;
+    const row = await prisma.systemConfig.findUnique({
+      where: { key: configKey },
+    });
+
+    if (row && row.value) {
+      try {
+        return JSON.parse(row.value) as { version: number; publishedAt: string };
+      } catch {}
+    }
+
+    return { version: 1, publishedAt: new Date().toISOString() };
+  }
+
+  public async updateTextVersionConfig(locale: string = 'en', nextVersion: number, publishedAt: string) {
+    const configKey = `cms_texts_version_${locale}`;
+    const payload = JSON.stringify({ version: nextVersion, publishedAt });
+    await prisma.systemConfig.upsert({
+      where: { key: configKey },
+      create: { key: configKey, value: payload },
+      update: { value: payload },
+    });
+  }
+
+  public async findPublishedTexts(locale: string = 'en') {
+    const rows = await prisma.cmsText.findMany({
+      where: {
+        locale,
+        publishedValue: { not: null },
+      },
+      select: {
+        key: true,
+        publishedValue: true,
+      },
+      orderBy: { key: 'asc' },
+    });
+
+    const textsMap: Record<string, string> = {};
+    for (const r of rows) {
+      if (r.publishedValue !== null) {
+        textsMap[r.key] = r.publishedValue;
+      }
+    }
+
+    const versionConfig = await this.getTextVersionConfig(locale);
+
+    return {
+      version: versionConfig.version,
+      publishedAt: versionConfig.publishedAt,
+      texts: textsMap,
+    };
+  }
+
+  public async findAllTexts(locale: string = 'en') {
+    return prisma.cmsText.findMany({
+      where: { locale },
+      select: {
+        key: true,
+        hasDraft: true,
+        draftValue: true,
+        publishedValue: true,
+        updatedBy: true,
+        updatedAt: true,
+        publishedBy: true,
+        publishedAt: true,
+      },
+      orderBy: { key: 'asc' },
+    });
+  }
+
+  public async upsertTextDraft(key: string, locale: string, value: string | null, actorEmail: string) {
+    const existing = await prisma.cmsText.findUnique({
+      where: { key_locale: { key, locale } },
+    });
+
+    const now = new Date();
+    let textRow;
+
+    if (existing) {
+      textRow = await prisma.cmsText.update({
+        where: { key_locale: { key, locale } },
+        data: {
+          hasDraft: true,
+          draftValue: value,
+          updatedBy: actorEmail,
+          updatedAt: now,
+        },
+      });
+    } else {
+      textRow = await prisma.cmsText.create({
+        data: {
+          key,
+          locale,
+          hasDraft: true,
+          draftValue: value,
+          publishedValue: null,
+          updatedBy: actorEmail,
+          updatedAt: now,
+        },
+      });
+    }
+
+    // Add revision row
+    await prisma.cmsTextRevision.create({
+      data: {
+        key,
+        locale,
+        value,
+        action: 'SAVE_DRAFT',
+        actorEmail,
+        createdAt: now,
+      },
+    });
+
+    // Write to audit log
+    await prisma.socialAuditLog.create({
+      data: {
+        actor: actorEmail,
+        action: 'CMS_TEXT_DRAFT_SAVED',
+        entity: `CmsText [${locale}] ${key}`,
+        details: `Saved draft value: "${existing?.draftValue ?? 'none'}" -> "${value ?? 'null (original)'}"`,
+      },
+    }).catch(() => {});
+
+    return textRow;
+  }
+
+  public async discardTextDrafts(keys: string[], locale: string = 'en', actorEmail: string) {
+    const now = new Date();
+    let discardedCount = 0;
+
+    for (const key of keys) {
+      const existing = await prisma.cmsText.findUnique({
+        where: { key_locale: { key, locale } },
+      });
+
+      if (!existing || !existing.hasDraft) continue;
+
+      if (existing.publishedValue === null) {
+        // If it was never published, delete the draft row entirely
+        await prisma.cmsText.delete({
+          where: { key_locale: { key, locale } },
+        });
+      } else {
+        await prisma.cmsText.update({
+          where: { key_locale: { key, locale } },
+          data: {
+            hasDraft: false,
+            draftValue: null,
+            updatedBy: actorEmail,
+            updatedAt: now,
+          },
+        });
+      }
+
+      await prisma.cmsTextRevision.create({
+        data: {
+          key,
+          locale,
+          value: existing.publishedValue,
+          action: 'DISCARD',
+          actorEmail,
+          createdAt: now,
+        },
+      });
+
+      await prisma.socialAuditLog.create({
+        data: {
+          actor: actorEmail,
+          action: 'CMS_TEXT_DRAFT_DISCARDED',
+          entity: `CmsText [${locale}] ${key}`,
+          details: `Discarded draft: "${existing.draftValue}" (reverted to published value: "${existing.publishedValue}")`,
+        },
+      }).catch(() => {});
+
+      discardedCount++;
+    }
+
+    return { discardedCount };
+  }
+
+  public async publishTextDrafts(keys: string[] | undefined, locale: string, actorEmail: string) {
+    const now = new Date();
+    const whereClause: any = {
+      locale,
+      hasDraft: true,
+    };
+
+    if (keys && keys.length > 0) {
+      whereClause.key = { in: keys };
+    }
+
+    const pendingDrafts = await prisma.cmsText.findMany({
+      where: whereClause,
+    });
+
+    for (const draft of pendingDrafts) {
+      await prisma.cmsText.update({
+        where: { id: draft.id },
+        data: {
+          publishedValue: draft.draftValue,
+          hasDraft: false,
+          draftValue: null,
+          publishedBy: actorEmail,
+          publishedAt: now,
+          updatedAt: now,
+        },
+      });
+
+      await prisma.cmsTextRevision.create({
+        data: {
+          key: draft.key,
+          locale,
+          value: draft.draftValue,
+          action: 'PUBLISH',
+          actorEmail,
+          createdAt: now,
+        },
+      });
+
+      await prisma.socialAuditLog.create({
+        data: {
+          actor: actorEmail,
+          action: 'CMS_TEXT_PUBLISHED',
+          entity: `CmsText [${locale}] ${draft.key}`,
+          details: `Published live text: "${draft.publishedValue ?? 'none'}" -> "${draft.draftValue ?? 'null (original)'}"`,
+        },
+      }).catch(() => {});
+    }
+
+    // Increment version
+    const versionConfig = await this.getTextVersionConfig(locale);
+    const nextVersion = versionConfig.version + 1;
+    const publishedAtStr = now.toISOString();
+    await this.updateTextVersionConfig(locale, nextVersion, publishedAtStr);
+
+    return {
+      version: nextVersion,
+      publishedAt: publishedAtStr,
+      publishedCount: pendingDrafts.length,
+    };
+  }
+
+  public async findTextHistory(key: string, locale: string = 'en') {
+    return prisma.cmsTextRevision.findMany({
+      where: { key, locale },
+      select: {
+        id: true,
+        key: true,
+        locale: true,
+        value: true,
+        action: true,
+        actorEmail: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 }

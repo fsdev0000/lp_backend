@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { cmsService } from '../services/cms.service';
+import { authenticateCmsAdmin } from '../../../middleware/cmsAuth';
 
 export class CmsPublicController {
   /**
@@ -9,6 +10,19 @@ export class CmsPublicController {
     try {
       const slug = String(req.params.slug);
       const preview = req.query.preview === 'true';
+
+      // Fix 2a: Drafts are private. Preview requires an admin session.
+      if (preview) {
+        const auth = await authenticateCmsAdmin(req);
+        if (!auth.success) {
+          res.status(auth.status || 401).json({
+            success: false,
+            error: auth.error || 'Administrator authorization required to preview drafts',
+          });
+          return;
+        }
+      }
+
       const page = await cmsService.getPageBySlug(slug, preview);
 
       if (!page) {
@@ -27,6 +41,34 @@ export class CmsPublicController {
       res.status(500).json({
         success: false,
         error: err.message || 'Internal server error while fetching page',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/cms/texts?locale=en
+   * Public endpoint returning published text strings dictionary with version.
+   */
+  public async getTexts(req: Request, res: Response): Promise<void> {
+    try {
+      const locale = (req.query.locale as string) || 'en';
+      if (locale !== 'en') {
+        res.status(400).json({
+          success: false,
+          error: 'Currently only locale "en" is supported',
+        });
+        return;
+      }
+
+      const data = await cmsService.getPublishedTexts(locale);
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: err.message || 'Internal server error while fetching texts',
       });
     }
   }

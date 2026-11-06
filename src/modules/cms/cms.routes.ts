@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { cmsPublicController } from './controllers/cmsPublic.controller';
 import { cmsAdminController } from './controllers/cmsAdmin.controller';
 import { createCmsCacheMiddleware } from './cache/cacheMiddleware';
-import { requireApiKey } from '../../middleware/apiKeyAuth';
+import { requireCmsAdmin } from '../../middleware/cmsAuth';
 
 export const cmsRouter = Router();
 
@@ -15,6 +15,13 @@ cmsRouter.get(
   '/bootstrap',
   createCmsCacheMiddleware({ ttlSeconds: 600, tags: ['navigation', 'settings', 'testimonials'] }),
   cmsPublicController.getBootstrap
+);
+
+// Public CMS texts (published strings dictionary with version; no-cache with ETag validation)
+cmsRouter.get(
+  '/texts',
+  createCmsCacheMiddleware({ cacheControl: 'no-cache', tags: ['texts'] }),
+  cmsPublicController.getTexts
 );
 
 // Individual page document with ordered sections & SEO properties
@@ -71,11 +78,11 @@ cmsRouter.get(
 );
 
 // ============================================================================
-// ADMIN CMS CRUD ENDPOINTS (Protected by Staff API Key / JWT)
+// ADMIN CMS CRUD ENDPOINTS (Strictly protected by Admin Role / JWT / lp_sess)
 // ============================================================================
 
 const adminRouter = Router();
-adminRouter.use(requireApiKey);
+adminRouter.use(requireCmsAdmin);
 
 // Page management
 adminRouter.get('/pages', cmsAdminController.listPages);
@@ -84,6 +91,13 @@ adminRouter.put('/pages/:slug', cmsAdminController.savePage);
 adminRouter.put('/pages/:slug/sections/:sectionKey', cmsAdminController.saveSection);
 adminRouter.post('/pages/:slug/publish', cmsAdminController.publishPage);
 adminRouter.delete('/pages/:slug', cmsAdminController.deletePage);
+
+// Text management (Inline Editor)
+adminRouter.get('/texts', cmsAdminController.listTexts);
+adminRouter.put('/texts', cmsAdminController.saveText);
+adminRouter.post('/texts/discard', cmsAdminController.discardTexts);
+adminRouter.post('/texts/publish', cmsAdminController.publishTexts);
+adminRouter.get('/texts/history', cmsAdminController.getTextHistory);
 
 // Testimonials
 adminRouter.post('/testimonials', cmsAdminController.saveTestimonial);

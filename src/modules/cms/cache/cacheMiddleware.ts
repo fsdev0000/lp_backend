@@ -4,14 +4,25 @@ import { cmsCache } from './cmsCache.service';
 export interface CacheOptions {
   ttlSeconds?: number;
   tags?: string[] | ((req: Request) => string[]);
+  cacheControl?: string; // Optional custom Cache-Control header (e.g. 'no-cache')
 }
 
 export function createCmsCacheMiddleware(options: CacheOptions = {}) {
   const defaultTtl = options.ttlSeconds || 300; // 5 minutes
+  const customCacheControl = options.cacheControl;
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // Only cache GET or HEAD requests
     if (req.method !== 'GET' && req.method !== 'HEAD') {
+      next();
+      return;
+    }
+
+    // Fix 2a: NEVER cache draft/preview responses, and bypass cache completely when previewing
+    const isPreview = req.query.preview === 'true';
+    if (isPreview) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.setHeader('X-Cache', 'BYPASS');
       next();
       return;
     }
@@ -28,15 +39,14 @@ export function createCmsCacheMiddleware(options: CacheOptions = {}) {
       .join('&');
     const cacheKey = `cms:${req.baseUrl}${req.path}${sortedQuery ? `?${sortedQuery}` : ''}`;
 
+    const effectiveCacheControl =
+      customCacheControl || 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400';
+
     if (!bypassCache) {
       const cached = cmsCache.get<any>(cacheKey);
       if (cached) {
-        // Set standard high-performance caching headers
         res.setHeader('ETag', cached.etag);
-        res.setHeader(
-          'Cache-Control',
-          'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400'
-        );
+        res.setHeader('Cache-Control', effectiveCacheControl);
         res.setHeader('X-Cache', 'HIT');
 
         // Check conditional request (If-None-Match)
@@ -68,6 +78,8 @@ export function createCmsCacheMiddleware(options: CacheOptions = {}) {
           if (req.path.startsWith('/pages/')) {
             const slug = req.params.slug || req.path.split('/')[2];
             tags = [`page:${slug}`, 'pages'];
+          } else if (req.path.startsWith('/texts')) {
+            tags = ['texts', `texts:${req.query.locale || 'en'}`];
           } else if (req.path.startsWith('/navigation')) {
             tags = ['navigation'];
           } else if (req.path.startsWith('/testimonials')) {
@@ -81,10 +93,13 @@ export function createCmsCacheMiddleware(options: CacheOptions = {}) {
 
         const etag = cmsCache.set(cacheKey, body, defaultTtl, tags);
         res.setHeader('ETag', etag);
-        res.setHeader(
-          'Cache-Control',
-          'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400'
-        );
+        res.setHeader('Cache-Control', effectiveCacheControl);
+
+        const clientETag = req.headers['if-none-match'];
+        if (clientETag && (clientETag === etag || clientETag === `W/${etag}`)) {
+          res.status(304).end();
+          return res;
+        }
       }
       return originalJson(body);
     };
@@ -92,4 +107,3 @@ export function createCmsCacheMiddleware(options: CacheOptions = {}) {
     next();
   };
 }
-

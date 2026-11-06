@@ -8,6 +8,9 @@ import {
   CmsFaqInputSchema,
   CmsNavigationMenuInputSchema,
   CmsSiteSettingInputSchema,
+  CmsTextInputSchema,
+  CmsTextDiscardSchema,
+  CmsTextPublishSchema,
 } from '../validation/cms.validation';
 
 export class CmsAdminController {
@@ -30,7 +33,13 @@ export class CmsAdminController {
    */
   public async savePage(req: Request, res: Response): Promise<void> {
     try {
-      const parseResult = CmsPageInputSchema.safeParse(req.body);
+      // Fix 2f: If slug is present in URL params, use it over body
+      const rawData = {
+        ...req.body,
+        ...(req.params.slug ? { slug: String(req.params.slug) } : {}),
+      };
+
+      const parseResult = CmsPageInputSchema.safeParse(rawData);
       if (!parseResult.success) {
         res.status(400).json({
           success: false,
@@ -209,6 +218,151 @@ export class CmsAdminController {
 
       const setting = await cmsService.saveSiteSetting(parseResult.data);
       res.status(200).json({ success: true, data: setting });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  // ============================================================================
+  // CMS TEXTS ADMIN ENDPOINTS (Section 4)
+  // ============================================================================
+
+  /**
+   * GET /api/v1/cms/admin/texts?locale=en
+   */
+  public async listTexts(req: Request, res: Response): Promise<void> {
+    try {
+      const locale = (req.query.locale as string) || 'en';
+      if (locale !== 'en') {
+        res.status(400).json({
+          success: false,
+          error: 'Currently only locale "en" is supported',
+        });
+        return;
+      }
+      const texts = await cmsService.getAllTexts(locale);
+      res.status(200).json({ success: true, data: texts });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * PUT /api/v1/cms/admin/texts
+   * Saves a draft value for a text key
+   */
+  public async saveText(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsTextInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const { key, locale, value } = parseResult.data;
+      const actorEmail = (req as any).user?.email || 'admin@leadersperformance.ae';
+      const text = await cmsService.saveTextDraft(key, locale, value, actorEmail);
+      res.status(200).json({ success: true, data: text });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/texts/discard
+   * Discards drafts for given keys
+   */
+  public async discardTexts(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsTextDiscardSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const locale = (req.query.locale as string) || (req.body?.locale as string) || 'en';
+      if (locale !== 'en') {
+        res.status(400).json({
+          success: false,
+          error: 'Currently only locale "en" is supported',
+        });
+        return;
+      }
+
+      const actorEmail = (req as any).user?.email || 'admin@leadersperformance.ae';
+      const result = await cmsService.discardTextDrafts(parseResult.data.keys, locale, actorEmail);
+      res.status(200).json({ success: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/texts/publish
+   * Publishes drafts (all or specific keys)
+   */
+  public async publishTexts(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsTextPublishSchema.safeParse(req.body || {});
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const locale = (req.query.locale as string) || (req.body?.locale as string) || 'en';
+      if (locale !== 'en') {
+        res.status(400).json({
+          success: false,
+          error: 'Currently only locale "en" is supported',
+        });
+        return;
+      }
+
+      const actorEmail = (req as any).user?.email || 'admin@leadersperformance.ae';
+      const result = await cmsService.publishTextDrafts(parseResult.data?.keys, locale, actorEmail);
+      res.status(200).json({ success: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * GET /api/v1/cms/admin/texts/history?key=...&locale=en
+   */
+  public async getTextHistory(req: Request, res: Response): Promise<void> {
+    try {
+      const key = req.query.key as string;
+      if (!key) {
+        res.status(400).json({
+          success: false,
+          error: 'Query parameter "key" is required',
+        });
+        return;
+      }
+
+      const locale = (req.query.locale as string) || 'en';
+      if (locale !== 'en') {
+        res.status(400).json({
+          success: false,
+          error: 'Currently only locale "en" is supported',
+        });
+        return;
+      }
+
+      const history = await cmsService.getTextHistory(key, locale);
+      res.status(200).json({ success: true, data: history });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
