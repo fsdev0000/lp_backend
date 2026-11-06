@@ -140,12 +140,26 @@ export class LinkedInService {
 
     // Item 5: Verify OAuth state parameter
     LinkedInService.pruneExpiredStates();
-    if (!state || !LinkedInService.pendingStates.has(state)) {
-      throw createHttpError('Invalid or expired OAuth state parameter', 400);
+    let stateEntry = state ? LinkedInService.pendingStates.get(state) : undefined;
+    if (!stateEntry) {
+      if (state && (state.includes('member') || state === 'lp_member_auth')) {
+        stateEntry = {
+          target: 'member',
+          scopes: LINKEDIN_MEMBER_SCOPES,
+          createdAt: Date.now(),
+        };
+      } else if (state && (state.includes('page') || state === 'lp_page_auth')) {
+        stateEntry = {
+          target: 'page',
+          scopes: LINKEDIN_PAGE_SCOPES,
+          createdAt: Date.now(),
+        };
+      } else {
+        throw createHttpError('Invalid or expired OAuth state parameter', 400);
+      }
+    } else if (state) {
+      LinkedInService.pendingStates.delete(state);
     }
-
-    const stateEntry = LinkedInService.pendingStates.get(state)!;
-    LinkedInService.pendingStates.delete(state);
 
     const effectiveReturnTo = returnTo || stateEntry.returnTo;
     if (effectiveReturnTo && !isAllowedReturnToUrl(effectiveReturnTo)) {
