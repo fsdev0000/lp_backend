@@ -204,6 +204,10 @@ app.use('/api/v1/social/tiktok', tiktokRoutes);
 app.use('/api/v1/integrations/tiktok', tiktokRoutes);
 app.use('/api/integrations/tiktok', tiktokRoutes);
 
+import { cmsRouter } from './modules/cms';
+app.use('/api/cms', cmsRouter);
+app.use('/api/v1/cms', cmsRouter);
+
 // Universal TikTok Developer signature file verification handler
 // Catches ANY request containing tiktok verification token with or without trailing slash
 app.use((req, res, next) => {

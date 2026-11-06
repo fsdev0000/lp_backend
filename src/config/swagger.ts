@@ -74,6 +74,10 @@ const swaggerOptions = {
         description: 'CRM Staff and Admin authentication: sign-in with password returning JWT or API token for Content Studio, Approvals, and Integrations.',
       },
       {
+        name: 'CMS & Page Content',
+        description: 'Dynamic Headless CMS engine: public cached page & section endpoints, navigation, testimonials, FAQs, and admin editorial management with instant cache invalidation.',
+      },
+      {
         name: 'TikTok Social CRM',
         description: 'TikTok Login Kit, Display API v2 profile/video telemetry (@lioneleersteling), Content Posting API v2 (draft upload & direct post with kill switch), and webhooks.',
       },
@@ -2443,6 +2447,519 @@ const swaggerOptions = {
           tags: ['TikTok Social CRM', 'Webhooks'],
           responses: {
             200: { description: 'Webhook event acknowledged' },
+          },
+        },
+      },
+
+      // ======================================================================
+      // CMS & HEADLESS PAGE CONTENT
+      // ======================================================================
+
+      '/cms/bootstrap': {
+        get: {
+          summary: 'CMS One-Shot Bootstrap Config',
+          description: 'Returns navigation menus, site settings, and featured social proof in a single microsecond response (<1ms cache hit) to eliminate frontend waterfall requests during startup.',
+          tags: ['CMS & Page Content'],
+          responses: {
+            200: {
+              description: 'Consolidated site bootstrap payload',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          navigation: { type: 'array', items: { type: 'object' } },
+                          settings: { type: 'object' },
+                          testimonials: { type: 'array', items: { type: 'object' } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      '/cms/pages/{slug}': {
+        get: {
+          summary: 'Get Published Page Document & Sections',
+          description: 'Retrieves complete page document, SEO head (title, description, OG tags), and ordered section blocks by slug (e.g., `home`, `meetlionel`, `roundtables`). Served with `Cache-Control: public, s-maxage=3600, stale-while-revalidate=86400` and cryptographic ETag.',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'path',
+              name: 'slug',
+              required: true,
+              schema: { type: 'string', example: 'home' },
+              description: 'Page slug identifier (e.g. home, meetlionel, roundtables, unmasked)',
+            },
+            {
+              in: 'query',
+              name: 'preview',
+              required: false,
+              schema: { type: 'boolean', example: false },
+              description: 'Whether to include unpublished draft versions',
+            },
+          ],
+          responses: {
+            200: { description: 'Page document and ordered sections' },
+            404: { description: 'Page not found' },
+          },
+        },
+      },
+
+      '/cms/sections/{slug}/{sectionKey}': {
+        get: {
+          summary: 'Get Isolated Page Section Content',
+          description: 'Retrieves a single section JSON block (e.g. `hero`, `the_next_level`, `testimonials`) for micro-updates.',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'path',
+              name: 'slug',
+              required: true,
+              schema: { type: 'string', example: 'home' },
+            },
+            {
+              in: 'path',
+              name: 'sectionKey',
+              required: true,
+              schema: { type: 'string', example: 'hero' },
+            },
+          ],
+          responses: {
+            200: { description: 'Section content payload' },
+            404: { description: 'Section not found' },
+          },
+        },
+      },
+
+      '/cms/navigation': {
+        get: {
+          summary: 'Get All Navigation Menus',
+          description: 'Retrieves header, footer, and legal link hierarchies.',
+          tags: ['CMS & Page Content'],
+          responses: {
+            200: { description: 'Array of navigation menu objects' },
+          },
+        },
+      },
+
+      '/cms/navigation/{location}': {
+        get: {
+          summary: 'Get Navigation Menu by Location',
+          description: 'Retrieves a specific menu tree (e.g., `header_main`, `footer_engage`, `footer_company`, `footer_legal`).',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'path',
+              name: 'location',
+              required: true,
+              schema: { type: 'string', example: 'header_main' },
+            },
+          ],
+          responses: {
+            200: { description: 'Navigation menu items' },
+            404: { description: 'Menu location not found' },
+          },
+        },
+      },
+
+      '/cms/testimonials': {
+        get: {
+          summary: 'Get Published Testimonials',
+          description: 'Retrieves client testimonials and social proof filtered by category.',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'query',
+              name: 'category',
+              required: false,
+              schema: { type: 'string', example: 'homepage' },
+              description: 'Filter category (homepage, unmasked, masterclass)',
+            },
+          ],
+          responses: {
+            200: { description: 'Array of testimonials' },
+          },
+        },
+      },
+
+      '/cms/faqs': {
+        get: {
+          summary: 'Get Published FAQs',
+          description: 'Retrieves categorized frequently asked questions.',
+          tags: ['CMS & Page Content'],
+          parameters: [
+            {
+              in: 'query',
+              name: 'category',
+              required: false,
+              schema: { type: 'string', example: 'general' },
+            },
+          ],
+          responses: {
+            200: { description: 'Array of FAQs' },
+          },
+        },
+      },
+
+      '/cms/settings': {
+        get: {
+          summary: 'Get Site Settings & Branding',
+          description: 'Retrieves global site configurations, social media links, and contact parameters.',
+          tags: ['CMS & Page Content'],
+          responses: {
+            200: { description: 'Key-value map of site settings' },
+          },
+        },
+      },
+
+      '/cms/admin/pages': {
+        get: {
+          summary: 'List All Pages (Admin)',
+          description: 'Lists all pages with draft status, version numbers, and section counts.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          responses: {
+            200: { description: 'List of page summaries' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+        post: {
+          summary: 'Create or Upsert Page (Admin)',
+          description: 'Creates a new page or updates an existing page draft with SEO properties and section content.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['slug', 'title'],
+                  properties: {
+                    slug: { type: 'string', example: 'roundtables' },
+                    title: { type: 'string', example: 'The Round Table' },
+                    description: { type: 'string' },
+                    status: { type: 'string', enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'], default: 'DRAFT' },
+                    seoTitle: { type: 'string', example: 'The Round Table | Leaders Performance' },
+                    metaDescription: { type: 'string' },
+                    keywords: { type: 'array', items: { type: 'string' } },
+                    ogImage: { type: 'string' },
+                    sections: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['sectionKey', 'sectionType', 'content'],
+                        properties: {
+                          sectionKey: { type: 'string', example: 'hero' },
+                          sectionType: { type: 'string', example: 'HERO' },
+                          order: { type: 'integer', default: 0 },
+                          isEnabled: { type: 'boolean', default: true },
+                          content: { type: 'object' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Saved page document' },
+            400: { description: 'Validation error' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/pages/{slug}': {
+        put: {
+          summary: 'Update Page (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'slug',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['title'],
+                  properties: {
+                    title: { type: 'string' },
+                    seoTitle: { type: 'string' },
+                    metaDescription: { type: 'string' },
+                    status: { type: 'string', enum: ['DRAFT', 'PUBLISHED'] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Updated page document' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+        delete: {
+          summary: 'Delete Page (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [
+            {
+              in: 'path',
+              name: 'slug',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            200: { description: 'Page deleted successfully' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/pages/{slug}/sections/{sectionKey}': {
+        put: {
+          summary: 'Upsert Page Section (Admin)',
+          description: 'Updates a specific section block and invalidates the page cache.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [
+            { in: 'path', name: 'slug', required: true, schema: { type: 'string' } },
+            { in: 'path', name: 'sectionKey', required: true, schema: { type: 'string' } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['sectionType', 'content'],
+                  properties: {
+                    sectionType: { type: 'string', example: 'HERO' },
+                    order: { type: 'integer', default: 0 },
+                    isEnabled: { type: 'boolean', default: true },
+                    content: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Updated section' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/pages/{slug}/publish': {
+        post: {
+          summary: 'Publish Page Draft & Evict Cache (Admin)',
+          description: 'Promotes draft page to PUBLISHED status, records publish timestamp, and flushes cache tags immediately.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [
+            { in: 'path', name: 'slug', required: true, schema: { type: 'string' } },
+          ],
+          responses: {
+            200: { description: 'Published page' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/testimonials': {
+        post: {
+          summary: 'Create Testimonial (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['name', 'role', 'avatarUrl', 'shortText', 'fullText'],
+                  properties: {
+                    name: { type: 'string', example: 'Erling Haverkamp' },
+                    role: { type: 'string', example: 'CEO, Imatech BV' },
+                    company: { type: 'string' },
+                    avatarUrl: { type: 'string' },
+                    shortText: { type: 'string' },
+                    fullText: { type: 'array', items: { type: 'string' } },
+                    category: { type: 'string', default: 'homepage' },
+                    order: { type: 'integer', default: 0 },
+                    isFeatured: { type: 'boolean', default: false },
+                    published: { type: 'boolean', default: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Created testimonial' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/testimonials/{id}': {
+        put: {
+          summary: 'Update Testimonial (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Updated testimonial' }, 401: { description: 'Unauthorized' } },
+        },
+        delete: {
+          summary: 'Delete Testimonial (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'Testimonial deleted' }, 401: { description: 'Unauthorized' } },
+        },
+      },
+
+      '/cms/admin/navigation': {
+        put: {
+          summary: 'Update Navigation Menu (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['location', 'title', 'items'],
+                  properties: {
+                    location: { type: 'string', example: 'header_main' },
+                    title: { type: 'string', example: 'Main Navigation' },
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['label', 'href'],
+                        properties: {
+                          label: { type: 'string' },
+                          href: { type: 'string' },
+                          isExternal: { type: 'boolean', default: false },
+                          order: { type: 'integer', default: 0 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Updated navigation menu' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/settings': {
+        put: {
+          summary: 'Update Site Setting (Admin)',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['key', 'value'],
+                  properties: {
+                    key: { type: 'string', example: 'socials' },
+                    value: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Updated setting' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/cache/purge': {
+        post: {
+          summary: 'Purge CMS Cache (Admin)',
+          description: 'Flushes in-memory and edge cache keys. Pass `{ "tag": "all" }` to clear everything, or `{ "tag": "page:home" }` to purge a specific page.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    tag: { type: 'string', example: 'page:home' },
+                    key: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Purge execution summary' },
+            401: { description: 'Unauthorized' },
+          },
+        },
+      },
+
+      '/cms/admin/cache/stats': {
+        get: {
+          summary: 'Get Live Cache Telemetry (Admin)',
+          description: 'Reports cache hits, misses, hit ratio percentage, and active key counts.',
+          tags: ['CMS & Page Content'],
+          security: [{ apiKeyAuth: [] }],
+          responses: {
+            200: {
+              description: 'Cache performance stats',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          hits: { type: 'integer', example: 1420 },
+                          misses: { type: 'integer', example: 12 },
+                          keysCount: { type: 'integer', example: 45 },
+                          hitRatio: { type: 'string', example: '99.16%' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Unauthorized' },
           },
         },
       },

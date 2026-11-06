@@ -644,3 +644,131 @@ model InstagramPublishingLog {
 
 
 
+
+
+// ============================================================================
+// CMS SYSTEM: PAGES & DYNAMIC CONTENT BLOCKS
+// ============================================================================
+
+enum CmsPageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model CmsPage {
+  id              String         @id @default(uuid())
+  slug            String         @unique // e.g. "home", "meetlionel", "roundtables", "unmasked"
+  title           String
+  description     String?
+  status          CmsPageStatus  @default(DRAFT)
+  version         Int            @default(1)
+  
+  // SEO Metadata
+  seoTitle        String?        @map("seo_title")
+  metaDescription String?        @map("meta_description")
+  keywords        String[]       @default([])
+  ogImage         String?        @map("og_image")
+  ogType          String         @default("website") @map("og_type")
+  canonicalUrl    String?        @map("canonical_url")
+  schemaJson      Json?          @map("schema_json")
+
+  // Content Sections (Ordered)
+  sections        CmsPageSection[]
+  
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  publishedAt     DateTime?      @map("published_at")
+
+  @@index([slug, status])
+  @@map("cms_pages")
+}
+
+model CmsPageSection {
+  id              String      @id @default(uuid())
+  pageId          String      @map("page_id")
+  sectionKey      String      @map("section_key") // e.g. "hero", "the_next_level", "reset_blueprint"
+  sectionType     String      @map("section_type") // HERO, FEATURE_GRID, TESTIMONIALS, FAQ, CTA, MARKDOWN
+  order           Int         @default(0)
+  isEnabled       Boolean     @default(true) @map("is_enabled")
+  
+  content         Json
+  
+  page            CmsPage     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, sectionKey])
+  @@index([pageId, order])
+  @@map("cms_page_sections")
+}
+
+// ============================================================================
+// CMS SYSTEM: REUSABLE ENTITIES
+// ============================================================================
+
+model CmsTestimonial {
+  id              String      @id @default(uuid())
+  name            String
+  role            String
+  company         String?
+  avatarUrl       String      @map("avatar_url")
+  shortText       String      @db.Text @map("short_text")
+  fullText        String[]    @map("full_text")
+  category        String      @default("general") // e.g. "homepage", "unmasked", "masterclass"
+  order           Int         @default(0)
+  isFeatured      Boolean     @default(false) @map("is_featured")
+  published       Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@index([category, published])
+  @@map("cms_testimonials")
+}
+
+model CmsFaq {
+  id              String      @id @default(uuid())
+  question        String
+  answer          String      @db.Text
+  category        String      // "masterclass", "unmasked", "general"
+  order           Int         @default(0)
+  published       Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@index([category, published])
+  @@map("cms_faqs")
+}
+
+model CmsNavigationMenu {
+  id              String      @id @default(uuid())
+  location        String      @unique // "header_main", "footer_engage", "footer_company", "footer_legal"
+  title           String
+  items           Json        // [{ label, href, isExternal, order, target }]
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@map("cms_navigation_menus")
+}
+
+model CmsSiteSetting {
+  key             String      @id // e.g. "social_links", "contact_details", "branding"
+  value           Json
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@map("cms_site_settings")
+}
+
+model CmsMediaAsset {
+  id              String      @id @default(uuid())
+  filename        String
+  originalName    String      @map("original_name")
+  mimeType        String      @map("mime_type")
+  sizeBytes       Int         @map("size_bytes")
+  width           Int?
+  height          Int?
+  publicUrl       String      @map("public_url")
+  altText         String?     @map("alt_text")
+  folder          String      @default("general")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([folder])
+  @@map("cms_media_assets")
+}

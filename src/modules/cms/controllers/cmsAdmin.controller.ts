@@ -1,0 +1,236 @@
+import { Request, Response } from 'express';
+import { cmsService } from '../services/cms.service';
+import { cmsCache } from '../cache/cmsCache.service';
+import {
+  CmsPageInputSchema,
+  CmsSectionInputSchema,
+  CmsTestimonialInputSchema,
+  CmsFaqInputSchema,
+  CmsNavigationMenuInputSchema,
+  CmsSiteSettingInputSchema,
+} from '../validation/cms.validation';
+
+export class CmsAdminController {
+  /**
+   * GET /api/v1/cms/admin/pages
+   */
+  public async listPages(req: Request, res: Response): Promise<void> {
+    try {
+      const status = req.query.status as any;
+      const pages = await cmsService.listPages(status);
+      res.status(200).json({ success: true, data: pages });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/pages
+   * PUT /api/v1/cms/admin/pages/:slug
+   */
+  public async savePage(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsPageInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const page = await cmsService.savePage(parseResult.data);
+      res.status(200).json({ success: true, data: page });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * PUT /api/v1/cms/admin/pages/:slug/sections/:sectionKey
+   */
+  public async saveSection(req: Request, res: Response): Promise<void> {
+    try {
+      const slug = String(req.params.slug);
+      const parseResult = CmsSectionInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const section = await cmsService.saveSection(slug, parseResult.data);
+      res.status(200).json({ success: true, data: section });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/pages/:slug/publish
+   */
+  public async publishPage(req: Request, res: Response): Promise<void> {
+    try {
+      const slug = String(req.params.slug);
+      const published = await cmsService.publishPage(slug);
+      res.status(200).json({ success: true, data: published });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cms/admin/pages/:slug
+   */
+  public async deletePage(req: Request, res: Response): Promise<void> {
+    try {
+      const slug = String(req.params.slug);
+      await cmsService.deletePage(slug);
+      res.status(200).json({ success: true, message: `Page '${slug}' deleted` });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/testimonials
+   * PUT /api/v1/cms/admin/testimonials/:id
+   */
+  public async saveTestimonial(req: Request, res: Response): Promise<void> {
+    try {
+      const id = req.params.id ? String(req.params.id) : null;
+      const parseResult = CmsTestimonialInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const testimonial = await cmsService.saveTestimonial(id, parseResult.data);
+      res.status(200).json({ success: true, data: testimonial });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cms/admin/testimonials/:id
+   */
+  public async deleteTestimonial(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      await cmsService.deleteTestimonial(id);
+      res.status(200).json({ success: true, message: 'Testimonial deleted' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/faqs
+   * PUT /api/v1/cms/admin/faqs/:id
+   */
+  public async saveFaq(req: Request, res: Response): Promise<void> {
+    try {
+      const id = req.params.id ? String(req.params.id) : null;
+      const parseResult = CmsFaqInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const faq = await cmsService.saveFaq(id, parseResult.data);
+      res.status(200).json({ success: true, data: faq });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cms/admin/faqs/:id
+   */
+  public async deleteFaq(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      await cmsService.deleteFaq(id);
+      res.status(200).json({ success: true, message: 'FAQ deleted' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * PUT /api/v1/cms/admin/navigation
+   */
+  public async saveNavigation(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsNavigationMenuInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const menu = await cmsService.saveNavigation(parseResult.data);
+      res.status(200).json({ success: true, data: menu });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * PUT /api/v1/cms/admin/settings
+   */
+  public async saveSiteSetting(req: Request, res: Response): Promise<void> {
+    try {
+      const parseResult = CmsSiteSettingInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parseResult.error.format(),
+        });
+        return;
+      }
+
+      const setting = await cmsService.saveSiteSetting(parseResult.data);
+      res.status(200).json({ success: true, data: setting });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/v1/cms/admin/cache/purge
+   */
+  public purgeCache(req: Request, res: Response): void {
+    const { tag, key } = req.body || {};
+    const target = tag || key || req.query.tag || req.query.key || 'all';
+    const result = cmsService.purgeCache(target as string);
+    res.status(200).json({ success: true, data: result });
+  }
+
+  /**
+   * GET /api/v1/cms/admin/cache/stats
+   */
+  public getCacheStats(_req: Request, res: Response): void {
+    const stats = cmsCache.getStats();
+    res.status(200).json({ success: true, data: stats });
+  }
+}
+
+export const cmsAdminController = new CmsAdminController();
