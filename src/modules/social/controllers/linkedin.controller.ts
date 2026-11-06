@@ -85,7 +85,9 @@ export class LinkedInController {
         return;
       }
 
-      const connection = await this.service.handleCallback(code, state, redirectUri, returnTo);
+      // Auto-detect redirect URI from incoming request if not explicitly provided
+      const autoRedirectUri = redirectUri || `${req.protocol}://${req.get('host')}${req.baseUrl}${req.path}`;
+      const connection = await this.service.handleCallback(code, state, autoRedirectUri, returnTo);
 
       // Redirect back to Social CRM UI only if returnTo passes strict allowlist check
       const verifiedReturnTo = connection.returnTo;
