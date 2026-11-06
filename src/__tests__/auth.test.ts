@@ -36,7 +36,7 @@ describe('Authentication & CRM Staff Access Suite', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('authenticates POST /api/v1/auth/login successfully and returns user profile and token', async () => {
+  it('authenticates POST /api/v1/auth/login successfully and returns user profile and expiring session token', async () => {
     const res = await request(app)
       .post('/api/v1/auth/login')
       .send({ email: CRM_ADMIN_EMAIL, password: CRM_ADMIN_PASS });
@@ -47,6 +47,25 @@ describe('Authentication & CRM Staff Access Suite', () => {
     expect(res.body.user.email).toBe(CRM_ADMIN_EMAIL);
     expect(res.body.user.role).toBe('admin');
     expect(res.body.token).toBeDefined();
+    // Item 1: Must be a signed expiring session token (lp_sess.*), NEVER the master API key
+    expect(res.body.token.startsWith('lp_sess.')).toBe(true);
+    expect(res.body.token).not.toBe(TEST_ADMIN_KEY);
+
+    // Verify session token works on protected endpoints
+    const meRes = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${res.body.token}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.success).toBe(true);
+    expect(meRes.body.user.email).toBe(CRM_ADMIN_EMAIL);
+  });
+
+  it('Item 1: rejects "API key as password" on POST /api/v1/auth/login', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: CRM_ADMIN_EMAIL, password: TEST_ADMIN_KEY });
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
   });
 
   it('GET /api/v1/auth/me rejects unauthenticated request with 401', async () => {

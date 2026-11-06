@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { getSupabaseClient } from '../services/supabaseStorageService';
+import { verifyCrmSessionToken } from '../utils/sessionToken';
 
 /**
  * Validates x-api-key, Authorization: Bearer <key|jwt>, or Basic Auth
@@ -55,19 +56,30 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       return next();
     }
 
+    // 2. Check signed expiring CRM session token (Item 1)
+    if (token && token.startsWith('lp_sess.')) {
+      const sessionUser = verifyCrmSessionToken(token);
+      if (sessionUser) {
+        (req as any).user = sessionUser;
+        return next();
+      }
+    }
+
     // 3. If token looks like a Supabase JWT (3 dot-separated parts), verify via Supabase Auth
-    // Security: Only grant access to CRM staff/admin users, preventing general Supabase users from accessing CRM APIs
+    // Security: Only check app_metadata (Item 3: user_metadata can be edited by end-users)
+    // and require verified email for domain match
     if (token && token.split('.').length === 3) {
       try {
         const supabase = await getSupabaseClient();
         const { data, error } = await supabase.auth.getUser(token);
         if (!error && data?.user) {
           const user = data.user;
-          const role = (user.app_metadata?.role || user.user_metadata?.role || '').toLowerCase();
+          const role = (user.app_metadata?.role || '').toLowerCase();
           const email = (user.email || '').toLowerCase();
+          const isEmailConfirmed = Boolean(user.email_confirmed_at || (user as any).confirmed_at);
           const isStaff =
             ['admin', 'staff', 'crm', 'editor'].includes(role) ||
-            email.endsWith('@leadersperformance.ae') ||
+            (isEmailConfirmed && email.endsWith('@leadersperformance.ae')) ||
             (process.env.CRM_ADMIN_EMAIL && email === process.env.CRM_ADMIN_EMAIL.toLowerCase());
 
           if (isStaff) {

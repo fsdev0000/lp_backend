@@ -14,18 +14,8 @@ router.post('/callback', controller.handleWebhook);
 router.get('/webhook', controller.handleWebhook);
 router.post('/webhook', controller.handleWebhook);
 
-// Authenticated TikTok endpoints
-// /auth-url allows browser-initiated OAuth redirects while retaining PKCE and allowlist security
-router.get(
-  '/auth-url',
-  (req, res, next) => {
-    if (req.headers['x-api-key'] || req.headers.authorization || req.query.api_key) {
-      return requireApiKey(req, res, next);
-    }
-    next();
-  },
-  controller.getAuthUrl
-);
+// Authenticated TikTok endpoints (Item 9: requireApiKey on /auth-url)
+router.get('/auth-url', requireApiKey, controller.getAuthUrl);
 router.get('/status', requireApiKey, controller.getStatus);
 router.get('/analytics', requireApiKey, controller.getAnalytics);
 router.post('/publish', requireApiKey, controller.publishDirect);

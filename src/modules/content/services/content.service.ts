@@ -62,11 +62,12 @@ export class ContentService {
         where: { id: { in: LEGACY_SEED_AUDIT_IDS } },
       });
 
-      // Item 4f: Migrate legacy posts saved before 0d3d43e that defaulted to mediaType="image" even when mediaUrl is a web page
+      // Item 4f / Item 6: Migrate legacy posts saved before 0d3d43e (created before Nov 4, 2026) that defaulted to mediaType="image"
       const legacyPosts = await contentPrisma.socialPost.findMany({
         where: {
           mediaType: 'image',
           mediaUrl: { not: null },
+          createdAt: { lt: new Date('2026-11-04T00:00:00.000Z') },
         },
       });
 

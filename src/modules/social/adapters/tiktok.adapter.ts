@@ -59,16 +59,50 @@ export class TikTokAdapter {
       clientKey:
         process.env.TIKTOK_CLIENT_KEY?.trim() ||
         process.env.TIKTOK_SANDBOX_CLIENT_KEY?.trim() ||
-        'sbawhyubzo4xr8qelx',
+        '',
       clientSecret:
         process.env.TIKTOK_CLIENT_SECRET?.trim() ||
         process.env.TIKTOK_SANDBOX_CLIENT_SECRET?.trim() ||
-        'v3vrynbj40NSJX8LF5Y5h0nRgi0bO6Zh',
+        '',
       redirectUri:
         process.env.TIKTOK_REDIRECT_URI?.trim() ||
         'https://staging.leadersperformance.ae/api/v1/social/tiktok/callback',
       username: process.env.TIKTOK_USERNAME?.trim() || 'lioneleersteling',
     };
+  }
+
+  /**
+   * Refreshes TikTok access token using grant_type=refresh_token (Item 7)
+   */
+  public async refreshAccessToken(refreshTokenStr: string): Promise<TikTokTokenResponse> {
+    const creds = this.getCredentials();
+    if (!creds.clientKey || !creds.clientSecret) {
+      throw new Error('Missing TIKTOK_CLIENT_KEY or TIKTOK_CLIENT_SECRET in environment variables.');
+    }
+
+    const params = new URLSearchParams({
+      client_key: creds.clientKey,
+      client_secret: creds.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshTokenStr.trim(),
+    });
+
+    const res = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    const data = (await res.json()) as any;
+    if (!res.ok || data.error) {
+      throw new Error(
+        `TikTok token refresh error: ${data.error_description || data.error || `HTTP ${res.status}`}`
+      );
+    }
+
+    return data as TikTokTokenResponse;
   }
 
   /**
@@ -256,13 +290,20 @@ export class TikTokAdapter {
   }
 
   /**
-   * Publishes a video to @lioneleersteling via TikTok Content Posting API (PULL_FROM_URL).
+   * Publishes or uploads draft video to @lioneleersteling via TikTok Content Posting API.
+   * Mode "DRAFT" routes to Creator Inbox /v2/post/publish/inbox/video/init/ (Item 8)
+   * Mode "DIRECT" routes to Direct Post /v2/post/publish/video/init/
    * Blocked by TIKTOK_PUBLISHING_ENABLED kill switch while false.
    */
   public async publishVideo(
     accessToken: string,
-    payload: { title: string; videoUrl: string; privacyLevel?: string }
-  ): Promise<{ publishId: string | null }> {
+    payload: {
+      title: string;
+      videoUrl: string;
+      privacyLevel?: string;
+      mode?: 'DIRECT' | 'DRAFT';
+    }
+  ): Promise<{ publishId: string | null; mode: 'DIRECT' | 'DRAFT' }> {
     if (!isTikTokPublishingEnabled()) {
       const err: any = new Error(
         'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false).'
@@ -271,31 +312,47 @@ export class TikTokAdapter {
       throw err;
     }
 
-    const res = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+    const mode = payload.mode === 'DRAFT' ? 'DRAFT' : 'DIRECT';
+    const endpoint =
+      mode === 'DRAFT'
+        ? 'https://open.tiktokapis.com/v2/post/publish/inbox/video/init/'
+        : 'https://open.tiktokapis.com/v2/post/publish/video/init/';
+
+    const body =
+      mode === 'DRAFT'
+        ? {
+            source_info: {
+              source: 'PULL_FROM_URL',
+              video_url: payload.videoUrl,
+            },
+          }
+        : {
+            post_info: {
+              title: payload.title.slice(0, 2200),
+              privacy_level: payload.privacyLevel || 'SELF_ONLY',
+              disable_duet: false,
+              disable_comment: false,
+              disable_stitch: false,
+            },
+            source_info: {
+              source: 'PULL_FROM_URL',
+              video_url: payload.videoUrl,
+            },
+          };
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json; charset=UTF-8',
       },
-      body: JSON.stringify({
-        post_info: {
-          title: payload.title.slice(0, 2200),
-          privacy_level: payload.privacyLevel || 'PUBLIC_TO_EVERYONE',
-          disable_duet: false,
-          disable_comment: false,
-          disable_stitch: false,
-        },
-        source_info: {
-          source: 'PULL_FROM_URL',
-          video_url: payload.videoUrl,
-        },
-      }),
+      body: JSON.stringify(body),
     });
 
     const json = (await res.json()) as any;
     if (!res.ok || (json?.error?.code && json.error.code !== 'ok')) {
       throw new Error(
-        `TikTok Content Posting API error: ${
+        `TikTok Content Posting API error (${mode}): ${
           json?.error?.message || json?.error?.code || `HTTP ${res.status}`
         }`
       );
@@ -303,14 +360,43 @@ export class TikTokAdapter {
 
     return {
       publishId: json?.data?.publish_id || null,
+      mode,
     };
   }
 
-  public async getActiveConnection() {
+  public async getActiveConnection(autoRefresh = true) {
     try {
-      return await socialPrisma.socialAccountConnection.findUnique({
+      const conn = await socialPrisma.socialAccountConnection.findUnique({
         where: { platform: TIKTOK_PLATFORM },
       });
+      if (!conn) return null;
+
+      // Item 7: Proactive Token Refresh before expiry
+      if (autoRefresh && conn.refreshToken && conn.tokenExpiresAt) {
+        const expiresInMs = new Date(conn.tokenExpiresAt).getTime() - Date.now();
+        // If expired or expiring within 60 minutes, refresh token
+        if (expiresInMs < 60 * 60 * 1000) {
+          try {
+            console.log('[TikTokAdapter] Proactively refreshing expiring TikTok access token...');
+            const refreshed = await this.refreshAccessToken(conn.refreshToken);
+            const expiresAt = new Date(Date.now() + (refreshed.expires_in || 86400) * 1000);
+            return await socialPrisma.socialAccountConnection.update({
+              where: { platform: TIKTOK_PLATFORM },
+              data: {
+                accessToken: refreshed.access_token,
+                refreshToken: refreshed.refresh_token || conn.refreshToken,
+                tokenExpiresAt: expiresAt,
+                status: 'HEALTHY',
+                lastSyncAt: new Date(),
+              },
+            });
+          } catch (refErr: any) {
+            console.warn('[TikTokAdapter] Proactive token refresh failed:', refErr?.message);
+          }
+        }
+      }
+
+      return conn;
     } catch {
       return null;
     }

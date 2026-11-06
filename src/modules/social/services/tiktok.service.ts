@@ -7,6 +7,7 @@ import {
 } from '../adapters/tiktok.adapter';
 import { isAllowedReturnToUrl } from '../config/linkedin.config';
 import { socialPrisma } from '../adapters/linkedin.adapter';
+import { verifyPostApprovalGuard } from '../../../utils/approvalSignature';
 
 interface PendingTikTokOAuthState {
   codeVerifier: string;
@@ -36,7 +37,7 @@ export class TikTokService {
     }
   }
 
-  public getAuthUrl(
+  public async getAuthUrl(
     redirectUri?: string,
     state?: string,
     scopes?: string[],
@@ -55,13 +56,31 @@ export class TikTokService {
     const authState = state?.trim() || `tt_${randomBytes(16).toString('hex')}`;
     const { codeVerifier, codeChallenge } = this.adapter.generatePkcePair();
 
-    TikTokService.pendingStates.set(authState, {
+    const statePayload: PendingTikTokOAuthState = {
       codeVerifier,
       redirectUri,
       returnTo,
       scopes: activeScopes,
       createdAt: Date.now(),
-    });
+    };
+
+    TikTokService.pendingStates.set(authState, statePayload);
+
+    // Item 9: Persist issued OAuth state & PKCE verifier to database so it survives container restarts
+    try {
+      await socialPrisma.systemConfig.upsert({
+        where: { key: `tt_state_${authState}` },
+        create: {
+          key: `tt_state_${authState}`,
+          value: JSON.stringify(statePayload),
+        },
+        update: {
+          value: JSON.stringify(statePayload),
+        },
+      });
+    } catch {
+      // Memory store fallback if DB is temporarily unreachable
+    }
 
     const url = this.adapter.getAuthorizationUrl(
       redirectUri,
@@ -78,7 +97,7 @@ export class TikTokService {
         clientKeyOverride?.trim() ||
         process.env.TIKTOK_CLIENT_KEY?.trim() ||
         process.env.TIKTOK_SANDBOX_CLIENT_KEY?.trim() ||
-        'sbawhyubzo4xr8qelx',
+        '',
       scopes: activeScopes,
     };
   }
@@ -88,21 +107,39 @@ export class TikTokService {
       throw createHttpError('Missing authorization code from TikTok callback', 400);
     }
 
+    if (!state) {
+      throw createHttpError('Missing state parameter from TikTok callback', 400);
+    }
+
     TikTokService.pruneExpiredStates();
-    // Allow state verification to survive container restarts if state matches valid format (starts with tt_)
-    if (!state || (!state.startsWith('tt_') && !TikTokService.pendingStates.has(state))) {
+
+    // Item 9: Look up issued state from memory or persistent DB (never accept arbitrary unissued states)
+    let stateEntry = TikTokService.pendingStates.get(state);
+    if (!stateEntry) {
+      try {
+        const dbEntry = await socialPrisma.systemConfig.findUnique({
+          where: { key: `tt_state_${state}` },
+        });
+        if (dbEntry?.value) {
+          stateEntry = JSON.parse(dbEntry.value);
+        }
+      } catch {
+        // Fall through
+      }
+    }
+
+    if (!stateEntry || Date.now() - stateEntry.createdAt > TikTokService.STATE_TTL_MS) {
       throw createHttpError('Invalid or expired TikTok OAuth state parameter', 400);
     }
 
-    const stateEntry = TikTokService.pendingStates.get(state) || {
-      codeVerifier: '',
-      redirectUri: undefined,
-      returnTo: undefined,
-      scopes: TIKTOK_DEFAULT_SCOPES,
-      createdAt: Date.now(),
-    };
-    if (TikTokService.pendingStates.has(state)) {
-      TikTokService.pendingStates.delete(state);
+    // Invalidate state immediately upon single use
+    TikTokService.pendingStates.delete(state);
+    try {
+      await socialPrisma.systemConfig.delete({
+        where: { key: `tt_state_${state}` },
+      });
+    } catch {
+      // Ignore cleanup error
     }
 
     const effectiveReturnTo = returnTo || stateEntry.returnTo;
@@ -233,15 +270,44 @@ export class TikTokService {
       };
     }
 
-    const [profile, videos] = await Promise.all([
-      this.adapter.fetchUserProfile(conn.accessToken),
-      this.adapter.fetchVideos(conn.accessToken, 20),
-    ]);
+    let profile: any;
+    let videos: any[] = [];
 
-    // Aggregate 7-day video performance from public videos
+    try {
+      [profile, videos] = await Promise.all([
+        this.adapter.fetchUserProfile(conn.accessToken),
+        this.adapter.fetchVideos(conn.accessToken, 20),
+      ]);
+    } catch (apiErr: any) {
+      // Item 7: Reactive token refresh if API returned 401 / expired token
+      if (conn.refreshToken) {
+        try {
+          console.log('[TikTokService] API call failed, refreshing access token...');
+          const refreshed = await this.adapter.refreshAccessToken(conn.refreshToken);
+          const expiresAt = new Date(Date.now() + (refreshed.expires_in || 86400) * 1000);
+          await this.adapter.saveConnection({
+            accountName: conn.accountName || `@${username}`,
+            accountUrn: conn.accountUrn || `tiktok:${username}`,
+            accessToken: refreshed.access_token,
+            refreshToken: refreshed.refresh_token || conn.refreshToken,
+            expiresInSeconds: refreshed.expires_in,
+          });
+          [profile, videos] = await Promise.all([
+            this.adapter.fetchUserProfile(refreshed.access_token),
+            this.adapter.fetchVideos(refreshed.access_token, 20),
+          ]);
+        } catch {
+          throw apiErr;
+        }
+      } else {
+        throw apiErr;
+      }
+    }
+
+    // Aggregate real 7-day video performance from public videos (Item 4: Never show fake numbers)
     const nowMs = Date.now();
     const sevenDaysAgoMs = nowMs - 7 * 24 * 60 * 60 * 1000;
-    const recent7dVideos = videos.filter((v) => new Date(v.publishedAt).getTime() >= sevenDaysAgoMs);
+    const recent7dVideos = (videos || []).filter((v) => new Date(v.publishedAt).getTime() >= sevenDaysAgoMs);
 
     const calcViews7d = recent7dVideos.reduce((acc, v) => acc + (v.views || 0), 0);
     const calcLikes7d = recent7dVideos.reduce((acc, v) => acc + (v.likes || 0), 0);
@@ -260,29 +326,26 @@ export class TikTokService {
       videoCount: profile.videoCount,
       performance7d: {
         timeframe: 'Last 7 days',
-        videoViews: calcViews7d > 0 ? calcViews7d : 3800,
-        videoViewsGrowth: '+12.2%',
-        profileViews: 35,
-        profileViewsGrowth: '-10.3%',
-        likes: calcLikes7d > 0 ? calcLikes7d : 71,
-        likesGrowth: '+1.4%',
-        comments: calcComments7d > 0 ? calcComments7d : 1,
-        shares: calcShares7d > 0 ? calcShares7d : 11,
-        sharesGrowth: '+22.2%',
-        estimatedRewards: '$0.00',
-        trafficSources: {
-          search: '51.1%',
-          forYou: '41.6%',
-          following: '3.7%',
-          personalProfile: '3.6%',
-          sound: '0.0%',
-        },
+        recentVideosCount: recent7dVideos.length,
+        videoViews: calcViews7d,
+        likes: calcLikes7d,
+        comments: calcComments7d,
+        shares: calcShares7d,
       },
       videos,
     };
   }
 
-  public async publishDirect(payload: { title: string; videoUrl: string; privacyLevel?: string }) {
+  public async publishDirect(payload: {
+    postId?: string;
+    title: string;
+    videoUrl: string;
+    privacyLevel?: string;
+    mode?: 'DIRECT' | 'DRAFT';
+    approvalSignature?: string;
+    approvedBy?: string;
+  }) {
+    // Item 8: Strict kill switch
     if (!isTikTokPublishingEnabled()) {
       throw createHttpError(
         'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false).',
@@ -290,12 +353,40 @@ export class TikTokService {
       );
     }
 
+    const mode = payload.mode === 'DRAFT' ? 'DRAFT' : 'DIRECT';
+
+    // Item 8: Direct publishing to feed must pass Content Studio & Executive Approval Guard
+    if (mode === 'DIRECT') {
+      const postPayload = {
+        id: payload.postId || `draft-${Date.now()}`,
+        title: payload.title,
+        hook: null,
+        body: payload.title,
+        platform: 'TIKTOK',
+        mediaUrl: payload.videoUrl,
+        status: 'APPROVED',
+        approvalSignature: payload.approvalSignature || '',
+        approvedBy: payload.approvedBy || 'Lionel Eersteling (Owner)',
+      };
+
+      const guard = verifyPostApprovalGuard(postPayload);
+      if (!guard.isValid) {
+        throw createHttpError(
+          `TikTok direct publishing aborted by executive guard: ${guard.reason}`,
+          400
+        );
+      }
+    }
+
     const conn = await this.adapter.getActiveConnection();
     if (!conn || !conn.accessToken) {
       throw createHttpError('TikTok account is not connected', 400);
     }
 
-    return this.adapter.publishVideo(conn.accessToken, payload);
+    return this.adapter.publishVideo(conn.accessToken, {
+      ...payload,
+      mode,
+    });
   }
 
   public async disconnect() {

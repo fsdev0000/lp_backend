@@ -1,4 +1,4 @@
-import { describe, it, expect, jest } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import instagramRoutes from '../modules/social/instagram.routes';
@@ -8,6 +8,7 @@ import { InstagramService } from '../modules/social/services/instagram.service';
 import { InstagramAnalyticsAdapter } from '../modules/analytics/adapters/instagramAnalytics.adapter';
 import { InstagramPublishingService } from '../modules/content/services/instagramPublishing.service';
 import { InstagramAnalyticsSyncJob } from '../modules/analytics/jobs/instagramAnalyticsSyncJob';
+import { socialPrisma } from '../modules/social/adapters/linkedin.adapter';
 import {
   generateAuthoritativeSignature,
   verifyPostApprovalGuard,
@@ -29,6 +30,71 @@ describe('Meta Instagram Integration Suite', () => {
   const service = new InstagramService();
   const analyticsAdapter = new InstagramAnalyticsAdapter();
   const publishingService = new InstagramPublishingService();
+
+  beforeEach(() => {
+    // Item 5: Mock adapter and Prisma to prevent wiping staging database or calling live Meta API during local test runs
+    jest.spyOn(InstagramAdapter.prototype, 'disconnect').mockImplementation(async () => {});
+    jest.spyOn(InstagramAdapter.prototype, 'ping').mockImplementation(async () => ({
+      status: 'HEALTHY',
+      latencyMs: 42,
+      message: 'Connected as @lioneleersteling',
+      account: { id: '17841427503988004', username: 'lioneleersteling', followersCount: 51 },
+    }));
+    jest.spyOn(InstagramAdapter.prototype, 'getActiveConnection').mockImplementation(async () => ({
+      id: 'mock-ig-id',
+      platform: 'INSTAGRAM',
+      accountName: 'Lionel Eersteling | Founder Performance',
+      accountUrn: 'instagram:17841427503988004',
+      accountEmail: null,
+      profilePictureUrl: null,
+      accessToken: 'mock_system_token',
+      refreshToken: null,
+      tokenExpiresAt: null,
+      scopes: ['instagram_basic'],
+      status: 'HEALTHY',
+      lastSyncAt: new Date(),
+      followersCount: 51,
+      metadata: { username: 'lioneleersteling', accountId: '17841427503988004', tokenType: 'SYSTEM_USER' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any));
+
+    jest.spyOn(socialPrisma.socialAccountConnection, 'deleteMany').mockResolvedValue({ count: 1 } as any);
+    jest.spyOn(socialPrisma.socialAccountConnection, 'findUnique').mockResolvedValue(null);
+    jest.spyOn(socialPrisma.socialAccountConnection, 'upsert').mockResolvedValue({} as any);
+    jest.spyOn(socialPrisma.socialAuditLog, 'create').mockResolvedValue({} as any);
+
+    jest.spyOn(InstagramAnalyticsAdapter.prototype, 'getAccountAnalytics').mockResolvedValue({
+      accountId: '17841427503988004',
+      username: 'lioneleersteling',
+      name: 'Lionel Eersteling',
+      profilePictureUrl: null,
+      biography: null,
+      connected: true,
+      followers: 51,
+      followerGrowth: 0,
+      followerGrowthFormatted: '0.0%',
+      impressions: null,
+      reach: null,
+      profileViews: null,
+      engagementRate: null,
+      engagementRateFormatted: null,
+      postsCount: 0,
+      postsInRange: 0,
+      range: '7d',
+      startDate: '2026-10-30',
+      endDate: '2026-11-06',
+      cachedAt: new Date().toISOString(),
+      isCached: false,
+      isFallback: false,
+    });
+    jest.spyOn(InstagramAnalyticsAdapter.prototype, 'getPosts').mockResolvedValue([]);
+    jest.spyOn(InstagramAnalyticsSyncJob, 'runSync').mockResolvedValue(undefined as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   describe('Module A: OAuth & Connection Lifecycle', () => {
     it('Security: rejects unauthenticated requests to Instagram endpoints with HTTP 401', async () => {

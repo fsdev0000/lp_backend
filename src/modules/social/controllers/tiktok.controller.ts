@@ -20,7 +20,7 @@ export class TikTokController {
 
       const clientKey = (req.query.client_key || req.query.clientKey) as string | undefined;
 
-      const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, returnTo, clientKey);
+      const result = await this.service.getAuthUrl(redirectUri, state, parsedScopes, returnTo, clientKey);
       if (req.query.redirect === 'true' || req.query.auto === 'true' || req.accepts('html')) {
         res.redirect(302, result.url);
         return;

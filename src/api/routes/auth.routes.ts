@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { getSupabaseClient } from '../../services/supabaseStorageService';
+import { createClient } from '@supabase/supabase-js';
+import { getSupabaseUrl, getSupabaseServiceKey } from '../../services/supabaseStorageService';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
+import { generateCrmSessionToken } from '../../utils/sessionToken';
 
 export const authRouter = Router();
 
@@ -20,63 +22,77 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    // 1. Try Supabase Auth signInWithPassword
+    // 1. Try Supabase Auth signInWithPassword using an ISOLATED, non-cached client (Item 2)
+    // Prevents polluting cachedClient service-role state with user auth tokens
     try {
-      const supabase = await getSupabaseClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password: cleanPassword,
-      });
+      const supabaseUrl = getSupabaseUrl();
+      const serviceKey = await getSupabaseServiceKey();
+      if (supabaseUrl && serviceKey) {
+        const isolatedAuthClient = createClient(supabaseUrl, serviceKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
 
-      if (!error && data?.session && data.user) {
-        const role = (data.user.app_metadata?.role || data.user.user_metadata?.role || '').toLowerCase();
-        const isStaff =
-          ['admin', 'staff', 'crm', 'editor'].includes(role) ||
-          cleanEmail.endsWith('@leadersperformance.ae') ||
-          (process.env.CRM_ADMIN_EMAIL && cleanEmail === process.env.CRM_ADMIN_EMAIL.toLowerCase());
+        const { data, error } = await isolatedAuthClient.auth.signInWithPassword({
+          email: cleanEmail,
+          password: cleanPassword,
+        });
 
-        if (isStaff) {
-          res.status(200).json({
-            success: true,
-            user: {
-              id: data.user.id,
-              email: data.user.email,
-              name: data.user.user_metadata?.name || data.user.email?.split('@')[0],
-              role: role || 'staff',
-            },
-            token: data.session.access_token,
-          });
-          return;
-        } else {
-          res.status(403).json({
-            success: false,
-            error: 'Forbidden: User is not authorized to access Social CRM resources.',
-          });
-          return;
+        if (!error && data?.session && data.user) {
+          // Security (Item 3): Rely strictly on app_metadata.role (user_metadata is client-editable)
+          const role = (data.user.app_metadata?.role || '').toLowerCase();
+          const isEmailConfirmed = Boolean(data.user.email_confirmed_at || (data.user as any).confirmed_at);
+          const isStaff =
+            ['admin', 'staff', 'crm', 'editor'].includes(role) ||
+            (isEmailConfirmed && cleanEmail.endsWith('@leadersperformance.ae')) ||
+            (process.env.CRM_ADMIN_EMAIL && cleanEmail === process.env.CRM_ADMIN_EMAIL.toLowerCase());
+
+          if (isStaff) {
+            res.status(200).json({
+              success: true,
+              user: {
+                id: data.user.id,
+                email: data.user.email,
+                name: (data.user.app_metadata?.name as string) || data.user.email?.split('@')[0],
+                role: role || 'staff',
+              },
+              token: data.session.access_token,
+            });
+            return;
+          } else {
+            res.status(403).json({
+              success: false,
+              error: 'Forbidden: User is not authorized to access Social CRM resources.',
+            });
+            return;
+          }
         }
       }
     } catch (supabaseErr: any) {
-      console.warn('[AuthRouter] Supabase signInWithPassword bypassed/failed:', supabaseErr?.message);
+      console.warn('[AuthRouter] Supabase isolated signInWithPassword bypassed/failed:', supabaseErr?.message);
     }
 
-    // 2. Fallback: Authenticate against CRM Admin / System Credentials
+    // 2. Fallback: Authenticate against configured CRM Admin credentials (Item 1)
+    // Drops "API key as password" and issues an expiring signed CRM session token (not the master API key)
     const configuredAdminEmail = (process.env.CRM_ADMIN_EMAIL || process.env.SWAGGER_USER || 'admin@leadersperformance.ae').toLowerCase();
     const configuredAdminPass = process.env.CRM_ADMIN_PASSWORD || process.env.SWAGGER_PASSWORD;
-    const fallbackApiKey = process.env.CRM_API_KEY || process.env.ADMIN_API_KEY || process.env.ARTICLES_API_KEY;
 
     const isDirectMatch =
-      configuredAdminPass &&
+      Boolean(configuredAdminPass) &&
       cleanEmail === configuredAdminEmail &&
       cleanPassword === configuredAdminPass;
 
-    // Also support passing valid CRM_API_KEY / ADMIN_API_KEY directly as password
-    const isApiKeyMatch =
-      fallbackApiKey &&
-      (cleanPassword === fallbackApiKey || cleanPassword === process.env.ADMIN_API_KEY || cleanPassword === process.env.CRM_API_KEY) &&
-      (cleanEmail.endsWith('@leadersperformance.ae') || cleanEmail.startsWith('admin'));
+    if (isDirectMatch) {
+      const sessionToken = generateCrmSessionToken({
+        id: 'crm-admin',
+        email: cleanEmail,
+        name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Lionel Eersteling',
+        role: 'admin',
+      });
 
-    if (isDirectMatch || isApiKeyMatch) {
-      const issuedToken = fallbackApiKey || 'lp_crm_sess_' + Buffer.from(cleanEmail).toString('hex');
       res.status(200).json({
         success: true,
         user: {
@@ -85,7 +101,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
           name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Lionel Eersteling',
           role: 'admin',
         },
-        token: issuedToken,
+        token: sessionToken,
       });
       return;
     }
