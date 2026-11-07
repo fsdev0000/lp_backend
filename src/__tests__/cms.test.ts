@@ -360,5 +360,45 @@ describe('CMS Module & Text Management Architecture', () => {
         });
       expect(oversizedRes.status).toBe(400);
     });
+
+    it('No-op Publish & Exact String Preservation: publishing when nothing is pending does not bump version, and placeholders/tags/spaces are stored unmodified', async () => {
+      const arrayIndexKey = `lionel.sport.items.0.title.${Date.now()}`;
+      const rawValue = '  Welcome {name}, <br> <strong>Turn Pressure into Performance</strong> & Lead  ';
+
+      // 1. Save draft with array index key, placeholders, tags, and untrimmed spaces
+      const saveRes = await request(app)
+        .put('/api/v1/cms/admin/texts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          key: arrayIndexKey,
+          locale: 'en',
+          value: rawValue,
+        });
+      expect(saveRes.status).toBe(200);
+      expect(saveRes.body.data.draftValue).toBe(rawValue);
+
+      // 2. Publish the draft
+      const pub1 = await request(app)
+        .post('/api/v1/cms/admin/texts/publish')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [arrayIndexKey], locale: 'en' });
+      expect(pub1.status).toBe(200);
+      expect(pub1.body.data.publishedCount).toBe(1);
+      const versionAfterFirstPublish = pub1.body.data.version;
+
+      // 3. Verify GET /cms/texts returns the exact raw string without trimming or escaping
+      const getPub = await request(app).get('/api/v1/cms/texts?locale=en');
+      expect(getPub.status).toBe(200);
+      expect(getPub.body.data.texts[arrayIndexKey]).toBe(rawValue);
+
+      // 4. Call publish again when nothing is pending for this key -> must be a no-op (version unchanged)
+      const pub2 = await request(app)
+        .post('/api/v1/cms/admin/texts/publish')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [arrayIndexKey], locale: 'en' });
+      expect(pub2.status).toBe(200);
+      expect(pub2.body.data.publishedCount).toBe(0);
+      expect(pub2.body.data.version).toBe(versionAfterFirstPublish);
+    });
   });
 });

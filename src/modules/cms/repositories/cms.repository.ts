@@ -94,6 +94,31 @@ export class CmsRepository {
       `CREATE INDEX IF NOT EXISTS "idx_cms_sections_page_order" ON "cms_page_sections"("page_id", "order");`,
       `CREATE INDEX IF NOT EXISTS "idx_cms_testimonials_cat_pub" ON "cms_testimonials"("category", "published");`,
       `CREATE INDEX IF NOT EXISTS "idx_cms_faqs_cat_pub" ON "cms_faqs"("category", "published");`,
+      `CREATE TABLE IF NOT EXISTS "cms_texts" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+        "key" VARCHAR(200) NOT NULL,
+        "locale" VARCHAR(10) NOT NULL DEFAULT 'en',
+        "has_draft" BOOLEAN NOT NULL DEFAULT false,
+        "draft_value" TEXT,
+        "published_value" TEXT,
+        "updated_by" TEXT,
+        "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "published_by" TEXT,
+        "published_at" TIMESTAMP(3)
+      );`,
+      `CREATE TABLE IF NOT EXISTS "cms_text_revisions" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+        "key" VARCHAR(200) NOT NULL,
+        "locale" VARCHAR(10) NOT NULL DEFAULT 'en',
+        "value" TEXT,
+        "action" VARCHAR(50) NOT NULL,
+        "actor_email" TEXT NOT NULL,
+        "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "cms_texts_key_locale_key" ON "cms_texts"("key", "locale");`,
+      `CREATE INDEX IF NOT EXISTS "cms_texts_locale_idx" ON "cms_texts"("locale");`,
+      `CREATE INDEX IF NOT EXISTS "cms_text_revisions_key_locale_idx" ON "cms_text_revisions"("key", "locale");`,
+      `CREATE INDEX IF NOT EXISTS "cms_text_revisions_created_at_idx" ON "cms_text_revisions"("created_at");`,
     ];
 
     try {
@@ -448,6 +473,7 @@ export class CmsRepository {
   }
 
   public async findPublishedTexts(locale: string = 'en') {
+    await this.ensureTables();
     const rows = await prisma.cmsText.findMany({
       where: {
         locale,
@@ -477,6 +503,7 @@ export class CmsRepository {
   }
 
   public async findAllTexts(locale: string = 'en') {
+    await this.ensureTables();
     return prisma.cmsText.findMany({
       where: { locale },
       select: {
@@ -494,6 +521,7 @@ export class CmsRepository {
   }
 
   public async upsertTextDraft(key: string, locale: string, value: string | null, actorEmail: string) {
+    await this.ensureTables();
     const existing = await prisma.cmsText.findUnique({
       where: { key_locale: { key, locale } },
     });
@@ -551,6 +579,7 @@ export class CmsRepository {
   }
 
   public async discardTextDrafts(keys: string[], locale: string = 'en', actorEmail: string) {
+    await this.ensureTables();
     const now = new Date();
     let discardedCount = 0;
 
@@ -605,6 +634,7 @@ export class CmsRepository {
   }
 
   public async publishTextDrafts(keys: string[] | undefined, locale: string, actorEmail: string) {
+    await this.ensureTables();
     const now = new Date();
     const whereClause: any = {
       locale,
@@ -618,6 +648,17 @@ export class CmsRepository {
     const pendingDrafts = await prisma.cmsText.findMany({
       where: whereClause,
     });
+
+    const versionConfig = await this.getTextVersionConfig(locale);
+
+    // No-op when nothing is pending: do not increment version
+    if (pendingDrafts.length === 0) {
+      return {
+        version: versionConfig.version,
+        publishedAt: versionConfig.publishedAt,
+        publishedCount: 0,
+      };
+    }
 
     for (const draft of pendingDrafts) {
       await prisma.cmsText.update({
@@ -653,8 +694,7 @@ export class CmsRepository {
       }).catch(() => {});
     }
 
-    // Increment version
-    const versionConfig = await this.getTextVersionConfig(locale);
+    // Increment version only when at least one pending draft was published
     const nextVersion = versionConfig.version + 1;
     const publishedAtStr = now.toISOString();
     await this.updateTextVersionConfig(locale, nextVersion, publishedAtStr);
@@ -667,6 +707,7 @@ export class CmsRepository {
   }
 
   public async findTextHistory(key: string, locale: string = 'en') {
+    await this.ensureTables();
     return prisma.cmsTextRevision.findMany({
       where: { key, locale },
       select: {

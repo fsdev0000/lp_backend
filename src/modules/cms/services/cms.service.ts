@@ -190,7 +190,10 @@ export class CmsService {
   }
 
   public async discardTextDrafts(keys: string[], locale: string, actorEmail: string) {
-    return this.repository.discardTextDrafts(keys, locale, actorEmail);
+    const result = await this.repository.discardTextDrafts(keys, locale, actorEmail);
+    cmsCache.invalidateTag('texts');
+    cmsCache.invalidateTag(`texts:${locale}`);
+    return result;
   }
 
   public async publishTextDrafts(keys: string[] | undefined, locale: string, actorEmail: string) {

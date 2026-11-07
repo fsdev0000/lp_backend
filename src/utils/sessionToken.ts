@@ -10,12 +10,11 @@ export interface CrmSessionPayload {
 }
 
 function getSessionSecret(): string {
-  return (
-    process.env.CRM_SESSION_SECRET ||
-    process.env.ADMIN_API_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    'lp-crm-session-secret-key-fallback'
-  );
+  const secret = process.env.CRM_SESSION_SECRET?.trim();
+  if (!secret) {
+    throw new Error('CRM_SESSION_SECRET environment variable is required for CRM session signing');
+  }
+  return secret;
 }
 
 /**
@@ -57,9 +56,14 @@ export function verifyCrmSessionToken(token: string): CrmSessionPayload | null {
   }
 
   const [, payloadB64, signature] = parts;
-  const expectedSig = createHmac('sha256', getSessionSecret())
-    .update(payloadB64)
-    .digest('base64url');
+  let expectedSig: string;
+  try {
+    expectedSig = createHmac('sha256', getSessionSecret())
+      .update(payloadB64)
+      .digest('base64url');
+  } catch {
+    return null;
+  }
 
   const sigBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expectedSig);
