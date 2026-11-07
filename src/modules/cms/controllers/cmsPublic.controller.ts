@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { cmsService } from '../services/cms.service';
 import { authenticateCmsAdmin } from '../../../middleware/cmsAuth';
+import { isSupportedCmsLocale } from '../validation/cms.validation';
 
 export class CmsPublicController {
   /**
@@ -47,15 +48,17 @@ export class CmsPublicController {
 
   /**
    * GET /api/v1/cms/texts?locale=en
-   * Public endpoint returning published text strings dictionary with version.
+   * GET /api/v1/cms/texts?locale=nl
+   * Public endpoint returning published text strings dictionary with version for the requested locale.
    */
   public async getTexts(req: Request, res: Response): Promise<void> {
     try {
-      const locale = (req.query.locale as string) || 'en';
-      if (locale !== 'en') {
+      const locale = req.query.locale !== undefined ? String(req.query.locale) : 'en';
+      if (!isSupportedCmsLocale(locale)) {
         res.status(400).json({
           success: false,
-          error: 'Currently only locale "en" is supported',
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
         });
         return;
       }

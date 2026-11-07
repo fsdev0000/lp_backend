@@ -66,8 +66,19 @@ export const CmsSiteSettingInputSchema = z.object({
 });
 
 // ============================================================================
-// CMS TEXTS VALIDATION (Section 4)
+// CMS TEXTS VALIDATION (Section 4 — English 'en' & Dutch 'nl')
 // ============================================================================
+
+export const SUPPORTED_CMS_LOCALES = ['en', 'nl'] as const;
+export type SupportedCmsLocale = (typeof SUPPORTED_CMS_LOCALES)[number];
+
+export function isSupportedCmsLocale(locale: unknown): locale is SupportedCmsLocale {
+  return typeof locale === 'string' && (SUPPORTED_CMS_LOCALES as readonly string[]).includes(locale);
+}
+
+export const CmsLocaleSchema = z.enum(SUPPORTED_CMS_LOCALES, {
+  message: 'Unsupported locale. Supported locales are "en" and "nl".',
+});
 
 export const CmsTextInputSchema = z.object({
   key: z
@@ -75,9 +86,7 @@ export const CmsTextInputSchema = z.object({
     .min(1, 'Key is required')
     .max(200, 'Key must not exceed 200 characters')
     .regex(/^[A-Za-z0-9_.-]+$/, 'Key must only contain letters, numbers, dots, hyphens, and underscores'),
-  locale: z.literal('en', {
-    message: 'Only "en" locale is supported at this time.',
-  }).default('en'),
+  locale: CmsLocaleSchema.default('en'),
   value: z
     .string()
     .max(5000, 'Text value must be at most 5,000 characters')
@@ -86,10 +95,12 @@ export const CmsTextInputSchema = z.object({
 
 export const CmsTextDiscardSchema = z.object({
   keys: z.array(z.string().min(1).max(200)).min(1, 'At least one key is required to discard drafts'),
+  locale: CmsLocaleSchema.optional(),
 });
 
 export const CmsTextPublishSchema = z.object({
   keys: z.array(z.string().min(1).max(200)).optional(),
+  locale: CmsLocaleSchema.optional(),
 });
 
 export type CmsPageInput = z.infer<typeof CmsPageInputSchema>;

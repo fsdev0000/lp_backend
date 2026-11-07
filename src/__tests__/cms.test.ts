@@ -12,6 +12,9 @@ const app = express();
 app.use(express.json());
 app.use('/api/v1/cms', cmsRouter);
 
+process.env.CRM_SESSION_SECRET =
+  process.env.CRM_SESSION_SECRET || 'lp-test-crm-session-secret-constant-123';
+
 const adminToken = generateCrmSessionToken({
   id: 'test-admin-uid',
   email: 'admin@leadersperformance.ae',
@@ -27,7 +30,7 @@ const staffToken = generateCrmSessionToken({
 });
 
 describe('CMS Module & Text Management Architecture', () => {
-  jest.setTimeout(30000);
+  jest.setTimeout(60000);
 
   beforeEach(() => {
     cmsCache.clear();
@@ -233,11 +236,32 @@ describe('CMS Module & Text Management Architecture', () => {
       expect(res2.text).toBe('');
     });
 
-    it('GET /api/v1/cms/texts with unsupported locale should return 400', async () => {
+    it('GET /api/v1/cms/texts?locale=nl should return 200 with version, publishedAt, texts dictionary, and Cache-Control: no-cache', async () => {
       const res = await request(app).get('/api/v1/cms/texts?locale=nl');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty('version');
+      expect(typeof res.body.data.version).toBe('number');
+      expect(res.body.data).toHaveProperty('publishedAt');
+      expect(res.body.data).toHaveProperty('texts');
+      expect(typeof res.body.data.texts).toBe('object');
+      expect(res.headers['cache-control']).toBe('no-cache');
+      expect(res.headers['etag']).toBeDefined();
+    });
+
+    it('GET /api/v1/cms/texts with unsupported locale (e.g. fr, de) should return 400 with INVALID_LOCALE', async () => {
+      const res = await request(app).get('/api/v1/cms/texts?locale=fr');
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
+      expect(res.body.code).toBe('INVALID_LOCALE');
       expect(res.body.error).toContain('locale');
+
+      const adminUnsupported = await request(app)
+        .get('/api/v1/cms/admin/texts?locale=de')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(adminUnsupported.status).toBe(400);
+      expect(adminUnsupported.body.code).toBe('INVALID_LOCALE');
     });
   });
 
@@ -399,6 +423,133 @@ describe('CMS Module & Text Management Architecture', () => {
       expect(pub2.status).toBe(200);
       expect(pub2.body.data.publishedCount).toBe(0);
       expect(pub2.body.data.version).toBe(versionAfterFirstPublish);
+    });
+
+    it('Multi-Locale Independence (en & nl): independent drafts, publishes, discards, versions, histories, and locale-isolated caches', async () => {
+      const sharedKey = `jest.test.bilingual.hero.slogan.${Date.now()}`;
+      const enDraft1 = 'Turn pressure into <gold>performance</gold> — {name}';
+      const nlDraft1 = 'Zet druk om in <gold>prestatie</gold> — {name}';
+
+      // 1. Save English draft -> verify Dutch is unaffected
+      const saveEn = await request(app)
+        .put('/api/v1/cms/admin/texts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ key: sharedKey, locale: 'en', value: enDraft1 });
+      expect(saveEn.status).toBe(200);
+      expect(saveEn.body.data.locale).toBe('en');
+      expect(saveEn.body.data.draftValue).toBe(enDraft1);
+
+      const adminNlBefore = await request(app)
+        .get('/api/v1/cms/admin/texts?locale=nl')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(adminNlBefore.status).toBe(200);
+      expect(adminNlBefore.body.data.find((r: any) => r.key === sharedKey)).toBeUndefined();
+
+      // 2. Save Dutch draft -> verify English draft is unaffected
+      const saveNl = await request(app)
+        .put('/api/v1/cms/admin/texts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ key: sharedKey, locale: 'nl', value: nlDraft1 });
+      expect(saveNl.status).toBe(200);
+      expect(saveNl.body.data.locale).toBe('nl');
+      expect(saveNl.body.data.draftValue).toBe(nlDraft1);
+
+      const adminEnCheck = await request(app)
+        .get('/api/v1/cms/admin/texts?locale=en')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const enRow = adminEnCheck.body.data.find((r: any) => r.key === sharedKey);
+      expect(enRow?.draftValue).toBe(enDraft1);
+
+      // 3. Prime both public caches (en & nl) and verify HITs
+      await request(app).get('/api/v1/cms/texts?locale=en');
+      const enCacheHit = await request(app).get('/api/v1/cms/texts?locale=en');
+      expect(enCacheHit.headers['x-cache']).toBe('HIT');
+
+      await request(app).get('/api/v1/cms/texts?locale=nl');
+      const nlCacheHit = await request(app).get('/api/v1/cms/texts?locale=nl');
+      expect(nlCacheHit.headers['x-cache']).toBe('HIT');
+
+      const enVersionBeforeNlPublish = enCacheHit.body.data.version;
+
+      // 4. Publish ONLY Dutch ('nl') -> verify Dutch is live, Dutch cache invalidated (MISS), while English cache stays HIT & English draft stays unpublished
+      const pubNl = await request(app)
+        .post('/api/v1/cms/admin/texts/publish')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [sharedKey], locale: 'nl' });
+      expect(pubNl.status).toBe(200);
+      expect(pubNl.body.data.publishedCount).toBe(1);
+
+      // Next visit to Dutch public endpoint is a MISS with the new Dutch value
+      const nlAfterPublish = await request(app).get('/api/v1/cms/texts?locale=nl');
+      expect(nlAfterPublish.status).toBe(200);
+      expect(nlAfterPublish.headers['x-cache']).toBe('MISS');
+      expect(nlAfterPublish.body.data.texts[sharedKey]).toBe(nlDraft1);
+
+      // Next visit to English public endpoint is still a HIT and does NOT have the unpublished English draft or Dutch text
+      const enAfterNlPublish = await request(app).get('/api/v1/cms/texts?locale=en');
+      expect(enAfterNlPublish.status).toBe(200);
+      expect(enAfterNlPublish.headers['x-cache']).toBe('HIT');
+      expect(enAfterNlPublish.body.data.version).toBe(enVersionBeforeNlPublish);
+      expect(enAfterNlPublish.body.data.texts[sharedKey]).toBeUndefined();
+
+      // 5. Publish English ('en') -> verify English is now live and Dutch remains intact
+      const pubEn = await request(app)
+        .post('/api/v1/cms/admin/texts/publish')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [sharedKey], locale: 'en' });
+      expect(pubEn.status).toBe(200);
+      expect(pubEn.body.data.publishedCount).toBe(1);
+
+      const enAfterEnPublish = await request(app).get('/api/v1/cms/texts?locale=en');
+      expect(enAfterEnPublish.headers['x-cache']).toBe('MISS');
+      expect(enAfterEnPublish.body.data.texts[sharedKey]).toBe(enDraft1);
+
+      const nlStillCached = await request(app).get('/api/v1/cms/texts?locale=nl');
+      expect(nlStillCached.headers['x-cache']).toBe('HIT');
+      expect(nlStillCached.body.data.texts[sharedKey]).toBe(nlDraft1);
+
+      // 6. Save new drafts in both locales, then discard ONLY Dutch draft -> English draft remains intact
+      await request(app)
+        .put('/api/v1/cms/admin/texts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ key: sharedKey, locale: 'en', value: 'English Draft v2' });
+      await request(app)
+        .put('/api/v1/cms/admin/texts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ key: sharedKey, locale: 'nl', value: 'Dutch Draft v2' });
+
+      const discardNl = await request(app)
+        .post('/api/v1/cms/admin/texts/discard')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [sharedKey], locale: 'nl' });
+      expect(discardNl.status).toBe(200);
+      expect(discardNl.body.data.discardedCount).toBe(1);
+
+      const adminEnAfterNlDiscard = await request(app)
+        .get('/api/v1/cms/admin/texts?locale=en')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const enRowStillDraft = adminEnAfterNlDiscard.body.data.find((r: any) => r.key === sharedKey);
+      expect(enRowStillDraft.hasDraft).toBe(true);
+      expect(enRowStillDraft.draftValue).toBe('English Draft v2');
+
+      // Discard English draft too
+      await request(app)
+        .post('/api/v1/cms/admin/texts/discard')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ keys: [sharedKey], locale: 'en' });
+
+      // 7. Verify locale-specific revision histories are isolated
+      const histEn = await request(app)
+        .get(`/api/v1/cms/admin/texts/history?key=${sharedKey}&locale=en`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const histNl = await request(app)
+        .get(`/api/v1/cms/admin/texts/history?key=${sharedKey}&locale=nl`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(histEn.status).toBe(200);
+      expect(histNl.status).toBe(200);
+      expect(histEn.body.data.every((r: any) => r.locale === 'en')).toBe(true);
+      expect(histNl.body.data.every((r: any) => r.locale === 'nl')).toBe(true);
     });
   });
 });

@@ -9,7 +9,10 @@
     "start": "node dist/server.js",
     "test": "jest --colors",
     "test:audiobook": "jest src/__tests__/audiobook.test.ts --colors --runInBand",
-    "test:summary": "node scripts/printTestSummary.js"
+    "test:summary": "node scripts/printTestSummary.js",
+    "prisma:resolve": "prisma migrate resolve --applied 20261106_add_cms_texts",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:generate": "prisma generate"
   },
   "keywords": [],
   "author": "",

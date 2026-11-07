@@ -31,11 +31,15 @@ export function createCmsCacheMiddleware(options: CacheOptions = {}) {
     const cacheControlHeader = req.headers['cache-control'] || '';
     const bypassCache = cacheControlHeader.includes('no-cache') || req.query.fresh === 'true';
 
-    // Construct deterministic cache key
-    const sortedQuery = Object.keys(req.query)
+    // Construct deterministic, locale-aware cache key
+    const queryMap: Record<string, any> = { ...req.query };
+    if (req.path.startsWith('/texts') && queryMap.locale === undefined) {
+      queryMap.locale = 'en';
+    }
+    const sortedQuery = Object.keys(queryMap)
       .filter((k) => k !== 'fresh')
       .sort()
-      .map((k) => `${k}=${req.query[k]}`)
+      .map((k) => `${k}=${queryMap[k]}`)
       .join('&');
     const cacheKey = `cms:${req.baseUrl}${req.path}${sortedQuery ? `?${sortedQuery}` : ''}`;
 

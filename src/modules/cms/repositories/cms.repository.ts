@@ -117,8 +117,21 @@ export class CmsRepository {
       );`,
       `CREATE UNIQUE INDEX IF NOT EXISTS "cms_texts_key_locale_key" ON "cms_texts"("key", "locale");`,
       `CREATE INDEX IF NOT EXISTS "cms_texts_locale_idx" ON "cms_texts"("locale");`,
+      `CREATE INDEX IF NOT EXISTS "cms_texts_locale_has_draft_idx" ON "cms_texts"("locale", "has_draft");`,
       `CREATE INDEX IF NOT EXISTS "cms_text_revisions_key_locale_idx" ON "cms_text_revisions"("key", "locale");`,
+      `CREATE INDEX IF NOT EXISTS "cms_text_revisions_locale_idx" ON "cms_text_revisions"("locale");`,
       `CREATE INDEX IF NOT EXISTS "cms_text_revisions_created_at_idx" ON "cms_text_revisions"("created_at");`,
+      `DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations') THEN
+          INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count")
+          SELECT gen_random_uuid()::text, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', NOW(), '20261106_add_cms_texts', NULL, NULL, NOW(), 1
+          WHERE NOT EXISTS (SELECT 1 FROM "_prisma_migrations" WHERE "migration_name" = '20261106_add_cms_texts');
+
+          INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count")
+          SELECT gen_random_uuid()::text, 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0', NOW(), '20261107120000_cms_texts_locale_indexes', NULL, NULL, NOW(), 1
+          WHERE NOT EXISTS (SELECT 1 FROM "_prisma_migrations" WHERE "migration_name" = '20261107120000_cms_texts_locale_indexes');
+        END IF;
+      END $$;`,
     ];
 
     try {
@@ -553,27 +566,29 @@ export class CmsRepository {
       });
     }
 
-    // Add revision row
-    await prisma.cmsTextRevision.create({
-      data: {
-        key,
-        locale,
-        value,
-        action: 'SAVE_DRAFT',
-        actorEmail,
-        createdAt: now,
-      },
-    });
-
-    // Write to audit log
-    await prisma.socialAuditLog.create({
-      data: {
-        actor: actorEmail,
-        action: 'CMS_TEXT_DRAFT_SAVED',
-        entity: `CmsText [${locale}] ${key}`,
-        details: `Saved draft value: "${existing?.draftValue ?? 'none'}" -> "${value ?? 'null (original)'}"`,
-      },
-    }).catch(() => {});
+    // Add revision row and audit log in parallel
+    await Promise.all([
+      prisma.cmsTextRevision.create({
+        data: {
+          key,
+          locale,
+          value,
+          action: 'SAVE_DRAFT',
+          actorEmail,
+          createdAt: now,
+        },
+      }),
+      prisma.socialAuditLog
+        .create({
+          data: {
+            actor: actorEmail,
+            action: 'CMS_TEXT_DRAFT_SAVED',
+            entity: `CmsText [${locale}] ${key}`,
+            details: `Saved draft value: "${existing?.draftValue ?? 'none'}" -> "${value ?? 'null (original)'}"`,
+          },
+        })
+        .catch(() => {}),
+    ]);
 
     return textRow;
   }
@@ -607,25 +622,28 @@ export class CmsRepository {
         });
       }
 
-      await prisma.cmsTextRevision.create({
-        data: {
-          key,
-          locale,
-          value: existing.publishedValue,
-          action: 'DISCARD',
-          actorEmail,
-          createdAt: now,
-        },
-      });
-
-      await prisma.socialAuditLog.create({
-        data: {
-          actor: actorEmail,
-          action: 'CMS_TEXT_DRAFT_DISCARDED',
-          entity: `CmsText [${locale}] ${key}`,
-          details: `Discarded draft: "${existing.draftValue}" (reverted to published value: "${existing.publishedValue}")`,
-        },
-      }).catch(() => {});
+      await Promise.all([
+        prisma.cmsTextRevision.create({
+          data: {
+            key,
+            locale,
+            value: existing.publishedValue,
+            action: 'DISCARD',
+            actorEmail,
+            createdAt: now,
+          },
+        }),
+        prisma.socialAuditLog
+          .create({
+            data: {
+              actor: actorEmail,
+              action: 'CMS_TEXT_DRAFT_DISCARDED',
+              entity: `CmsText [${locale}] ${key}`,
+              details: `Discarded draft: "${existing.draftValue}" (reverted to published value: "${existing.publishedValue}")`,
+            },
+          })
+          .catch(() => {}),
+      ]);
 
       discardedCount++;
     }
@@ -661,37 +679,39 @@ export class CmsRepository {
     }
 
     for (const draft of pendingDrafts) {
-      await prisma.cmsText.update({
-        where: { id: draft.id },
-        data: {
-          publishedValue: draft.draftValue,
-          hasDraft: false,
-          draftValue: null,
-          publishedBy: actorEmail,
-          publishedAt: now,
-          updatedAt: now,
-        },
-      });
-
-      await prisma.cmsTextRevision.create({
-        data: {
-          key: draft.key,
-          locale,
-          value: draft.draftValue,
-          action: 'PUBLISH',
-          actorEmail,
-          createdAt: now,
-        },
-      });
-
-      await prisma.socialAuditLog.create({
-        data: {
-          actor: actorEmail,
-          action: 'CMS_TEXT_PUBLISHED',
-          entity: `CmsText [${locale}] ${draft.key}`,
-          details: `Published live text: "${draft.publishedValue ?? 'none'}" -> "${draft.draftValue ?? 'null (original)'}"`,
-        },
-      }).catch(() => {});
+      await Promise.all([
+        prisma.cmsText.update({
+          where: { id: draft.id },
+          data: {
+            publishedValue: draft.draftValue,
+            hasDraft: false,
+            draftValue: null,
+            publishedBy: actorEmail,
+            publishedAt: now,
+            updatedAt: now,
+          },
+        }),
+        prisma.cmsTextRevision.create({
+          data: {
+            key: draft.key,
+            locale,
+            value: draft.draftValue,
+            action: 'PUBLISH',
+            actorEmail,
+            createdAt: now,
+          },
+        }),
+        prisma.socialAuditLog
+          .create({
+            data: {
+              actor: actorEmail,
+              action: 'CMS_TEXT_PUBLISHED',
+              entity: `CmsText [${locale}] ${draft.key}`,
+              details: `Published live text: "${draft.publishedValue ?? 'none'}" -> "${draft.draftValue ?? 'null (original)'}"`,
+            },
+          })
+          .catch(() => {}),
+      ]);
     }
 
     // Increment version only when at least one pending draft was published

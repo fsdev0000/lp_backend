@@ -11,6 +11,7 @@ import {
   CmsTextInputSchema,
   CmsTextDiscardSchema,
   CmsTextPublishSchema,
+  isSupportedCmsLocale,
 } from '../validation/cms.validation';
 
 export class CmsAdminController {
@@ -224,19 +225,20 @@ export class CmsAdminController {
   }
 
   // ============================================================================
-  // CMS TEXTS ADMIN ENDPOINTS (Section 4)
+  // CMS TEXTS ADMIN ENDPOINTS (Section 4 — English 'en' & Dutch 'nl')
   // ============================================================================
 
   /**
-   * GET /api/v1/cms/admin/texts?locale=en
+   * GET /api/v1/cms/admin/texts?locale=en|nl
    */
   public async listTexts(req: Request, res: Response): Promise<void> {
     try {
-      const locale = (req.query.locale as string) || 'en';
-      if (locale !== 'en') {
+      const locale = req.query.locale !== undefined ? String(req.query.locale) : 'en';
+      if (!isSupportedCmsLocale(locale)) {
         res.status(400).json({
           success: false,
-          error: 'Currently only locale "en" is supported',
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
         });
         return;
       }
@@ -249,11 +251,24 @@ export class CmsAdminController {
 
   /**
    * PUT /api/v1/cms/admin/texts
-   * Saves a draft value for a text key
+   * Saves a draft value for a text key in 'en' or 'nl'
    */
   public async saveText(req: Request, res: Response): Promise<void> {
     try {
-      const parseResult = CmsTextInputSchema.safeParse(req.body);
+      const rawLocale = req.body?.locale !== undefined ? req.body.locale : (req.query.locale as string) || 'en';
+      if (!isSupportedCmsLocale(rawLocale)) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
+        });
+        return;
+      }
+
+      const parseResult = CmsTextInputSchema.safeParse({
+        ...req.body,
+        locale: rawLocale,
+      });
       if (!parseResult.success) {
         res.status(400).json({
           success: false,
@@ -274,25 +289,34 @@ export class CmsAdminController {
 
   /**
    * POST /api/v1/cms/admin/texts/discard
-   * Discards drafts for given keys
+   * Discards drafts for given keys in the selected locale ('en' or 'nl')
    */
   public async discardTexts(req: Request, res: Response): Promise<void> {
     try {
-      const parseResult = CmsTextDiscardSchema.safeParse(req.body);
+      const locale =
+        req.query.locale !== undefined
+          ? String(req.query.locale)
+          : req.body?.locale !== undefined
+          ? String(req.body.locale)
+          : 'en';
+      if (!isSupportedCmsLocale(locale)) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
+        });
+        return;
+      }
+
+      const parseResult = CmsTextDiscardSchema.safeParse({
+        ...req.body,
+        locale,
+      });
       if (!parseResult.success) {
         res.status(400).json({
           success: false,
           error: 'Validation failed',
           details: parseResult.error.format(),
-        });
-        return;
-      }
-
-      const locale = (req.query.locale as string) || (req.body?.locale as string) || 'en';
-      if (locale !== 'en') {
-        res.status(400).json({
-          success: false,
-          error: 'Currently only locale "en" is supported',
         });
         return;
       }
@@ -307,25 +331,34 @@ export class CmsAdminController {
 
   /**
    * POST /api/v1/cms/admin/texts/publish
-   * Publishes drafts (all or specific keys)
+   * Publishes drafts (all or specific keys) for the selected locale ('en' or 'nl')
    */
   public async publishTexts(req: Request, res: Response): Promise<void> {
     try {
-      const parseResult = CmsTextPublishSchema.safeParse(req.body || {});
+      const locale =
+        req.query.locale !== undefined
+          ? String(req.query.locale)
+          : req.body?.locale !== undefined
+          ? String(req.body.locale)
+          : 'en';
+      if (!isSupportedCmsLocale(locale)) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
+        });
+        return;
+      }
+
+      const parseResult = CmsTextPublishSchema.safeParse({
+        ...(req.body || {}),
+        locale,
+      });
       if (!parseResult.success) {
         res.status(400).json({
           success: false,
           error: 'Validation failed',
           details: parseResult.error.format(),
-        });
-        return;
-      }
-
-      const locale = (req.query.locale as string) || (req.body?.locale as string) || 'en';
-      if (locale !== 'en') {
-        res.status(400).json({
-          success: false,
-          error: 'Currently only locale "en" is supported',
         });
         return;
       }
@@ -339,7 +372,7 @@ export class CmsAdminController {
   }
 
   /**
-   * GET /api/v1/cms/admin/texts/history?key=...&locale=en
+   * GET /api/v1/cms/admin/texts/history?key=...&locale=en|nl
    */
   public async getTextHistory(req: Request, res: Response): Promise<void> {
     try {
@@ -352,11 +385,12 @@ export class CmsAdminController {
         return;
       }
 
-      const locale = (req.query.locale as string) || 'en';
-      if (locale !== 'en') {
+      const locale = req.query.locale !== undefined ? String(req.query.locale) : 'en';
+      if (!isSupportedCmsLocale(locale)) {
         res.status(400).json({
           success: false,
-          error: 'Currently only locale "en" is supported',
+          code: 'INVALID_LOCALE',
+          error: 'Unsupported locale. Supported locales are "en" and "nl".',
         });
         return;
       }

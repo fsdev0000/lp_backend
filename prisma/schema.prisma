@@ -792,6 +792,7 @@ model CmsText {
 
   @@unique([key, locale])
   @@index([locale])
+  @@index([locale, hasDraft])
   @@map("cms_texts")
 }
 
@@ -805,6 +806,7 @@ model CmsTextRevision {
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([key, locale])
+  @@index([locale])
   @@index([createdAt])
   @@map("cms_text_revisions")
 }

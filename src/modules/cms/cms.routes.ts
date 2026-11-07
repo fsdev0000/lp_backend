@@ -17,10 +17,16 @@ cmsRouter.get(
   cmsPublicController.getBootstrap
 );
 
-// Public CMS texts (published strings dictionary with version; no-cache with ETag validation)
+// Public CMS texts (published strings dictionary with version; locale-isolated caching with ETag validation)
 cmsRouter.get(
   '/texts',
-  createCmsCacheMiddleware({ cacheControl: 'no-cache', tags: ['texts'] }),
+  createCmsCacheMiddleware({
+    cacheControl: 'no-cache',
+    tags: (req) => {
+      const locale = req.query.locale !== undefined ? String(req.query.locale) : 'en';
+      return ['texts', `texts:${locale}`];
+    },
+  }),
   cmsPublicController.getTexts
 );
 

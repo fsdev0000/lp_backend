@@ -191,15 +191,14 @@ export class CmsService {
 
   public async discardTextDrafts(keys: string[], locale: string, actorEmail: string) {
     const result = await this.repository.discardTextDrafts(keys, locale, actorEmail);
-    cmsCache.invalidateTag('texts');
+    // Invalidate only the relevant locale's texts cache tag so other locales remain cached
     cmsCache.invalidateTag(`texts:${locale}`);
     return result;
   }
 
   public async publishTextDrafts(keys: string[] | undefined, locale: string, actorEmail: string) {
     const result = await this.repository.publishTextDrafts(keys, locale, actorEmail);
-    // Invalidate cache immediately on publish
-    cmsCache.invalidateTag('texts');
+    // Invalidate only the relevant locale's texts cache tag so other locales remain cached
     cmsCache.invalidateTag(`texts:${locale}`);
     return result;
   }

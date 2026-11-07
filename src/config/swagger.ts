@@ -2488,15 +2488,15 @@ const swaggerOptions = {
 
       '/cms/texts': {
         get: {
-          summary: 'Get Published CMS Texts (Inline Editor)',
-          description: 'Returns published website text strings dictionary along with version metadata. Always sends Cache-Control: no-cache with ETag for conditional revalidation.',
+          summary: 'Get Published CMS Texts (English & Dutch)',
+          description: 'Returns published website text strings dictionary along with version metadata for the requested locale ("en" or "nl"). Always sends Cache-Control: no-cache with ETag for conditional revalidation.',
           tags: ['CMS & Page Content'],
           parameters: [
             {
               in: 'query',
               name: 'locale',
-              schema: { type: 'string', default: 'en' },
-              description: 'Language locale code (only "en" is currently supported)',
+              schema: { type: 'string', enum: ['en', 'nl'], default: 'en' },
+              description: 'Language locale code ("en" for English, "nl" for Dutch)',
             },
           ],
           responses: {
@@ -2951,26 +2951,27 @@ const swaggerOptions = {
 
       '/cms/admin/texts': {
         get: {
-          summary: 'List All CMS Texts with Draft Status (Admin)',
-          description: 'Returns all text rows for a given locale including hasDraft, draftValue, and publishedValue flags.',
+          summary: 'List All CMS Texts with Draft Status (Admin — en & nl)',
+          description: 'Returns all text rows for a given locale ("en" or "nl") including hasDraft, draftValue, and publishedValue flags.',
           tags: ['CMS & Page Content'],
           security: [{ bearerAuth: [] }],
           parameters: [
             {
               in: 'query',
               name: 'locale',
-              schema: { type: 'string', default: 'en' },
-              description: 'Language locale code (default: en)',
+              schema: { type: 'string', enum: ['en', 'nl'], default: 'en' },
+              description: 'Language locale code ("en" or "nl")',
             },
           ],
           responses: {
             200: { description: 'List of text entries' },
+            400: { description: 'Unsupported locale' },
             401: { description: 'Unauthorized' },
           },
         },
         put: {
-          summary: 'Save Text Draft (Admin)',
-          description: 'Saves or updates draft text for a key without affecting the live website until published.',
+          summary: 'Save Text Draft (Admin — en & nl)',
+          description: 'Saves or updates draft text for a key in the specified locale ("en" or "nl") without affecting the live website until published.',
           tags: ['CMS & Page Content'],
           security: [{ bearerAuth: [] }],
           requestBody: {
@@ -2982,7 +2983,7 @@ const swaggerOptions = {
                   required: ['key', 'value'],
                   properties: {
                     key: { type: 'string', example: 'home.hero.title' },
-                    locale: { type: 'string', default: 'en' },
+                    locale: { type: 'string', enum: ['en', 'nl'], default: 'en' },
                     value: { type: 'string', nullable: true, example: 'Ambition creates <gold>pressure</gold>.' },
                   },
                 },
@@ -2991,7 +2992,7 @@ const swaggerOptions = {
           },
           responses: {
             200: { description: 'Draft text saved successfully' },
-            400: { description: 'Validation failed' },
+            400: { description: 'Validation failed or unsupported locale' },
             401: { description: 'Unauthorized' },
           },
         },
@@ -2999,8 +3000,8 @@ const swaggerOptions = {
 
       '/cms/admin/texts/discard': {
         post: {
-          summary: 'Discard Text Drafts (Admin)',
-          description: 'Discards uncommitted drafts for specified keys, reverting them to their currently published values.',
+          summary: 'Discard Text Drafts (Admin — en & nl)',
+          description: 'Discards uncommitted drafts for specified keys in the selected locale ("en" or "nl"), reverting them to their currently published values and invalidating the locale cache tag.',
           tags: ['CMS & Page Content'],
           security: [{ bearerAuth: [] }],
           requestBody: {
@@ -3012,7 +3013,7 @@ const swaggerOptions = {
                   required: ['keys'],
                   properties: {
                     keys: { type: 'array', items: { type: 'string' }, example: ['home.hero.title'] },
-                    locale: { type: 'string', default: 'en' },
+                    locale: { type: 'string', enum: ['en', 'nl'], default: 'en' },
                   },
                 },
               },
@@ -3020,7 +3021,7 @@ const swaggerOptions = {
           },
           responses: {
             200: { description: 'Drafts discarded successfully' },
-            400: { description: 'Validation failed' },
+            400: { description: 'Validation failed or unsupported locale' },
             401: { description: 'Unauthorized' },
           },
         },
@@ -3028,8 +3029,8 @@ const swaggerOptions = {
 
       '/cms/admin/texts/publish': {
         post: {
-          summary: 'Publish Text Drafts & Evict Cache (Admin)',
-          description: 'Publishes drafts (all or specific keys), increments text version, writes revisions, and purges texts cache tags.',
+          summary: 'Publish Text Drafts & Evict Locale Cache (Admin — en & nl)',
+          description: 'Publishes drafts (all or specific keys) for the selected locale ("en" or "nl"), increments the locale text version (no-op if 0 pending drafts), writes revisions, and purges the locale texts cache tag (`texts:en` or `texts:nl`).',
           tags: ['CMS & Page Content'],
           security: [{ bearerAuth: [] }],
           requestBody: {
@@ -3039,16 +3040,16 @@ const swaggerOptions = {
                 schema: {
                   type: 'object',
                   properties: {
-                    keys: { type: 'array', items: { type: 'string' }, description: 'Omit or leave empty to publish all drafts' },
-                    locale: { type: 'string', default: 'en' },
+                    keys: { type: 'array', items: { type: 'string' }, description: 'Omit or leave empty to publish all drafts for the locale' },
+                    locale: { type: 'string', enum: ['en', 'nl'], default: 'en' },
                   },
                 },
               },
             },
           },
           responses: {
-            200: { description: 'Texts published successfully and cache purged' },
-            400: { description: 'Validation failed' },
+            200: { description: 'Texts published successfully and locale cache purged' },
+            400: { description: 'Validation failed or unsupported locale' },
             401: { description: 'Unauthorized' },
           },
         },
@@ -3056,17 +3057,17 @@ const swaggerOptions = {
 
       '/cms/admin/texts/history': {
         get: {
-          summary: 'Get Text Revision History (Admin)',
-          description: 'Returns chronological audit history of all draft saves, discards, and publishes for a key.',
+          summary: 'Get Text Revision History (Admin — en & nl)',
+          description: 'Returns chronological audit history of all draft saves, discards, and publishes for a key and locale ("en" or "nl").',
           tags: ['CMS & Page Content'],
           security: [{ bearerAuth: [] }],
           parameters: [
             { in: 'query', name: 'key', required: true, schema: { type: 'string' } },
-            { in: 'query', name: 'locale', schema: { type: 'string', default: 'en' } },
+            { in: 'query', name: 'locale', schema: { type: 'string', enum: ['en', 'nl'], default: 'en' } },
           ],
           responses: {
             200: { description: 'Revision history entries' },
-            400: { description: 'Key parameter required' },
+            400: { description: 'Key parameter required or unsupported locale' },
             401: { description: 'Unauthorized' },
           },
         },
