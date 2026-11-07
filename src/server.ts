@@ -76,6 +76,8 @@ const corsOptions: cors.CorsOptions = {
     'x-reading-time',
     'x-author',
     'x-published',
+    'X-Internal-Key',
+    'x-internal-key',
   ],
   credentials: true,
 };
@@ -207,6 +209,15 @@ app.use('/api/integrations/tiktok', tiktokRoutes);
 import { cmsRouter } from './modules/cms';
 app.use('/api/cms', cmsRouter);
 app.use('/api/v1/cms', cmsRouter);
+
+import { internalAutomationRouter } from './modules/automation/internal.routes';
+import { crmAutomationRouter } from './modules/automation/crm.routes';
+app.use('/internal', internalAutomationRouter);
+app.use('/api/v1/internal', internalAutomationRouter);
+app.use('/api/v1/social-crm', crmAutomationRouter);
+app.use('/api/social-crm', crmAutomationRouter);
+app.use('/api/v1', crmAutomationRouter);
+app.use('/api', crmAutomationRouter);
 
 // Universal TikTok Developer signature file verification handler
 // Catches ANY request containing tiktok verification token with or without trailing slash

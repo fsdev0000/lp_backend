@@ -810,3 +810,309 @@ model CmsTextRevision {
   @@index([createdAt])
   @@map("cms_text_revisions")
 }
+
+// ============================================================================
+// SOCIAL CRM CONTENT AUTOMATION (PLAN SECTION 5)
+// ============================================================================
+
+enum Platform {
+  LINKEDIN
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+  X
+  MEDIUM
+  LINKEDIN_NEWSLETTER
+  INSPO
+  WEBSITE
+}
+
+enum PublishMode {
+  AUTO
+  MANUAL
+}
+
+enum PostStatus {
+  BLOCKED            // missing/ambiguous file, invalid spec, unknown channel
+  PENDING_REVIEW     // waiting for Lionel
+  CHANGES_REQUESTED  // Lionel asked for edits
+  APPROVED           // ready; publisher picks it up at scheduledAt
+  PUBLISHING         // locked by publisher
+  PROCESSING         // platform still processing (IG container, TikTok, YouTube)
+  PUBLISHED
+  FAILED             // retries exhausted or non-retryable error
+  MISSED             // approved too late (past grace window)
+  REJECTED           // Lionel: do not publish
+  SKIPPED            // calendar says "No video posted" etc.
+  CANCELLED          // row removed/changed before publish
+  MANUAL_DONE        // manual channel confirmed done in CRM
+}
+
+enum MediaStatus {
+  PENDING_UPLOAD
+  READY
+  INVALID
+}
+
+enum ReviewAction {
+  SUBMITTED
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+  COMMENT
+  RESUBMITTED
+}
+
+model FolderRule {
+  id                 String      @id @default(uuid())
+  drivePath          String      @unique @map("drive_path") // e.g. "01_Linkedin/01_Quotes"
+  platform           Platform
+  postKind           String      @map("post_kind")          // Image, Video, Reel, Carousel, Article
+  contentTypeAliases String[]    @default([]) @map("content_type_aliases") // e.g. ["quote", "quotes"]
+  mode               PublishMode @default(AUTO)
+  expectedFiles      String      @map("expected_files")
+  isActive           Boolean     @default(true) @map("is_active")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  @@index([platform])
+  @@map("crm_folder_rules")
+}
+
+model SocialAccount {
+  id               String    @id @default(uuid())
+  platform         Platform
+  label            String    // "LinkedIn Lionel personal", "TikTok NL"
+  externalId       String    @map("external_id") // person URN, org URN, IG user id, channel id, open_id
+  tokenEncrypted   String?   @db.Text @map("token_encrypted") // AES-GCM with key from env
+  refreshEncrypted String?   @db.Text @map("refresh_encrypted")
+  tokenExpiresAt   DateTime? @map("token_expires_at")
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  posts            Post[]
+
+  @@index([platform, isActive])
+  @@map("crm_social_accounts")
+}
+
+model ChannelAlias {
+  id        String      @id @default(uuid())
+  alias     String      @unique // normalised, e.g. "tiktok nl", "linkedin"
+  platform  Platform
+  accountId String?     @map("account_id") // null for MANUAL channels
+  mode      PublishMode
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  @@map("crm_channel_aliases")
+}
+
+model ContentItem {
+  id           String   @id @default(uuid())
+  sheetId      String   @map("sheet_id")
+  sheetTab     String   @map("sheet_tab")
+  rowNumber    Int      @map("row_number")
+  rowKey       String   @unique @map("row_key") // sha256(sheetId|date|time|channelRaw|subjectNormalised)
+  rowHash      String   @map("row_hash")        // sha256 of all cell values; detects edits
+  scheduledAt  DateTime @map("scheduled_at")    // UTC, from calendar date+time in CALENDAR_TZ
+  channelRaw   String   @map("channel_raw")
+  contentType  String?  @map("content_type")
+  subject      String?
+  fileLocation String?  @map("file_location")
+  rawRow       Json     @map("raw_row")
+  category     String?  // Founder Pressure, Leadership, ...
+  lastSeenAt   DateTime @map("last_seen_at")
+  unseenRuns   Int      @default(0) @map("unseen_runs")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  posts        Post[]
+
+  @@index([scheduledAt])
+  @@index([lastSeenAt])
+  @@map("crm_content_items")
+}
+
+model Post {
+  id             String      @id @default(uuid())
+  contentItemId  String      @map("content_item_id")
+  accountId      String?     @map("account_id")
+  platform       Platform
+  mode           PublishMode
+  status         PostStatus
+  blockedReason  String?     @db.Text @map("blocked_reason")
+  scheduledAt    DateTime    @map("scheduled_at")
+  title          String?     // YouTube title
+  caption        String?     @db.Text
+  hashtags       String[]    @default([])
+  options        Json        @default("{}") // playlistId, privacy, tiktok flags, IG mediaType (REELS/CAROUSEL/IMAGE)
+  captionSource  String?     @map("caption_source") // DRIVE_FILE | CALENDAR | GEMINI
+  revision       Int         @default(1)
+  approvedById   String?     @map("approved_by_id")
+  approvedAt     DateTime?   @map("approved_at")
+  attemptCount   Int         @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?   @map("next_attempt_at")
+  lockedAt       DateTime?   @map("locked_at")
+  lockedBy       String?     @map("locked_by")
+  platformPostId String?     @map("platform_post_id")
+  platformUrl    String?     @map("platform_url")
+  processingRef  String?     @map("processing_ref") // IG container id / TikTok publish_id
+  publishedAt    DateTime?   @map("published_at")
+  lastError      String?     @db.Text @map("last_error")
+  idempotencyKey String      @unique @map("idempotency_key") // contentItemId|platform|accountId
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  contentItem    ContentItem        @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  account        SocialAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  media          PostMedia[]
+  revisions      PostRevision[]
+  reviewEvents   ReviewEvent[]
+  attempts       PublishAttempt[]
+  metricSnapshots PostMetricSnapshot[]
+
+  @@index([status, scheduledAt])
+  @@index([platform, status])
+  @@index([contentItemId])
+  @@map("crm_posts")
+}
+
+model MediaAsset {
+  id              String      @id @default(uuid())
+  driveFileId     String      @map("drive_file_id")
+  checksumMd5     String      @map("checksum_md5")
+  fileName        String      @map("file_name")
+  mimeType        String      @map("mime_type")
+  sizeBytes       BigInt      @map("size_bytes")
+  durationSec     Float?      @map("duration_sec")
+  width           Int?
+  height          Int?
+  storageProvider String      @default("supabase") @map("storage_provider")
+  bucket          String
+  objectKey       String?     @map("object_key")
+  status          MediaStatus
+  invalidReason   String?     @db.Text @map("invalid_reason")
+  deleteAfter     DateTime?   @map("delete_after")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  postMedia       PostMedia[]
+
+  @@unique([driveFileId, checksumMd5])
+  @@index([checksumMd5])
+  @@index([deleteAfter])
+  @@map("crm_media_assets")
+}
+
+model PostMedia {
+  postId   String @map("post_id")
+  assetId  String @map("asset_id")
+  position Int    @default(0)
+  role     String // MAIN | THUMBNAIL | COVER | CAPTION_SOURCE
+  revision Int    @default(1)
+
+  post     Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  asset    MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@id([postId, assetId, role, revision])
+  @@index([postId, revision])
+  @@map("crm_post_media")
+}
+
+model PostRevision {
+  id            String   @id @default(uuid())
+  postId        String   @map("post_id")
+  revision      Int
+  caption       String?  @db.Text
+  title         String?
+  mediaSnapshot Json     @map("media_snapshot")
+  createdById   String?  @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  post          Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, revision])
+  @@map("crm_post_revisions")
+}
+
+model ReviewEvent {
+  id        String       @id @default(uuid())
+  postId    String       @map("post_id")
+  revision  Int
+  action    ReviewAction
+  comment   String?      @db.Text
+  actorId   String       @map("actor_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  post      Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@map("crm_review_events")
+}
+
+model PublishAttempt {
+  id         String    @id @default(uuid())
+  postId     String    @map("post_id")
+  attemptNo  Int       @map("attempt_no")
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  httpStatus Int?      @map("http_status")
+  errorCode  String?   @map("error_code")
+  response   Json?
+
+  post       Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, attemptNo])
+  @@map("crm_publish_attempts")
+}
+
+model Notification {
+  id           String    @id @default(uuid())
+  type         String
+  postId       String?   @map("post_id")
+  recipients   String[]
+  cc           String[]  @default([])
+  subject      String
+  body         String    @db.Text
+  dedupeKey    String    @unique @map("dedupe_key")
+  status       String    @default("PENDING") // PENDING | SENT | FAILED
+  attemptCount Int       @default(0) @map("attempt_count")
+  sentAt       DateTime? @map("sent_at")
+  error        String?   @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([status, createdAt])
+  @@index([postId])
+  @@map("crm_notifications")
+}
+
+model JobRun {
+  id         String    @id @default(uuid())
+  workflow   String
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  stats      Json?
+  error      String?   @db.Text
+
+  @@index([workflow, startedAt])
+  @@map("crm_job_runs")
+}
+
+model PostMetricSnapshot {
+  id          String   @id @default(uuid())
+  postId      String   @map("post_id")
+  capturedAt  DateTime @map("captured_at")
+  views       Int?
+  reach       Int?
+  impressions Int?
+  likes       Int?
+  comments    Int?
+  shares      Int?
+  saves       Int?
+  raw         Json?
+
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, capturedAt])
+  @@map("crm_post_metric_snapshots")
+}
