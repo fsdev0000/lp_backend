@@ -127,12 +127,34 @@ export class LinkedInController {
         : rawTarget === 'page' || rawTarget === 'member'
         ? (rawTarget as LinkedInOAuthTarget)
         : undefined;
+      const syncLive = req.query.sync === 'true' || req.query.refresh === 'true';
 
-      const status = await this.service.getStatus(target);
+      const status = await this.service.getStatus(target, syncLive);
       res.status(200).json({ success: true, ...status });
     } catch (error: any) {
       console.error('[LinkedInController] getStatus error:', error);
       res.status(500).json({ success: false, error: error?.message || 'Failed to get LinkedIn status' });
+    }
+  };
+
+  /**
+   * Internally verifies/refreshes LinkedIn OAuth credentials, syncs profile into DB, and returns structured profile
+   * GET /api/v1/social/linkedin/profile
+   * GET /api/v1/social/linkedin/page/profile
+   */
+  public getProfile = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const isPageRoute = req.path.includes('/page/');
+      const rawTarget = ((req.query.target as string) || '').toLowerCase().trim();
+      const target: LinkedInOAuthTarget = isPageRoute || rawTarget === 'page' ? 'page' : 'member';
+
+      const profile = await this.service.getProfile(target);
+      res.status(200).json({ success: true, data: profile });
+    } catch (error: any) {
+      console.error('[LinkedInController] getProfile error:', error);
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to fetch LinkedIn profile' });
     }
   };
 
@@ -159,7 +181,7 @@ export class LinkedInController {
   };
 
   /**
-   * Directly posts to LinkedIn
+   * Directly posts to LinkedIn using internal DB credentials, persists post in DB, and returns structured result
    * POST /api/v1/social/linkedin/share
    */
   public publishDirect = async (req: Request, res: Response): Promise<void> => {
@@ -172,19 +194,63 @@ export class LinkedInController {
         return;
       }
 
-      const { text, title, mediaUrl, mediaType } = req.body || {};
-      if (!text || !text.trim()) {
+      const { text, title, hook, body, mediaUrl, mediaType, tags } = req.body || {};
+      const resolvedText = (text || body || '').trim();
+      if (!resolvedText) {
         res.status(400).json({ success: false, error: 'Text content is required to publish to LinkedIn' });
         return;
       }
 
-      const result = await this.service.publishDirect({ text, title, mediaUrl, mediaType });
+      const result = await this.service.publishDirect({
+        text: resolvedText,
+        title,
+        hook,
+        body,
+        mediaUrl,
+        mediaType,
+        tags,
+      });
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       console.error('[LinkedInController] publishDirect error:', error);
       res
         .status(error?.statusCode || 500)
         .json({ success: false, error: error?.message || 'Failed to publish post to LinkedIn' });
+    }
+  };
+
+  /**
+   * Retrieves LinkedIn posts stored in DB and optionally syncs live engagement metrics from LinkedIn API
+   * GET /api/v1/social/linkedin/posts
+   */
+  public getPosts = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const sync = req.query.sync !== 'false';
+      const limit = Number(req.query.limit) || 25;
+      const result = await this.service.getPosts({ sync, limit });
+      res.status(200).json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('[LinkedInController] getPosts error:', error);
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to fetch LinkedIn posts' });
+    }
+  };
+
+  /**
+   * Full internal synchronization of LinkedIn profile, posts, and company analytics into DB
+   * POST /api/v1/social/linkedin/sync
+   */
+  public syncAll = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const range = (req.body?.range as string) || (req.query.range as string) || '30d';
+      const result = await this.service.syncAll(range);
+      res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('[LinkedInController] syncAll error:', error);
+      res
+        .status(error?.statusCode || 500)
+        .json({ success: false, error: error?.message || 'Failed to synchronize LinkedIn data' });
     }
   };
 

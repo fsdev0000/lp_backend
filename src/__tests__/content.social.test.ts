@@ -130,6 +130,49 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       }
       return { count: 1 };
     }) as any);
+    jest.spyOn(socialPrisma.socialAccountConnection, 'update').mockImplementation((async ({ where, data }: any) => {
+      const existing = mockConnections.get(where.platform);
+      if (!existing) throw new Error(`Connection not found: ${where.platform}`);
+      const updated = { ...existing, ...data, updatedAt: new Date() };
+      mockConnections.set(where.platform, updated);
+      return updated;
+    }) as any);
+    jest.spyOn(analyticsPrisma.socialAccountConnection, 'update').mockImplementation((async ({ where, data }: any) => {
+      const existing = mockConnections.get(where.platform);
+      if (!existing) return null;
+      const updated = { ...existing, ...data, updatedAt: new Date() };
+      mockConnections.set(where.platform, updated);
+      return updated;
+    }) as any);
+    jest.spyOn(socialPrisma.socialPost, 'create').mockImplementation((async ({ data }: any) => {
+      const id = data.id || `post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const record = {
+        id,
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockPosts.set(id, record);
+      return record;
+    }) as any);
+    jest.spyOn(socialPrisma.socialPost, 'findMany').mockImplementation((async ({ where }: any = {}) => {
+      return Array.from(mockPosts.values()).filter((p) => {
+        if (where?.platform && p.platform !== where.platform) return false;
+        if (where?.status && p.status !== where.status) return false;
+        return true;
+      });
+    }) as any);
+    jest.spyOn(socialPrisma.socialPost, 'update').mockImplementation((async ({ where, data }: any) => {
+      const existing = mockPosts.get(where.id);
+      if (!existing) throw new Error(`Not found: ${where.id}`);
+      const updated = { ...existing, ...data, updatedAt: new Date() };
+      mockPosts.set(where.id, updated);
+      return updated;
+    }) as any);
+    jest.spyOn(socialPrisma.systemConfig, 'upsert').mockResolvedValue({ id: 'cfg-1' } as any);
+    jest.spyOn(socialPrisma.systemConfig, 'findUnique').mockResolvedValue(null as any);
+    jest.spyOn(socialPrisma.systemConfig, 'deleteMany').mockResolvedValue({ count: 1 } as any);
+    jest.spyOn(analyticsPrisma.systemConfig, 'upsert').mockResolvedValue({ id: 'cfg-2' } as any);
     jest.spyOn(socialPrisma.socialAuditLog, 'create').mockResolvedValue({ id: 'audit-social' } as any);
   });
 
@@ -565,6 +608,103 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       expect(spyCompany).toHaveBeenCalledWith('90d', true);
       expect(spyCompany).toHaveBeenCalledWith('all', true);
       expect(spyPosts).toHaveBeenCalledWith(true);
+    });
+
+    it('Item 15: Internal LinkedIn Auth & DB Persistence — auto-refreshes expiring token, publishes via internal DB credentials, persists post & metrics into DB, and returns structured response', async () => {
+      process.env.LINKEDIN_PUBLISHING_ENABLED = 'true';
+      process.env.LINKEDIN_CLIENT_ID = '86mkbep31a3f0n';
+      process.env.LINKEDIN_CLIENT_SECRET = 'secret-test';
+
+      // Seed an expiring member connection (expires in 1 minute -> triggers automatic internal refresh)
+      mockConnections.set('LINKEDIN', {
+        id: 'conn-member-1',
+        platform: 'LINKEDIN',
+        accountName: 'Lionel Eersteling',
+        accountUrn: 'urn:li:person:y9cZ96RKv_',
+        accessToken: 'expiring-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 60 * 1000),
+        scopes: ['openid', 'profile', 'email', 'w_member_social'],
+        status: 'HEALTHY',
+        followersCount: 0,
+      });
+
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
+        const url = String(input);
+        if (url.includes('/oauth/v2/accessToken')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              access_token: 'refreshed-internal-access-token',
+              expires_in: 5184000,
+              refresh_token: 'new-refresh-token',
+              refresh_token_expires_in: 31536000,
+            }),
+          } as any;
+        }
+        if (url.includes('/rest/posts')) {
+          return {
+            ok: true,
+            status: 201,
+            headers: {
+              get: (name: string) =>
+                name.toLowerCase() === 'x-restli-id' ? 'urn:li:share:999888777' : null,
+            },
+            json: async () => ({ id: 'urn:li:share:999888777' }),
+          } as any;
+        }
+        if (url.includes('/rest/socialMetadata/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              reactionSummaries: {
+                LIKE: { count: 14 },
+                PRAISE: { count: 5 },
+              },
+              commentSummary: { count: 6 },
+            }),
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      });
+
+      // 1. Frontend calls POST /api/v1/social/linkedin/share WITHOUT any LinkedIn token
+      const shareRes = await request(app)
+        .post('/api/v1/social/linkedin/share')
+        .set('x-api-key', TEST_API_KEY)
+        .send({
+          title: 'Internal Auth Architecture Test',
+          text: 'Testing internal LinkedIn OAuth management and DB persistence.',
+          tags: ['Leadership', 'Performance'],
+        });
+
+      expect(shareRes.status).toBe(200);
+      expect(shareRes.body.success).toBe(true);
+      expect(shareRes.body.data.postUrn).toBe('urn:li:share:999888777');
+      expect(shareRes.body.data.post).toBeTruthy();
+      expect(shareRes.body.data.post.status).toBe('PUBLISHED');
+      expect(shareRes.body.data.post.platformPostId).toBe('urn:li:share:999888777');
+
+      // 2. Verify token was refreshed and persisted in DB
+      const updatedConn = mockConnections.get('LINKEDIN');
+      expect(updatedConn.accessToken).toBe('refreshed-internal-access-token');
+      expect(updatedConn.refreshToken).toBe('new-refresh-token');
+
+      // 3. Frontend calls GET /api/v1/social/linkedin/posts to retrieve DB posts with live synced metrics
+      const postsRes = await request(app)
+        .get('/api/v1/social/linkedin/posts')
+        .set('x-api-key', TEST_API_KEY);
+
+      expect(postsRes.status).toBe(200);
+      expect(postsRes.body.success).toBe(true);
+      expect(postsRes.body.total).toBe(1);
+      expect(postsRes.body.posts[0].platformPostId).toBe('urn:li:share:999888777');
+      expect(postsRes.body.posts[0].metrics.reactions).toBe(19);
+      expect(postsRes.body.posts[0].metrics.comments).toBe(6);
+
+      fetchSpy.mockRestore();
     });
   });
 });

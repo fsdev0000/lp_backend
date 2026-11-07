@@ -53,6 +53,15 @@ export interface LinkedInPostResult {
   postUrl: string | null;
 }
 
+export interface LinkedInPostEngagement {
+  urn: string;
+  reactions: number;
+  comments: number;
+  reposts: number;
+  impressions: number | null;
+  clicks: number | null;
+}
+
 export type LinkedInOAuthTarget = 'page' | 'member';
 
 function extractRealLinkedInUrn(raw?: string | null): string | null {
@@ -158,6 +167,99 @@ export class LinkedInAdapter {
     }
 
     return (await response.json()) as LinkedInTokenResponse;
+  }
+
+  /**
+   * Refreshes an expired or expiring LinkedIn OAuth access token using the stored refresh token
+   */
+  public async refreshAccessToken(
+    refreshToken: string,
+    target: LinkedInOAuthTarget = 'member'
+  ): Promise<LinkedInTokenResponse> {
+    const creds = this.getCredentials(target);
+    const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
+
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken.trim(),
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[LinkedInAdapter] Token refresh failed:', response.status, errText);
+      throw new Error(`LinkedIn token refresh error ${response.status}: ${errText}`);
+    }
+
+    return (await response.json()) as LinkedInTokenResponse;
+  }
+
+  /**
+   * Internally resolves a valid LinkedIn DB connection, automatically refreshing the access token
+   * and persisting the updated token to the database if expired or expiring within 5 minutes.
+   */
+  public async ensureValidConnection(target: LinkedInOAuthTarget = 'member', forceRefresh = false) {
+    const conn =
+      target === 'page' ? await this.getActivePageConnection() : await this.getActiveConnection();
+    if (!conn) return null;
+
+    const now = Date.now();
+    const bufferMs = 5 * 60 * 1000; // 5-minute safety buffer
+    const isExpiringOrExpired = Boolean(
+      conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() - now <= bufferMs
+    );
+
+    if ((forceRefresh || isExpiringOrExpired) && conn.refreshToken) {
+      try {
+        const refreshed = await this.refreshAccessToken(conn.refreshToken, target);
+        const platform = target === 'page' ? LINKEDIN_PAGE_PLATFORM : LINKEDIN_MEMBER_PLATFORM;
+        const updatedConn = await this.saveConnection({
+          platform,
+          accountName: conn.accountName || 'Lionel Eersteling',
+          accountUrn: conn.accountUrn || '',
+          accountEmail: conn.accountEmail || undefined,
+          profilePictureUrl: conn.profilePictureUrl || undefined,
+          accessToken: refreshed.access_token,
+          refreshToken: refreshed.refresh_token || conn.refreshToken,
+          expiresInSeconds: refreshed.expires_in || 5184000,
+          refreshTokenExpiresIn: refreshed.refresh_token_expires_in,
+          scopes: refreshed.scope ? refreshed.scope.split(/[\s,]+/).filter(Boolean) : conn.scopes,
+          followersCount: conn.followersCount,
+          metadata:
+            conn.metadata && typeof conn.metadata === 'object' && !Array.isArray(conn.metadata)
+              ? { ...(conn.metadata as Record<string, any>), lastTokenRefreshAt: new Date().toISOString() }
+              : { lastTokenRefreshAt: new Date().toISOString() },
+        });
+
+        try {
+          await socialPrisma.socialAuditLog.create({
+            data: {
+              actor: 'System Auth Manager',
+              action: 'LINKEDIN_TOKEN_REFRESHED',
+              entity: `LinkedInConnection #${platform}`,
+              details: `Automatically refreshed LinkedIn ${target} OAuth token and persisted to database.`,
+            },
+          });
+        } catch {
+          // Ignore audit log write failure
+        }
+
+        return updatedConn;
+      } catch (err: any) {
+        console.warn(`[LinkedInAdapter] Auto-refresh notice for ${target}:`, err?.message);
+      }
+    }
+
+    return conn;
   }
 
   /**
@@ -706,6 +808,82 @@ export class LinkedInAdapter {
   }
 
   /**
+   * Fetches social actions / engagement (reactions, comments, reposts) for a published LinkedIn post URN
+   */
+  public async fetchPostEngagement(
+    accessToken: string,
+    postUrn: string
+  ): Promise<LinkedInPostEngagement> {
+    const apiVersion = getLinkedInApiVersion();
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      'LinkedIn-Version': apiVersion,
+      'X-Restli-Protocol-Version': '2.0.0',
+    };
+
+    try {
+      const metaRes = await fetch(
+        `https://api.linkedin.com/rest/socialMetadata/${encodeURIComponent(postUrn)}`,
+        { headers }
+      );
+      if (metaRes.ok) {
+        const data = (await metaRes.json()) as any;
+        let reactions = 0;
+        if (data?.reactionSummaries && typeof data.reactionSummaries === 'object') {
+          for (const val of Object.values(data.reactionSummaries) as any[]) {
+            reactions += typeof val?.count === 'number' ? val.count : 0;
+          }
+        }
+        const comments = typeof data?.commentSummary?.count === 'number' ? data.commentSummary.count : 0;
+        return {
+          urn: postUrn,
+          reactions,
+          comments,
+          reposts: 0,
+          impressions: null,
+          clicks: null,
+        };
+      }
+    } catch {
+      // Fallback to v2 socialActions
+    }
+
+    try {
+      const actionsRes = await fetch(
+        `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(postUrn)}`,
+        { headers }
+      );
+      if (actionsRes.ok) {
+        const data = (await actionsRes.json()) as any;
+        const reactions = typeof data?.likesSummary?.totalLikes === 'number' ? data.likesSummary.totalLikes : 0;
+        const comments =
+          typeof data?.commentsSummary?.totalFirstLevelComments === 'number'
+            ? data.commentsSummary.totalFirstLevelComments
+            : 0;
+        return {
+          urn: postUrn,
+          reactions,
+          comments,
+          reposts: 0,
+          impressions: null,
+          clicks: null,
+        };
+      }
+    } catch {
+      // Ignore network failure
+    }
+
+    return {
+      urn: postUrn,
+      reactions: 0,
+      comments: 0,
+      reposts: 0,
+      impressions: null,
+      clicks: null,
+    };
+  }
+
+  /**
    * Saves or updates LinkedIn account connection (either 'LINKEDIN' for member posting or 'LINKEDIN_PAGE' for company analytics).
    */
   public async saveConnection(data: {
@@ -717,12 +895,17 @@ export class LinkedInAdapter {
     accessToken: string;
     refreshToken?: string;
     expiresInSeconds: number;
+    refreshTokenExpiresIn?: number;
     scopes?: string[];
     followersCount?: number | null;
+    metadata?: Record<string, any> | null;
   }) {
     const platform = data.platform || LINKEDIN_MEMBER_PLATFORM;
     const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? LINKEDIN_PAGE_SCOPES : LINKEDIN_MEMBER_SCOPES;
     const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000);
+    const refreshExpiresAt = data.refreshTokenExpiresIn
+      ? new Date(Date.now() + data.refreshTokenExpiresIn * 1000)
+      : undefined;
 
     return socialPrisma.socialAccountConnection.upsert({
       where: { platform },
@@ -735,10 +918,12 @@ export class LinkedInAdapter {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken || null,
         tokenExpiresAt: expiresAt,
+        ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
         scopes: data.scopes || defaultScopes,
         status: 'HEALTHY',
         lastSyncAt: new Date(),
         followersCount: data.followersCount !== undefined ? data.followersCount : null,
+        ...(data.metadata !== undefined ? { metadata: data.metadata as any } : {}),
       },
       update: {
         accountName: data.accountName,
@@ -748,9 +933,12 @@ export class LinkedInAdapter {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken || undefined,
         tokenExpiresAt: expiresAt,
+        ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
         scopes: data.scopes || defaultScopes,
         status: 'HEALTHY',
         lastSyncAt: new Date(),
+        ...(data.followersCount !== undefined ? { followersCount: data.followersCount } : {}),
+        ...(data.metadata !== undefined ? { metadata: data.metadata as any } : {}),
       },
     });
   }

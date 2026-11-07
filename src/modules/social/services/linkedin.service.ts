@@ -9,6 +9,7 @@ import {
   LINKEDIN_PAGE_SCOPES,
 } from '../config/linkedin.config';
 import { LinkedInAnalyticsAdapter } from '../../analytics/adapters/linkedinAnalytics.adapter';
+import { contentPrisma } from '../../content/services/content.service';
 
 interface PendingOAuthState {
   target: LinkedInOAuthTarget;
@@ -40,6 +41,7 @@ export class LinkedInService {
 
   /**
    * Registers an OAuth state token for verification during callback (also usable in tests).
+   * Persists to both memory and database (system_configs) so OAuth flows survive server restarts.
    */
   public static registerOAuthState(
     state: string,
@@ -55,6 +57,15 @@ export class LinkedInService {
       createdAt: Date.now(),
     };
     this.pendingStates.set(state, entry);
+
+    socialPrisma.systemConfig
+      ?.upsert?.({
+        where: { key: `li_state_${state}` },
+        create: { key: `li_state_${state}`, value: JSON.stringify(entry) },
+        update: { value: JSON.stringify(entry) },
+      })
+      ?.catch?.(() => {});
+
     return entry;
   }
 
@@ -138,17 +149,33 @@ export class LinkedInService {
       throw createHttpError('Missing authorization code from LinkedIn redirect', 400);
     }
 
-    // Item 5: Verify OAuth state parameter
+    // Item 5: Verify OAuth state parameter (in-memory or DB persistent state)
     LinkedInService.pruneExpiredStates();
     let stateEntry = state ? LinkedInService.pendingStates.get(state) : undefined;
+    if (!stateEntry && state) {
+      try {
+        const dbState = await socialPrisma.systemConfig?.findUnique?.({
+          where: { key: `li_state_${state}` },
+        });
+        if (dbState?.value) {
+          const parsed = JSON.parse(dbState.value) as PendingOAuthState;
+          if (Date.now() - parsed.createdAt <= LinkedInService.STATE_TTL_MS) {
+            stateEntry = parsed;
+          }
+        }
+      } catch {
+        // Ignore DB lookup notice
+      }
+    }
+
     if (!stateEntry) {
-      if (state && (state.includes('member') || state === 'lp_member_auth')) {
+      if (state === 'lp_member_auth') {
         stateEntry = {
           target: 'member',
           scopes: LINKEDIN_MEMBER_SCOPES,
           createdAt: Date.now(),
         };
-      } else if (state && (state.includes('page') || state === 'lp_page_auth')) {
+      } else if (state === 'lp_page_auth') {
         stateEntry = {
           target: 'page',
           scopes: LINKEDIN_PAGE_SCOPES,
@@ -159,6 +186,9 @@ export class LinkedInService {
       }
     } else if (state) {
       LinkedInService.pendingStates.delete(state);
+      socialPrisma.systemConfig
+        ?.delete?.({ where: { key: `li_state_${state}` } })
+        ?.catch?.(() => {});
     }
 
     const effectiveReturnTo = returnTo || stateEntry.returnTo;
@@ -187,7 +217,14 @@ export class LinkedInService {
         accessToken: tokenRes.access_token,
         refreshToken: tokenRes.refresh_token,
         expiresInSeconds: tokenRes.expires_in,
+        refreshTokenExpiresIn: tokenRes.refresh_token_expires_in,
         scopes: pageScopes.length > 0 ? pageScopes : LINKEDIN_PAGE_SCOPES,
+        metadata: {
+          organizationId: orgProfile.id,
+          vanityName: orgProfile.vanityName,
+          clientId: process.env.LINKEDIN_PAGE_CLIENT_ID?.trim() || '78ocx3kz1moo0s',
+          connectedAt: new Date().toISOString(),
+        },
       });
 
       // Clear analytics cache immediately so connected page shows live data right away (Item 14)
@@ -231,7 +268,16 @@ export class LinkedInService {
       accessToken: tokenRes.access_token,
       refreshToken: tokenRes.refresh_token,
       expiresInSeconds: tokenRes.expires_in,
+      refreshTokenExpiresIn: tokenRes.refresh_token_expires_in,
       scopes: tokenRes.scope ? tokenRes.scope.split(/[\s,]+/).filter(Boolean) : LINKEDIN_MEMBER_SCOPES,
+      metadata: {
+        sub: profile.sub,
+        givenName: profile.given_name,
+        familyName: profile.family_name,
+        email: profile.email,
+        clientId: process.env.LINKEDIN_CLIENT_ID?.trim() || '86mkbep31a3f0n',
+        connectedAt: new Date().toISOString(),
+      },
     });
 
     try {
@@ -264,15 +310,61 @@ export class LinkedInService {
   /**
    * Gets current LinkedIn connection status, including publishingEnabled (Item 1)
    * and separate member ('LINKEDIN') vs company page ('LINKEDIN_PAGE') connection status (Item 9).
+   * Automatically refreshes expiring tokens in DB when refreshToken is present.
    */
-  public async getStatus(target?: LinkedInOAuthTarget) {
+  public async getStatus(target?: LinkedInOAuthTarget, syncLive = false) {
     const publishingEnabled = isLinkedInPublishingEnabled();
 
     try {
-      const [memberConn, pageConn] = await Promise.all([
-        this.adapter.getActiveConnection(),
-        this.adapter.getActivePageConnection(),
+      let [memberConn, pageConn] = await Promise.all([
+        this.adapter.ensureValidConnection('member'),
+        this.adapter.ensureValidConnection('page'),
       ]);
+
+      if (syncLive) {
+        if (memberConn?.accessToken) {
+          try {
+            const liveMember = await this.adapter.fetchUserProfile(memberConn.accessToken);
+            memberConn = await this.adapter.saveConnection({
+              platform: LINKEDIN_MEMBER_PLATFORM,
+              accountName: liveMember.name || memberConn.accountName || 'Lionel Eersteling',
+              accountUrn: liveMember.urn || memberConn.accountUrn || '',
+              accountEmail: liveMember.email || memberConn.accountEmail || undefined,
+              profilePictureUrl: liveMember.picture || memberConn.profilePictureUrl || undefined,
+              accessToken: memberConn.accessToken,
+              refreshToken: memberConn.refreshToken || undefined,
+              expiresInSeconds: memberConn.tokenExpiresAt
+                ? Math.max(60, Math.floor((new Date(memberConn.tokenExpiresAt).getTime() - Date.now()) / 1000))
+                : 5184000,
+              scopes: memberConn.scopes,
+              followersCount: memberConn.followersCount,
+            });
+          } catch {
+            // Keep existing DB connection if upstream check fails
+          }
+        }
+
+        if (pageConn?.accessToken) {
+          try {
+            const livePage = await this.adapter.fetchOrganizationProfile(pageConn.accessToken);
+            pageConn = await this.adapter.saveConnection({
+              platform: LINKEDIN_PAGE_PLATFORM,
+              accountName: livePage.name || pageConn.accountName || 'Leaders Performance',
+              accountUrn: livePage.urn || pageConn.accountUrn || '',
+              profilePictureUrl: livePage.logoUrl || pageConn.profilePictureUrl || undefined,
+              accessToken: pageConn.accessToken,
+              refreshToken: pageConn.refreshToken || undefined,
+              expiresInSeconds: pageConn.tokenExpiresAt
+                ? Math.max(60, Math.floor((new Date(pageConn.tokenExpiresAt).getTime() - Date.now()) / 1000))
+                : 5184000,
+              scopes: pageConn.scopes,
+              followersCount: pageConn.followersCount,
+            });
+          } catch {
+            // Keep existing DB connection if upstream check fails
+          }
+        }
+      }
 
       const formatConn = (conn: any) => {
         if (!conn) return null;
@@ -293,6 +385,7 @@ export class LinkedInService {
           expiresAt: conn.tokenExpiresAt,
           tokenExpiresIn: `${daysUntilExpiry ?? 60} days`,
           followersCount: conn.followersCount ?? null,
+          metadata: conn.metadata ?? null,
         };
       };
 
@@ -354,6 +447,112 @@ export class LinkedInService {
   }
 
   /**
+   * Internally fetches the live LinkedIn profile using DB-stored OAuth credentials,
+   * updates the database connection record, and returns the structured profile to the frontend.
+   */
+  public async getProfile(target: LinkedInOAuthTarget = 'member') {
+    let conn = await this.adapter.ensureValidConnection(target);
+    if (!conn || !conn.accessToken) {
+      throw createHttpError(
+        `LinkedIn ${target === 'page' ? 'company page' : 'personal profile'} is not connected yet`,
+        400
+      );
+    }
+
+    if (target === 'page') {
+      const orgProfile = await this.adapter.fetchOrganizationProfile(conn.accessToken);
+      const updated = await this.adapter.saveConnection({
+        platform: LINKEDIN_PAGE_PLATFORM,
+        accountName: orgProfile.name,
+        accountUrn: orgProfile.urn,
+        profilePictureUrl: orgProfile.logoUrl || conn.profilePictureUrl || undefined,
+        accessToken: conn.accessToken,
+        refreshToken: conn.refreshToken || undefined,
+        expiresInSeconds: conn.tokenExpiresAt
+          ? Math.max(60, Math.floor((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / 1000))
+          : 5184000,
+        scopes: conn.scopes,
+        followersCount: conn.followersCount,
+        metadata: {
+          ...(conn.metadata && typeof conn.metadata === 'object' ? (conn.metadata as Record<string, any>) : {}),
+          organizationId: orgProfile.id,
+          vanityName: orgProfile.vanityName,
+          lastProfileSyncAt: new Date().toISOString(),
+        },
+      });
+
+      return {
+        target: 'page' as const,
+        platform: LINKEDIN_PAGE_PLATFORM,
+        connected: true,
+        accountName: updated.accountName,
+        accountUrn: updated.accountUrn,
+        vanityName: orgProfile.vanityName,
+        organizationId: orgProfile.id,
+        profilePictureUrl: updated.profilePictureUrl,
+        followersCount: updated.followersCount,
+        scopes: updated.scopes,
+        lastSyncAt: updated.lastSyncAt,
+        expiresAt: updated.tokenExpiresAt,
+        status: updated.status,
+      };
+    }
+
+    let profile;
+    try {
+      profile = await this.adapter.fetchUserProfile(conn.accessToken);
+    } catch (err: any) {
+      if (conn.refreshToken) {
+        conn = await this.adapter.ensureValidConnection('member', true);
+        if (conn?.accessToken) {
+          profile = await this.adapter.fetchUserProfile(conn.accessToken);
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    const updated = await this.adapter.saveConnection({
+      platform: LINKEDIN_MEMBER_PLATFORM,
+      accountName: profile.name,
+      accountUrn: profile.urn,
+      accountEmail: profile.email || conn.accountEmail || undefined,
+      profilePictureUrl: profile.picture || conn.profilePictureUrl || undefined,
+      accessToken: conn.accessToken,
+      refreshToken: conn.refreshToken || undefined,
+      expiresInSeconds: conn.tokenExpiresAt
+        ? Math.max(60, Math.floor((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / 1000))
+        : 5184000,
+      scopes: conn.scopes,
+      followersCount: conn.followersCount,
+      metadata: {
+        ...(conn.metadata && typeof conn.metadata === 'object' ? (conn.metadata as Record<string, any>) : {}),
+        sub: profile.sub,
+        givenName: profile.given_name,
+        familyName: profile.family_name,
+        email: profile.email,
+        lastProfileSyncAt: new Date().toISOString(),
+      },
+    });
+
+    return {
+      target: 'member' as const,
+      platform: LINKEDIN_MEMBER_PLATFORM,
+      connected: true,
+      accountName: updated.accountName,
+      accountUrn: updated.accountUrn,
+      accountEmail: updated.accountEmail,
+      profilePictureUrl: updated.profilePictureUrl,
+      scopes: updated.scopes,
+      lastSyncAt: updated.lastSyncAt,
+      expiresAt: updated.tokenExpiresAt,
+      status: updated.status,
+    };
+  }
+
+  /**
    * Disconnects the active LinkedIn account(s) and clears analytics cache
    */
   public async disconnect(target?: LinkedInOAuthTarget | 'all') {
@@ -377,9 +576,19 @@ export class LinkedInService {
 
   /**
    * Directly posts a standalone message to LinkedIn using the personal member connection ('LINKEDIN').
+   * Internally manages LinkedIn authentication from DB, publishes to LinkedIn, persists the published post
+   * into the social_posts table in DB, logs audit trail, and returns the structured response to the frontend.
    * Enforces LINKEDIN_PUBLISHING_ENABLED kill switch (returns 403 when false).
    */
-  public async publishDirect(content: { text: string; title?: string; mediaUrl?: string; mediaType?: string }) {
+  public async publishDirect(content: {
+    text: string;
+    title?: string;
+    hook?: string;
+    body?: string;
+    mediaUrl?: string;
+    mediaType?: string;
+    tags?: string[];
+  }) {
     if (!isLinkedInPublishingEnabled()) {
       throw createHttpError(
         'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false).',
@@ -387,28 +596,184 @@ export class LinkedInService {
       );
     }
 
-    const conn = await this.adapter.getActiveConnection();
+    let conn = await this.adapter.ensureValidConnection('member');
     if (!conn || !conn.accessToken || !conn.accountUrn) {
       throw createHttpError('LinkedIn personal publishing account is not connected', 400);
     }
 
-    const result = await this.adapter.publishPost(conn.accessToken, conn.accountUrn, content);
+    let result;
+    try {
+      result = await this.adapter.publishPost(conn.accessToken, conn.accountUrn, content);
+    } catch (err: any) {
+      if (conn.refreshToken && String(err?.message || '').includes('401')) {
+        conn = await this.adapter.ensureValidConnection('member', true);
+        if (!conn || !conn.accessToken || !conn.accountUrn) {
+          throw err;
+        }
+        result = await this.adapter.publishPost(conn.accessToken, conn.accountUrn, content);
+      } else {
+        throw err;
+      }
+    }
+
+    const now = new Date();
+    const derivedTitle =
+      content.title?.trim() ||
+      (content.text.trim().length > 70 ? `${content.text.trim().slice(0, 67)}...` : content.text.trim());
+
+    let savedPost: any = null;
+    try {
+      savedPost = await contentPrisma.socialPost.create({
+        data: {
+          title: derivedTitle,
+          hook: content.hook || null,
+          body: content.body || content.text,
+          platform: LINKEDIN_MEMBER_PLATFORM,
+          status: 'PUBLISHED',
+          author: conn.accountName || 'Lionel Eersteling',
+          scheduledFor: now,
+          publishedAt: now,
+          mediaUrl: content.mediaUrl || null,
+          mediaType: content.mediaType || (content.mediaUrl ? 'image' : 'article'),
+          tags: content.tags || [],
+          approvedBy: conn.accountName || 'Lionel Eersteling (Owner)',
+          approvedAt: now,
+          platformPostId: result.postUrn,
+          platformPostUrl: result.postUrl,
+          metrics: {
+            reactions: 0,
+            comments: 0,
+            reposts: 0,
+            impressions: null,
+            clicks: null,
+            lastSyncedAt: now.toISOString(),
+          },
+          metadata: {
+            authorUrn: conn.accountUrn,
+            publishedVia: 'DIRECT_SHARE_API',
+            publishedAtIso: now.toISOString(),
+          },
+        },
+      });
+    } catch {
+      // Ignore DB post save error if mocked/unreachable
+    }
 
     try {
       await socialPrisma.socialAuditLog.create({
         data: {
           actor: conn.accountName || 'Lionel Eersteling',
           action: 'LINKEDIN_DIRECT_POST_PUBLISHED',
-          entity: result.postUrn || 'LinkedInDirectPost',
-          details: `Published direct message to LinkedIn feed. URN: ${result.postUrn || 'none'}`,
-          metadata: { postUrl: result.postUrl },
+          entity: result.postUrn || (savedPost?.id ? `ContentPost #${savedPost.id}` : 'LinkedInDirectPost'),
+          details: `Published direct message to LinkedIn feed and saved to DB. URN: ${result.postUrn || 'none'}`,
+          metadata: { postUrl: result.postUrl, dbPostId: savedPost?.id || null },
         },
       });
     } catch {
       // Ignore audit log error if DB is unreachable
     }
 
-    return result;
+    return {
+      ...result,
+      post: savedPost,
+    };
+  }
+
+  /**
+   * Internally fetches LinkedIn posts and live engagement metrics using stored DB credentials,
+   * updates the database (social_posts.metrics), and returns the structured post list to the frontend.
+   */
+  public async getPosts(options: { sync?: boolean; limit?: number } = {}) {
+    const limit = Math.min(100, Math.max(1, options.limit || 25));
+    const shouldSync = options.sync !== false;
+
+    const [memberConn, pageConn] = await Promise.all([
+      this.adapter.ensureValidConnection('member'),
+      this.adapter.ensureValidConnection('page'),
+    ]);
+
+    let dbPosts: any[] = [];
+    try {
+      dbPosts = await contentPrisma.socialPost.findMany({
+        where: { platform: 'LINKEDIN' },
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        take: limit,
+      });
+    } catch {
+      dbPosts = [];
+    }
+
+    // If sync is enabled and member token is valid, refresh engagement metrics from LinkedIn API and persist to DB
+    if (shouldSync && memberConn?.accessToken && dbPosts.length > 0) {
+      const publishedWithUrn = dbPosts.filter(
+        (p) => p.status === 'PUBLISHED' && typeof p.platformPostId === 'string' && p.platformPostId.startsWith('urn:li:')
+      );
+
+      for (const post of publishedWithUrn.slice(0, 15)) {
+        try {
+          const engagement = await this.adapter.fetchPostEngagement(memberConn.accessToken, post.platformPostId);
+          const existingMetrics =
+            post.metrics && typeof post.metrics === 'object' && !Array.isArray(post.metrics)
+              ? (post.metrics as Record<string, any>)
+              : {};
+          const updatedMetrics = {
+            ...existingMetrics,
+            reactions: engagement.reactions,
+            comments: engagement.comments,
+            reposts: engagement.reposts,
+            lastSyncedAt: new Date().toISOString(),
+          };
+
+          const updatedPost = await contentPrisma.socialPost.update({
+            where: { id: post.id },
+            data: { metrics: updatedMetrics },
+          });
+          Object.assign(post, updatedPost);
+        } catch {
+          // Keep existing metrics if upstream call fails
+        }
+      }
+    }
+
+    return {
+      posts: dbPosts,
+      total: dbPosts.length,
+      memberConnected: Boolean(memberConn?.accessToken),
+      pageConnected: Boolean(pageConn?.accessToken),
+      syncedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Performs a full internal LinkedIn synchronization (member profile, published post engagement,
+   * and company page analytics if connected), persists all results into the database, and returns
+   * the consolidated state to the frontend.
+   */
+  public async syncAll(range = '30d') {
+    const status = await this.getStatus(undefined, true);
+    const postsResult = await this.getPosts({ sync: true, limit: 25 });
+    const analyticsAdapter = new LinkedInAnalyticsAdapter();
+    const companyAnalytics = await analyticsAdapter.getCompanyAnalytics(range, true);
+
+    try {
+      await socialPrisma.socialAuditLog.create({
+        data: {
+          actor: status.accountName || 'System Sync Manager',
+          action: 'LINKEDIN_FULL_SYNC_COMPLETED',
+          entity: 'LinkedInIntegration',
+          details: `Synchronized LinkedIn profile, ${postsResult.total} posts, and company analytics (${range}) to database.`,
+        },
+      });
+    } catch {
+      // Ignore audit log error
+    }
+
+    return {
+      syncedAt: new Date().toISOString(),
+      status,
+      posts: postsResult.posts,
+      companyAnalytics,
+    };
   }
 
   /**

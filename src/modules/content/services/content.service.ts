@@ -522,7 +522,9 @@ export class ContentService {
    * Internal helper to dispatch content to LinkedIn API using the personal profile connection ('LINKEDIN').
    */
   private async dispatchToLinkedIn(post: SocialPost) {
-    const conn = await this.linkedin.getActiveConnection();
+    const conn =
+      (await this.linkedin.ensureValidConnection('member').catch(() => null)) ||
+      (await this.linkedin.getActiveConnection());
     if (!conn || !conn.accessToken || !conn.accountUrn) {
       throw createHttpError(
         'LinkedIn personal publishing account is not connected. Please connect LinkedIn first.',

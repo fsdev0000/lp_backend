@@ -380,6 +380,34 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         cachedAt: now,
       };
 
+      // Persist updated followersCount, lastSyncAt, and analytics snapshot to DB
+      try {
+        if (conn) {
+          await analyticsPrisma.socialAccountConnection?.update?.({
+            where: { platform: LINKEDIN_PAGE_PLATFORM },
+            data: {
+              followersCount: typeof followers === 'number' ? followers : conn.followersCount ?? 0,
+              lastSyncAt: new Date(),
+              status: 'HEALTHY',
+            },
+          });
+        }
+        await analyticsPrisma.systemConfig?.upsert?.({
+          where: { key: `linkedin_analytics_snapshot_${win.range}` },
+          update: {
+            value: result as any,
+            description: `Cached LinkedIn Company Page analytics snapshot (${win.range})`,
+          },
+          create: {
+            key: `linkedin_analytics_snapshot_${win.range}`,
+            value: result as any,
+            description: `Cached LinkedIn Company Page analytics snapshot (${win.range})`,
+          },
+        });
+      } catch {
+        // Non-blocking DB snapshot persistence
+      }
+
       return result;
     } catch (err: any) {
       await LiveErrorBoundary.logUpstreamError('LINKEDIN' as any, 'getCompanyAnalytics', err);
