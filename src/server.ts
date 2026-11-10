@@ -32,7 +32,6 @@ const ALLOWED_ORIGINS = [
   'https://elevenlabs.io',
   'https://api.elevenlabs.io',
   'https://clarity.microsoft.com',
-  'https://lpsocialcrm.vercel.app',
 ];
 
 
