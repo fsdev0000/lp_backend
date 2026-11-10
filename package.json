@@ -19,6 +19,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@types/node": "^26.1.1",
     "@google-analytics/data": "^7.3.0",
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.117.0",
