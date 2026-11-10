@@ -26,13 +26,13 @@ const ALLOWED_ORIGINS = [
   'https://www.leadersperformance.ae',
   'https://api.leadersperformance.ae',
   'https://staging.leadersperformance.ae',
+  'https://social.leadersperformance.ae',
   'https://unmasked.leadersperformance.ae',
   'https://srv826934.hstgr.cloud',
   'https://elevenlabs.io',
   'https://api.elevenlabs.io',
   'https://clarity.microsoft.com',
   'https://lpsocialcrm.vercel.app',
-  'https://lpsocialcrm.vercel.applp_backend'
 ];
 
 
