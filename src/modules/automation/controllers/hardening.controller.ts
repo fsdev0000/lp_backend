@@ -5,6 +5,7 @@ import { encryptToken } from '../crypto/tokenCrypto';
 import { digestService } from '../hardening/digest.service';
 import { maintenanceService } from '../hardening/maintenance.service';
 import { inventoryService } from '../hardening/inventory.service';
+import { calendarVerificationService } from '../hardening/calendarVerification.service';
 import { notificationService } from '../notifications/notification.service';
 
 export class HardeningController {
@@ -84,6 +85,33 @@ export class HardeningController {
         success: false,
         code: 'INVENTORY_CHECK_ERROR',
         error: err?.message || 'Failed to run inventory check',
+      });
+    }
+  };
+
+  /**
+   * POST /internal/calendar/verify
+   * Flow 4: Reconciles Content Calendar rows against database posts & publishing state.
+   */
+  public verifyCalendar = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const result = await calendarVerificationService.verifyCalendar({
+        rows: Array.isArray(req.body?.rows) ? req.body.rows : [],
+        now: req.body?.now ? new Date(req.body.now) : new Date(),
+        lookbackDays: req.body?.lookbackDays ? Number(req.body.lookbackDays) : 7,
+        lookaheadDays: req.body?.lookaheadDays ? Number(req.body.lookaheadDays) : 7,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error(`[HardeningController] postId=none verifyCalendar error:`, err?.message);
+      res.status(500).json({
+        success: false,
+        code: 'CALENDAR_VERIFICATION_ERROR',
+        error: err?.message || 'Failed to run calendar verification',
       });
     }
   };

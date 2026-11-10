@@ -30,9 +30,10 @@ internalAutomationRouter.post('/notifications/:id/failed', internalReviewControl
 // Step 4 Publishing (Flow 2): Publisher run
 internalAutomationRouter.post('/publisher/run', publisherController.runPublisher);
 
-// Step 5 Hardening: Daily Digest, Maintenance, and Flow 3 Inventory Check
+// Step 5 Hardening: Daily Digest, Maintenance, Flow 3 Inventory Check, and Flow 4 Calendar Verification
 internalAutomationRouter.get('/digest', hardeningController.getDailyDigest);
 internalAutomationRouter.post('/maintenance/run', hardeningController.runMaintenance);
 internalAutomationRouter.post('/inventory/check', hardeningController.checkInventory);
+internalAutomationRouter.post('/calendar/verify', hardeningController.verifyCalendar);
 
 export default internalAutomationRouter;
