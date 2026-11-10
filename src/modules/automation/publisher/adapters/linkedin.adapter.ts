@@ -439,8 +439,17 @@ export class LinkedInPublishAdapter implements IPublishAdapter {
     externalId: string;
     refreshToken: string;
   }): Promise<RefreshTokenResult> {
-    const clientId = (process.env.LINKEDIN_CLIENT_ID || '').trim();
-    const clientSecret = (process.env.LINKEDIN_CLIENT_SECRET || '').trim();
+    const isOrgAccount = (account.externalId || '').startsWith('urn:li:organization:');
+    const clientId = (
+      (isOrgAccount ? process.env.LINKEDIN_PAGE_CLIENT_ID : '') ||
+      process.env.LINKEDIN_CLIENT_ID ||
+      ''
+    ).trim();
+    const clientSecret = (
+      (isOrgAccount ? process.env.LINKEDIN_PAGE_CLIENT_SECRET : '') ||
+      process.env.LINKEDIN_CLIENT_SECRET ||
+      ''
+    ).trim();
 
     const res = await this.fetchWithTimeout('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',

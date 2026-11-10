@@ -1,4 +1,9 @@
 import swaggerJSDoc from 'swagger-jsdoc';
+import {
+  automationSwaggerPaths,
+  automationSwaggerSecuritySchemes,
+  automationSwaggerTags,
+} from './swagger.automation';
 
 const swaggerOptions = {
   definition: {
@@ -3183,4 +3188,18 @@ const swaggerOptions = {
       : ['./src/api/routes/*.ts', './src/modules/**/*.ts'], // Scan src in dev, dist only in production
 };
 
-export const swaggerSpec = swaggerJSDoc(swaggerOptions);
+const baseSpec = swaggerJSDoc(swaggerOptions) as any;
+
+// Merge the Social CRM Content Automation module docs (n8n internal + CRM review endpoints)
+export const swaggerSpec = {
+  ...baseSpec,
+  tags: [...(baseSpec.tags || []), ...automationSwaggerTags],
+  paths: { ...(baseSpec.paths || {}), ...automationSwaggerPaths },
+  components: {
+    ...(baseSpec.components || {}),
+    securitySchemes: {
+      ...(baseSpec.components?.securitySchemes || {}),
+      ...automationSwaggerSecuritySchemes,
+    },
+  },
+};

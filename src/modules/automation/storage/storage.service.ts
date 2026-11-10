@@ -77,6 +77,7 @@ export function assertNotFullUrl(objectKey: string): void {
 export class SupabaseStorageService implements IStorageService {
   public readonly provider: string;
   public readonly defaultBucket: string;
+  private readonly verifiedBuckets = new Set<string>();
 
   constructor(
     bucket: string = process.env.STORAGE_BUCKET || DEFAULT_SOCIAL_MEDIA_BUCKET,
@@ -86,9 +87,25 @@ export class SupabaseStorageService implements IStorageService {
     this.provider = provider;
   }
 
+  private async ensureBucket(bucket: string): Promise<void> {
+    if (this.verifiedBuckets.has(bucket)) return;
+    try {
+      const supabase = await getSupabaseClient();
+      const { data: buckets } = await supabase.storage.listBuckets();
+      const exists = (buckets || []).some((b) => b.name === bucket);
+      if (!exists) {
+        await supabase.storage.createBucket(bucket, { public: false });
+      }
+      this.verifiedBuckets.add(bucket);
+    } catch {
+      // Ignore if bucket check fails; upload call will surface any real error
+    }
+  }
+
   public async put(params: StoragePutParams): Promise<StorageLocation> {
     const bucket = params.bucket || this.defaultBucket;
     assertNotFullUrl(params.objectKey);
+    await this.ensureBucket(bucket);
 
     const supabase = await getSupabaseClient();
     const { error } = await supabase.storage.from(bucket).upload(params.objectKey, params.data, {
@@ -145,6 +162,7 @@ export class SupabaseStorageService implements IStorageService {
     bucket: string = this.defaultBucket
   ): Promise<{ signedUrl: string; token?: string; path: string }> {
     assertNotFullUrl(objectKey);
+    await this.ensureBucket(bucket);
     const supabase = await getSupabaseClient();
     const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(objectKey);
 

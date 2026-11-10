@@ -174,7 +174,10 @@ export class HardeningController {
       });
 
       const settings = {
-        CALENDAR_SHEET_ID: process.env.CALENDAR_SHEET_ID || '1eb9XK1hvhX-ABd4nHjpmMBdtTH6cmMgL',
+        CALENDAR_SHEET_ID:
+          process.env.CALENDAR_FILE_ID ||
+          process.env.CALENDAR_SHEET_ID ||
+          '1eb9XK1hvhX-ABd4nHjpmMBdtTH6cmMgL',
         CALENDAR_SOURCE: process.env.CALENDAR_SOURCE || 'xlsx',
         CALENDAR_TZ: process.env.CALENDAR_TZ || 'Europe/Amsterdam',
         DRIVE_ROOT_FOLDER_ID: process.env.DRIVE_ROOT_FOLDER_ID || '177ptcsSWKiBveriapQmPo1KQwFhsi44C',

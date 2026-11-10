@@ -3,6 +3,8 @@ import { normalizeFileNameNfc } from '../storage/storage.service';
 
 export const DEFAULT_CALENDAR_TZ = 'Europe/Amsterdam';
 
+// TODO (Plan Section 12 Open Question #3): Confirm exact default post times per channel with the team.
+// Can be overridden via env var DEFAULT_POST_TIME_BY_PLATFORM (JSON or "LINKEDIN=09:00,INSTAGRAM=12:00,...").
 export const DEFAULT_POST_TIMES_BY_CHANNEL: Record<string, string> = {
   LINKEDIN: '09:00',
   LINKEDIN_NEWSLETTER: '09:00',
@@ -15,6 +17,30 @@ export const DEFAULT_POST_TIMES_BY_CHANNEL: Record<string, string> = {
   X: '10:00',
   DEFAULT: '09:00',
 };
+
+export function getDefaultPostTimeForChannel(channelKey: string): string {
+  const upperKey = (channelKey || '').trim().toUpperCase();
+  const rawEnv = (process.env.DEFAULT_POST_TIME_BY_PLATFORM || '').trim();
+  if (rawEnv) {
+    try {
+      if (rawEnv.startsWith('{')) {
+        const parsed = JSON.parse(rawEnv) as Record<string, string>;
+        if (parsed[upperKey]) return String(parsed[upperKey]).trim();
+        if (parsed.DEFAULT) return String(parsed.DEFAULT).trim();
+      } else {
+        for (const pair of rawEnv.split(',')) {
+          const [k, v] = pair.split('=').map((s) => s.trim());
+          if (k && v && k.toUpperCase() === upperKey) {
+            return v;
+          }
+        }
+      }
+    } catch {
+      // Fall back to DEFAULT_POST_TIMES_BY_CHANNEL if env format is invalid
+    }
+  }
+  return DEFAULT_POST_TIMES_BY_CHANNEL[upperKey] || DEFAULT_POST_TIMES_BY_CHANNEL.DEFAULT;
+}
 
 const MONTH_NAMES = [
   'january',
@@ -573,9 +599,7 @@ export function parseAndFilterCalendarRows(params: {
     const parsedTime = parseCalendarTimeToHhMm(colB);
     const usedDefaultTime = !parsedTime;
     const firstChannelUpper = (channelRaw.split(/[&/,+]/)[0] || '').trim().toUpperCase();
-    const defaultTime =
-      DEFAULT_POST_TIMES_BY_CHANNEL[firstChannelUpper] ||
-      DEFAULT_POST_TIMES_BY_CHANNEL.DEFAULT;
+    const defaultTime = getDefaultPostTimeForChannel(firstChannelUpper);
     const timeHhMm = parsedTime || defaultTime;
 
     const scheduledAtUtc = localDateTimeToUtc(dateYmd, timeHhMm, timeZone);

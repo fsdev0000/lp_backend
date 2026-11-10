@@ -339,8 +339,14 @@ export class YouTubePublishAdapter implements IPublishAdapter {
     externalId: string;
     refreshToken: string;
   }): Promise<RefreshTokenResult> {
-    const clientId = (process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim();
+    const clientId = (
+      process.env.YOUTUBE_OAUTH_CLIENT_ID ||
+      process.env.YOUTUBE_CLIENT_ID ||
+      process.env.GOOGLE_CLIENT_ID ||
+      ''
+    ).trim();
     const clientSecret = (
+      process.env.YOUTUBE_OAUTH_CLIENT_SECRET ||
       process.env.YOUTUBE_CLIENT_SECRET ||
       process.env.GOOGLE_CLIENT_SECRET ||
       ''
