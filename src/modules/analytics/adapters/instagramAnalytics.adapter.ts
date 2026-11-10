@@ -106,20 +106,27 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
       let followerGrowthFormatted: string | null = null;
 
       try {
-        const startUnix = Math.floor(new Date(`${win.startDate}T00:00:00Z`).getTime() / 1000);
+        const rawStartUnix = Math.floor(new Date(`${win.startDate}T00:00:00Z`).getTime() / 1000);
         const endUnix = Math.floor(new Date(`${win.endDate}T23:59:59Z`).getTime() / 1000);
+        // Meta Graph API v21.0 requires metric_type=total_value and max 30-day window between since and until
+        const maxWindowSeconds = 30 * 86400;
+        const startUnix = (endUnix - rawStartUnix > maxWindowSeconds)
+          ? endUnix - maxWindowSeconds
+          : rawStartUnix;
 
-        const insightsUrl = `https://graph.facebook.com/v21.0/${accountId}/insights?metric=reach,impressions,profile_views&period=day&since=${startUnix}&until=${endUnix}&access_token=${token}`;
+        const insightsUrl = `https://graph.facebook.com/v21.0/${accountId}/insights?metric=views,profile_views,reach&metric_type=total_value&period=day&since=${startUnix}&until=${endUnix}&access_token=${token}`;
         const insightsRes = await fetch(insightsUrl);
 
         if (insightsRes.ok) {
           const insData = (await insightsRes.json()) as any;
           const rows = insData.data || [];
           for (const row of rows) {
-            const sum = (row.values || []).reduce((acc: number, v: any) => acc + (v.value || 0), 0);
-            if (row.name === 'reach') reach = sum;
-            if (row.name === 'impressions') impressions = sum;
-            if (row.name === 'profile_views') profileViews = sum;
+            const val = typeof row.total_value?.value === 'number'
+              ? row.total_value.value
+              : (row.values || []).reduce((acc: number, v: any) => acc + (v.value || 0), 0);
+            if (row.name === 'reach') reach = val;
+            if (row.name === 'views' || row.name === 'impressions') impressions = val;
+            if (row.name === 'profile_views') profileViews = val;
           }
         }
       } catch (e: any) {
