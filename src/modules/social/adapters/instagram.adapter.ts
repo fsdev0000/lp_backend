@@ -209,6 +209,10 @@ export class InstagramAdapter {
         tokenExpiresAt: null, // System user tokens do not expire
         scopes: [
           'instagram_basic',
+          'instagram_manage_insights',
+          'pages_show_list',
+          'pages_read_engagement',
+          'business_management',
           'instagram_content_publish',
           'instagram_manage_comments',
           'instagram_manage_messages',
