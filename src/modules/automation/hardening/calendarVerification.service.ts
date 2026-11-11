@@ -1,3 +1,4 @@
+import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 import { automationPrisma } from '../state/transition';
 import {
   formatDualTimezone,
@@ -254,6 +255,17 @@ export class CalendarVerificationService {
       stats: { total, published, scheduled, overdue, missing, blocked, auditDate: auditDateStr },
       list: verifiedList,
     });
+
+    // Automatically dispatch email notification via verified SMTP
+    try {
+      await sendSmtpEmail({
+        to: recipientEmails,
+        subject: emailSubject,
+        html: emailHtml,
+      });
+    } catch (err: any) {
+      console.error('[CalendarVerification] Failed to dispatch email:', err?.message);
+    }
 
     return {
       stats: { total, published, scheduled, overdue, missing, blocked, auditDate: auditDateStr },
