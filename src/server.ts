@@ -151,6 +151,9 @@ app.use(
 );
 app.use(express.text({ type: ['text/*', 'application/x-yaml', 'text/markdown'] }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/assets', express.static(path.join(process.cwd(), 'public/assets')));
+app.use('/api/assets', express.static(path.join(process.cwd(), 'public/assets')));
+app.use('/api/v1/assets', express.static(path.join(process.cwd(), 'public/assets')));
 
 app.use('/api', checkoutRouter);
 app.use('/api/v1', checkoutRouter);
