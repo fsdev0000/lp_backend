@@ -38,7 +38,7 @@ import {
   downloadDriveFileBuffer,
   DriveFolderListing,
 } from './driveClient';
-import { notificationService } from '../notifications/notification.service';
+import { notificationService, buildLeadersPerformanceNotificationHtml } from '../notifications/notification.service';
 import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 
 export interface IngestRowsInput {
@@ -1352,10 +1352,17 @@ export class IngestService {
                 const allRecipients = Array.from(
                   new Set([...queued.notification.recipients, ...(queued.notification.cc || [])])
                 );
+                const emailHtml = buildLeadersPerformanceNotificationHtml({
+                  subject: queued.notification.subject,
+                  type: queued.notification.type,
+                  body: queued.notification.body,
+                  postId: p.id,
+                  post: p,
+                });
                 await sendSmtpEmail({
                   to: allRecipients,
                   subject: queued.notification.subject,
-                  html: queued.notification.body.replace(/\n/g, '<br/>'),
+                  html: emailHtml,
                 });
                 await notificationService.markSent(queued.notification.id);
               } catch (smtpErr: any) {

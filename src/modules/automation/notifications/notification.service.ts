@@ -869,23 +869,15 @@ export function buildLeadersPerformanceNotificationHtml(params: {
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td>
-            <table style="border-collapse: collapse; margin-bottom: 8px;">
-              <tr>
-                <td style="vertical-align: middle; padding-right: 12px;">
-                  <div style="background: linear-gradient(135deg, #D4AF37 0%, #AA771C 100%); width: 38px; height: 38px; border-radius: 8px; text-align: center; line-height: 38px; font-weight: 900; color: #0F172A; font-size: 18px; letter-spacing: -0.5px; box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);">
-                    LP
-                  </div>
-                </td>
-                <td style="vertical-align: middle;">
-                  <div style="font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; line-height: 1.2;">
-                    LEADERS PERFORMANCE
-                  </div>
-                  <div style="font-size: 19px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
-                    Social CRM & Content Ops
-                  </div>
-                </td>
-              </tr>
-            </table>
+            <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
+              <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
+            </a>
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
+              LEADERS PERFORMANCE
+            </div>
+            <div style="font-size: 19px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
+              Social CRM & Content Ops
+            </div>
           </td>
           <td style="text-align: right; vertical-align: middle;">
             <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">
@@ -1013,23 +1005,15 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td>
-            <table style="border-collapse: collapse; margin-bottom: 4px;">
-              <tr>
-                <td style="vertical-align: middle; padding-right: 12px;">
-                  <div style="background: linear-gradient(135deg, #D4AF37 0%, #AA771C 100%); width: 36px; height: 36px; border-radius: 8px; text-align: center; line-height: 36px; font-weight: 900; color: #0F172A; font-size: 17px; letter-spacing: -0.5px; box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);">
-                    LP
-                  </div>
-                </td>
-                <td style="vertical-align: middle;">
-                  <div style="font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; line-height: 1.2;">
-                    LEADERS PERFORMANCE
-                  </div>
-                  <div style="font-size: 18px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
-                    Social CRM & Automation Engine
-                  </div>
-                </td>
-              </tr>
-            </table>
+            <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
+              <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
+            </a>
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
+              LEADERS PERFORMANCE
+            </div>
+            <div style="font-size: 18px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
+              Social CRM & Automation Engine
+            </div>
           </td>
           <td style="text-align: right; vertical-align: middle;">
             <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">

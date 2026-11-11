@@ -356,6 +356,9 @@ export class CalendarVerificationService {
     
     <!-- Header -->
     <div style="background: #0F172A; padding: 24px 32px; border-bottom: 3px solid #D4AF37;">
+      <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
+        <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 12px; border: 0;" border="0" />
+      </a>
       <h1 style="color: #FFFFFF; margin: 0; font-size: 22px; font-weight: 700;">Leaders Performance · Content Calendar Audit</h1>
       <p style="color: #94A3B8; margin: 6px 0 0 0; font-size: 13px;">Daily Publishing Verification & Calendar Reconciliation Report — ${auditDate}</p>
     </div>
