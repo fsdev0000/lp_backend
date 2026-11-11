@@ -586,9 +586,8 @@ export class NotificationService {
       'https://staging.leadersperformance.ae'
     ).replace(/\/+$/, '');
 
-    const subject = `[Workflow Error] ${params.workflowName} failed${
-      params.failedNode ? ` at "${params.failedNode}"` : ''
-    }`;
+    const subject = `[Workflow Error] ${params.workflowName} failed${params.failedNode ? ` at "${params.failedNode}"` : ''
+      }`;
     const body = [
       `n8n workflow "${params.workflowName}" crashed.`,
       `Failed node: ${params.failedNode || 'unknown'}`,
