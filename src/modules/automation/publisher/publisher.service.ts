@@ -282,10 +282,15 @@ export class PublisherService {
    */
   public async publishSinglePost(
     postId: string,
-    options: { now?: Date; forceImmediate?: boolean; actorId?: string } = {}
+    options: { now?: Date; forceImmediate?: boolean; actorId?: string; dryRun?: boolean } = {}
   ): Promise<{ status: string; post: any }> {
     const now = options.now || new Date();
     const actorId = options.actorId || 'flow2-publisher';
+    const isDryRun =
+      options.dryRun ??
+      (process.env.PUBLISHER_DRY_RUN === 'true' ||
+        process.env.PUBLISHER_DRY_RUN === '1' ||
+        process.env.ENABLE_LIVE_PUBLISHING === 'false');
 
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
@@ -325,6 +330,37 @@ export class PublisherService {
       now,
       allowEarlyScheduledUpload: allowEarly,
     });
+
+    // If dryRun is active, dump state to database without calling external social APIs
+    if (isDryRun) {
+      console.log(
+        `[Publisher] DRY RUN: Post ${post.id} (${post.platform}) approved — dumped to DB without external publish.`
+      );
+      const pubPost = await transition(post.id, 'PUBLISH_SUCCESS', {
+        actorId,
+        now,
+        platformPostId: `staged_db_${post.id.slice(0, 8)}`,
+        platformUrl: `https://social.leadersperformance.ae/approvals?post=${post.id}`,
+        httpStatus: 200,
+        rawResponse: {
+          dryRun: true,
+          dumpedToDbAt: now.toISOString(),
+          note: 'Live publishing disabled: dumped to PostgreSQL DB',
+        },
+      });
+
+      await notificationService.queuePublished({
+        id: pubPost.id,
+        platform: pubPost.platform,
+        scheduledAt: pubPost.scheduledAt,
+        title: pubPost.title,
+        caption: pubPost.caption,
+        revision: pubPost.revision,
+        platformUrl: pubPost.platformUrl,
+      });
+
+      return { status: 'PUBLISHED', post: pubPost };
+    }
 
     const adapter = this.getAdapter(post.platform);
     if (!adapter) {
@@ -608,8 +644,13 @@ export class PublisherService {
    * 5. Queue MANUAL_TASK_DUE reminders (at scheduledAt and +24h reminder, Edge Case #30)
    * 6. Queue APPROVAL_SLA reminders (<24h and <6h before slot)
    */
-  public async run(options: { now?: Date } = {}): Promise<PublisherRunSummary> {
+  public async run(options: { now?: Date; dryRun?: boolean } = {}): Promise<PublisherRunSummary> {
     const now = options.now || new Date();
+    const isDryRun =
+      options.dryRun ??
+      (process.env.PUBLISHER_DRY_RUN === 'true' ||
+        process.env.PUBLISHER_DRY_RUN === '1' ||
+        process.env.ENABLE_LIVE_PUBLISHING === 'false');
     const graceMinutes = Number(process.env.PUBLISH_GRACE_MINUTES) || 120;
     const graceCutoff = new Date(now.getTime() - graceMinutes * 60 * 1000);
     const staleLockCutoff = new Date(now.getTime() - 15 * 60 * 1000);
@@ -689,7 +730,7 @@ export class PublisherService {
     `;
 
     for (const row of dueRows) {
-      const outcome = await this.publishSinglePost(row.id, { now });
+      const outcome = await this.publishSinglePost(row.id, { now, dryRun: isDryRun });
       if (outcome.status === 'PUBLISHED') summary.published.push(row.id);
       else if (outcome.status === 'PROCESSING') summary.processing.push(row.id);
       else if (outcome.status === 'APPROVED') summary.retried.push(row.id);

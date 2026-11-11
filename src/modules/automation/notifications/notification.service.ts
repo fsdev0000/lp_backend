@@ -57,10 +57,9 @@ export function formatDualTimezone(date: Date): DualTimezoneFormatted {
 export function getCrmPostUrl(postId: string): string {
   const base = (
     process.env.CRM_BASE_URL ||
-    process.env.FRONTEND_URL ||
-    'https://staging.leadersperformance.ae'
+    'https://social.leadersperformance.ae'
   ).replace(/\/+$/, '');
-  return `${base}/posts/${postId}`;
+  return `${base}/approvals?post=${postId}`;
 }
 
 export function getRecipientLists(): {
@@ -727,16 +726,25 @@ export class NotificationService {
           continue;
         }
 
+        let postData: any = null;
+        if (notif.postId) {
+          postData = await automationPrisma.post.findUnique({
+            where: { id: notif.postId },
+          });
+        }
+
+        const html = buildLeadersPerformanceNotificationHtml({
+          subject: notif.subject,
+          type: notif.type,
+          body: notif.body,
+          postId: notif.postId,
+          post: postData,
+        });
+
         const success = await sendSmtpEmail({
           to: recipients,
           subject: notif.subject,
-          html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1E293B; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #E2E8F0; border-radius: 8px;">
-            <h3 style="color: #0F172A; margin-top: 0;">${notif.subject}</h3>
-            <div style="white-space: pre-wrap; font-size: 14px;">${notif.body}</div>
-            <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #E2E8F0; font-size: 11px; color: #94A3B8;">
-              Leaders Performance Content Ops · Automated Notification
-            </div>
-          </div>`,
+          html,
         });
 
         if (success) {
@@ -754,6 +762,187 @@ export class NotificationService {
 
     return { sent, failed };
   }
+}
+
+function escapeHtml(str: string): string {
+  return (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function buildLeadersPerformanceNotificationHtml(params: {
+  subject: string;
+  type: string;
+  body: string;
+  postId?: string | null;
+  post?: any;
+}): string {
+  const { subject, type, body, postId, post } = params;
+  const crmUrl = postId
+    ? getCrmPostUrl(postId)
+    : (process.env.CRM_BASE_URL || 'https://social.leadersperformance.ae').replace(/\/+$/, '') + '/approvals';
+
+  let badgeText = 'EXECUTIVE NOTICE';
+  let badgeBg = 'rgba(212, 175, 55, 0.15)';
+  let badgeColor = '#D4AF37';
+  let badgeBorder = '#D4AF37';
+  let isApproval = false;
+
+  if (type === 'REVIEW_REQUEST' || type === 'APPROVAL_SLA') {
+    badgeText = '⏳ ACTION REQUIRED: EXECUTIVE APPROVAL';
+    badgeBg = '#FEF3C7';
+    badgeColor = '#92400E';
+    badgeBorder = '#FCD34D';
+    isApproval = true;
+  } else if (type === 'REVISION_READY') {
+    badgeText = '📝 REVISION SUBMITTED';
+    badgeBg = '#DBEAFE';
+    badgeColor = '#1E40AF';
+    badgeBorder = '#93C5FD';
+    isApproval = true;
+  } else if (type === 'APPROVED') {
+    badgeText = '✅ POST APPROVED';
+    badgeBg = '#D1FAE5';
+    badgeColor = '#065F46';
+    badgeBorder = '#6EE7B7';
+  } else if (type === 'CHANGES_REQUESTED' || type === 'REJECTED') {
+    badgeText = '⚠️ CHANGES REQUESTED';
+    badgeBg = '#FEE2E2';
+    badgeColor = '#991B1B';
+    badgeBorder = '#FCA5A5';
+  } else if (type === 'PUBLISHED') {
+    badgeText = '🚀 POST PUBLISHED';
+    badgeBg = '#D1FAE5';
+    badgeColor = '#065F46';
+    badgeBorder = '#6EE7B7';
+  } else if (type === 'INVENTORY_LOW') {
+    badgeText = '⚠️ LOW INVENTORY ALERT';
+    badgeBg = '#FFEDD5';
+    badgeColor = '#9A3412';
+    badgeBorder = '#FDBA74';
+  }
+
+  const platform = post?.platform || '';
+  const platformLabel = platform ? formatPlatformDisplay(platform) : '';
+  const scheduledDate = post?.scheduledAt ? new Date(post.scheduledAt) : null;
+  const tz = scheduledDate ? formatDualTimezone(scheduledDate) : null;
+  const caption = post?.caption || '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1E293B;">
+  <div style="max-width: 620px; margin: 30px auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); border: 1px solid #E2E8F0;">
+    
+    <!-- Top Gold Accent Bar -->
+    <div style="height: 4px; background: linear-gradient(90deg, #D4AF37 0%, #F3E5AB 50%, #C5A880 100%);"></div>
+
+    <!-- Executive Header with Leaders Performance Branding -->
+    <div style="background: #0F172A; padding: 26px 32px; color: #FFFFFF;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td>
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 6px;">
+              LEADERS PERFORMANCE
+            </div>
+            <div style="font-size: 20px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px;">
+              Social CRM & Content Ops
+            </div>
+          </td>
+          <td style="text-align: right; vertical-align: middle;">
+            <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">
+              ${badgeText}
+            </span>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Notification Body -->
+    <div style="padding: 28px 32px 20px 32px;">
+      <div style="font-size: 18px; font-weight: 700; color: #0F172A; margin-bottom: 12px; line-height: 1.4;">
+        ${escapeHtml(subject)}
+      </div>
+
+      <!-- Key Metadata Card (Dual Timezone & Channel) -->
+      ${
+        tz || platformLabel
+          ? `
+      <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 18px; margin-bottom: 24px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          ${
+            platformLabel
+              ? `<tr>
+            <td style="padding: 6px 0; color: #64748B; width: 140px; font-weight: 600;">Platform</td>
+            <td style="padding: 6px 0; font-weight: 700; color: #0F172A;">
+              <span style="background: #0F172A; color: #F8FAFC; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">
+                ${escapeHtml(platformLabel)}
+              </span>
+            </td>
+          </tr>`
+              : ''
+          }
+          ${
+            tz
+              ? `<tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Europe/Amsterdam</td>
+            <td style="padding: 6px 0; color: #1E293B; font-weight: 600;">${tz.amsterdam}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Asia/Dubai</td>
+            <td style="padding: 6px 0; color: #1E293B; font-weight: 600;">${tz.dubai}</td>
+          </tr>`
+              : ''
+          }
+          ${
+            post?.revision
+              ? `<tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Revision</td>
+            <td style="padding: 6px 0; color: #1E293B; font-weight: 600;">Revision ${post.revision}</td>
+          </tr>`
+              : ''
+          }
+        </table>
+      </div>`
+          : ''
+      }
+
+      <!-- Post Draft Preview / Body Details -->
+      <div style="margin-bottom: 28px;">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748B; margin-bottom: 8px;">
+          ${caption ? 'Content Preview / Caption:' : 'Notification Details:'}
+        </div>
+        <div style="background: #FFFFFF; border-left: 4px solid #D4AF37; border-top: 1px solid #E2E8F0; border-right: 1px solid #E2E8F0; border-bottom: 1px solid #E2E8F0; border-radius: 0 8px 8px 0; padding: 16px; font-size: 14px; line-height: 1.6; color: #334155; white-space: pre-wrap;">${escapeHtml(
+          caption || body
+        )}</div>
+      </div>
+
+      <!-- Prominent Call to Action Button -->
+      <div style="text-align: center; margin: 32px 0 20px 0;">
+        <a href="${crmUrl}" style="background: #0F172A; border: 2px solid #D4AF37; color: #FFFFFF; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 8px; display: inline-block; box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2);">
+          ${isApproval ? '👉 Review & Approve in Social CRM' : '👉 Open in Social CRM'}
+        </a>
+        <div style="margin-top: 12px; font-size: 12px; color: #94A3B8;">
+          Direct Link: <a href="${crmUrl}" style="color: #64748B; text-decoration: underline;">${crmUrl}</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #F8FAFC; padding: 20px 32px; border-top: 1px solid #E2E8F0; text-align: center; font-size: 12px; color: #94A3B8; line-height: 1.5;">
+      <strong>Leaders Performance Management Consultancies L.L.C</strong> · Dubai<br />
+      Executive Social CRM Automated Governance System · <a href="https://social.leadersperformance.ae" style="color: #64748B; text-decoration: underline;">social.leadersperformance.ae</a>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 export const notificationService = new NotificationService();

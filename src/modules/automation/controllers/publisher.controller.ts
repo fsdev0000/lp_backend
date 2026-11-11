@@ -12,7 +12,8 @@ export class PublisherController {
   public runPublisher = async (req: Request, res: Response): Promise<void> => {
     try {
       const now = req.body?.now ? new Date(req.body.now) : new Date();
-      const summary = await publisherService.run({ now });
+      const dryRun = req.body?.dryRun !== undefined ? Boolean(req.body.dryRun) : undefined;
+      const summary = await publisherService.run({ now, dryRun });
       const outbox = await notificationService.dispatchPendingOutbox();
 
       res.status(200).json({
