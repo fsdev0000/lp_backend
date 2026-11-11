@@ -20,6 +20,12 @@ export class HardeningController {
       const queueEmail = req.query.queueEmail !== 'false';
       const result = await digestService.generateDigest({ now, queueEmail });
 
+      if (queueEmail && result.emailQueued) {
+        await notificationService.dispatchPendingOutbox().catch((err: any) => {
+          console.error('[HardeningController] dispatchPendingOutbox error:', err?.message);
+        });
+      }
+
       res.status(200).json({
         success: true,
         data: result,

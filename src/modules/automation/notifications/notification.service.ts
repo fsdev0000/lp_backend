@@ -72,7 +72,8 @@ export function getRecipientLists(): {
     const cleaned = (raw || '')
       .split(',')
       .map((e) => e.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((e) => !e.toLowerCase().includes('lionel') && !e.toLowerCase().includes('asad') && !e.toLowerCase().includes('sarath'));
     return cleaned.length > 0 ? cleaned : fallback;
   };
 
@@ -498,7 +499,7 @@ export class NotificationService {
     const base = (
       process.env.CRM_BASE_URL ||
       process.env.FRONTEND_URL ||
-      'https://staging.leadersperformance.ae'
+      'https://social.leadersperformance.ae'
     ).replace(/\/+$/, '');
 
     const subject =
@@ -583,7 +584,7 @@ export class NotificationService {
     const base = (
       process.env.CRM_BASE_URL ||
       process.env.FRONTEND_URL ||
-      'https://staging.leadersperformance.ae'
+      'https://social.leadersperformance.ae'
     ).replace(/\/+$/, '');
 
     const subject = `[Workflow Error] ${params.workflowName} failed${params.failedNode ? ` at "${params.failedNode}"` : ''
