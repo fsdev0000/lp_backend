@@ -144,7 +144,8 @@ export function parseAllCalendarSections(
  */
 export async function scanSocialMediaDriveFolders(
   drive: drive_v3.Drive,
-  rootFolderId: string = process.env.DRIVE_ROOT_FOLDER_ID || '177ptcsSWKiBveriapQmPo1KQwFhsi44C'
+  rootFolderId: string = process.env.DRIVE_ROOT_FOLDER_ID || '177ptcsSWKiBveriapQmPo1KQwFhsi44C',
+  options?: { fromDate?: string; toDate?: string }
 ): Promise<DriveFolderListing[]> {
   const folderListings: DriveFolderListing[] = [];
 
@@ -186,6 +187,9 @@ export async function scanSocialMediaDriveFolders(
       if (!item.id || !item.name) continue;
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(item.name)) {
+        if (options?.fromDate && item.name < options.fromDate) continue;
+        if (options?.toDate && item.name > options.toDate) continue;
+
         // Direct date folder (e.g. 03_Youtube/2026-11-05 or 04_Tiktok/2026-11-05)
         const { files, subfolders } = await listDateFolderContents(drive, item.id);
 
@@ -213,6 +217,9 @@ export async function scanSocialMediaDriveFolders(
 
         for (const df of dateFolders.data.files || []) {
           if (df.id && df.name && /^\d{4}-\d{2}-\d{2}$/.test(df.name)) {
+            if (options?.fromDate && df.name < options.fromDate) continue;
+            if (options?.toDate && df.name > options.toDate) continue;
+
             const { files, subfolders } = await listDateFolderContents(drive, df.id);
 
             folderListings.push({
@@ -329,3 +336,4 @@ export async function downloadDriveFileBuffer(
   );
   return Buffer.from(getRes.data as ArrayBuffer);
 }
+

@@ -998,6 +998,7 @@ export class IngestService {
     const isDocx =
       asset.mimeType ===
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      asset.mimeType === 'application/vnd.google-apps.document' ||
       lowerName.endsWith('.docx');
 
     let extractedCaption: string | null = null;
@@ -1223,7 +1224,10 @@ export class IngestService {
     );
 
     console.log('[DumpFromDrive] Scanning Google Drive folders for ready assets...');
-    const folderListings = await scanSocialMediaDriveFolders(ctx.drive);
+    const folderListings = await scanSocialMediaDriveFolders(ctx.drive, undefined, {
+      fromDate: ingestResult.windowStartYmd,
+      toDate: ingestResult.windowEndYmd,
+    });
     const listingsMap = new Map<string, DriveFolderListing>();
     for (const fl of folderListings) {
       const clean = (fl.drivePath || '').replace(/^\/+|\/+$/g, '');
