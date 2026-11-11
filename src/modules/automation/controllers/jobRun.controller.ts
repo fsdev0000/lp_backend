@@ -46,7 +46,18 @@ export class JobRunController {
    */
   public finishJobRun = async (req: Request, res: Response): Promise<void> => {
     try {
-      const id = String(req.body?.id || req.body?.jobRunId || '').trim();
+      let id = String(req.body?.id || req.body?.jobRunId || '').trim();
+      if (!id) {
+        const workflow = String(req.body?.workflow || '').trim();
+        const latest = await automationPrisma.jobRun.findFirst({
+          where: workflow ? { workflow, finishedAt: null } : { finishedAt: null },
+          orderBy: { startedAt: 'desc' },
+        });
+        if (latest) {
+          id = latest.id;
+        }
+      }
+
       if (!id) {
         res.status(400).json({
           success: false,
