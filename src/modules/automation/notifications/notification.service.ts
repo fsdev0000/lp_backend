@@ -579,6 +579,8 @@ export class NotificationService {
     failedNode?: string;
     errorMessage: string;
     executionId?: string;
+    executionUrl?: string;
+    isTest?: boolean;
   }) {
     const r = getRecipientLists();
     const base = (
@@ -587,12 +589,18 @@ export class NotificationService {
       'https://social.leadersperformance.ae'
     ).replace(/\/+$/, '');
 
-    const subject = `[Workflow Error] ${params.workflowName} failed${params.failedNode ? ` at "${params.failedNode}"` : ''
-      }`;
+    const isTest = params.isTest || params.workflowName === 'Example Workflow';
+    const prefix = isTest ? '[Test · Workflow Error]' : '[Workflow Error]';
+    const testTag = isTest ? ' (n8n Simulation)' : '';
+
+    const subject = `${prefix} ${params.workflowName} failed${
+      params.failedNode ? ` at "${params.failedNode}"` : ''
+    }${testTag}`;
     const body = [
       `n8n workflow "${params.workflowName}" crashed.`,
       `Failed node: ${params.failedNode || 'unknown'}`,
       `Error: ${params.errorMessage}`,
+      `Execution ID: ${params.executionId || 'none'}`,
       `Inspect JobRuns in Social CRM: ${base}/accounts`,
     ].join('\n');
 
@@ -734,13 +742,21 @@ export class NotificationService {
           });
         }
 
-        const html = buildLeadersPerformanceNotificationHtml({
-          subject: notif.subject,
-          type: notif.type,
-          body: notif.body,
-          postId: notif.postId,
-          post: postData,
-        });
+        let html: string;
+        if (notif.type === 'JOB_FAILED') {
+          html = buildLeadersPerformanceWorkflowErrorHtml({
+            workflowName: notif.subject.replace(/^\[(Test · )?Workflow Error\]\s*/, '').split(' failed')[0] || 'Social CRM Workflow',
+            errorMessage: notif.body,
+          });
+        } else {
+          html = buildLeadersPerformanceNotificationHtml({
+            subject: notif.subject,
+            type: notif.type,
+            body: notif.body,
+            postId: notif.postId,
+            post: postData,
+          });
+        }
 
         const success = await sendSmtpEmail({
           to: recipients,
@@ -850,6 +866,7 @@ export function buildLeadersPerformanceNotificationHtml(params: {
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td>
+            <img src="https://social.leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" style="height: 38px; display: block; margin-bottom: 12px;" />
             <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 6px;">
               LEADERS PERFORMANCE
             </div>
@@ -941,6 +958,154 @@ export function buildLeadersPerformanceNotificationHtml(params: {
       <strong>Leaders Performance Management Consultancies L.L.C</strong> · Dubai<br />
       Executive Social CRM Automated Governance System · <a href="https://social.leadersperformance.ae" style="color: #64748B; text-decoration: underline;">social.leadersperformance.ae</a>
     </div>
+  </div>
+</body>
+</html>`;
+}
+
+export function buildLeadersPerformanceWorkflowErrorHtml(params: {
+  workflowName: string;
+  failedNode?: string;
+  errorMessage: string;
+  executionId?: string;
+  executionUrl?: string;
+  isTest?: boolean;
+}): string {
+  const { workflowName, failedNode, errorMessage, executionId, executionUrl, isTest } = params;
+  const crmUrl = (process.env.CRM_BASE_URL || 'https://social.leadersperformance.ae').replace(/\/+$/, '') + '/accounts';
+  const now = new Date();
+  const tz = formatDualTimezone(now);
+
+  const isMockSimulation = isTest || workflowName === 'Example Workflow' || failedNode === 'Node With Error';
+  const badgeText = isMockSimulation ? '🧪 SIMULATION TEST' : '🚨 WORKFLOW CRASH';
+  const badgeBg = isMockSimulation ? '#FEF3C7' : '#FEE2E2';
+  const badgeColor = isMockSimulation ? '#92400E' : '#991B1B';
+  const badgeBorder = isMockSimulation ? '#FCD34D' : '#FCA5A5';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workflow Alert · ${escapeHtml(workflowName)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1E293B;">
+  <div style="max-width: 640px; margin: 30px auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); border: 1px solid #E2E8F0;">
+    
+    <!-- Top Gold Accent Bar -->
+    <div style="height: 4px; background: linear-gradient(90deg, #D4AF37 0%, #F3E5AB 50%, #C5A880 100%);"></div>
+
+    <!-- Executive Header with Leaders Performance Branding -->
+    <div style="background: #0F172A; padding: 26px 32px; color: #FFFFFF;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td>
+            <img src="https://social.leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" style="height: 38px; display: block; margin-bottom: 12px;" />
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
+              LEADERS PERFORMANCE
+            </div>
+            <div style="font-size: 19px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px;">
+              Social CRM & Automation Engine
+            </div>
+          </td>
+          <td style="text-align: right; vertical-align: middle;">
+            <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">
+              ${badgeText}
+            </span>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Alert Body -->
+    <div style="padding: 28px 32px 24px 32px;">
+      
+      ${
+        isMockSimulation
+          ? `
+      <div style="background: #FFFBEB; border-left: 4px solid #F59E0B; border-top: 1px solid #FDE68A; border-right: 1px solid #FDE68A; border-bottom: 1px solid #FDE68A; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; color: #92400E; line-height: 1.5;">
+        <strong>ℹ️ n8n Error Trigger Simulation:</strong> This email was dispatched by a manual test run in n8n using sample data (<em>"Example Workflow"</em>). When an active production workflow (such as Flow 1, 2, 3, 4, or 5) encounters an issue, this alert will dynamically display the exact workflow name and the failing node.
+      </div>`
+          : ''
+      }
+
+      <div style="font-size: 18px; font-weight: 700; color: #0F172A; margin-bottom: 14px; line-height: 1.4;">
+        ${
+          isMockSimulation
+            ? 'Workflow Crash Notification Test'
+            : `Execution Failure in <span style="color: #DC2626;">${escapeHtml(workflowName)}</span>`
+        }
+      </div>
+
+      <!-- Failure Metadata Card -->
+      <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 18px; margin-bottom: 24px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; width: 140px; font-weight: 600;">Workflow</td>
+            <td style="padding: 6px 0; font-weight: 700; color: #0F172A;">
+              <span style="background: #0F172A; color: #F8FAFC; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">
+                ${escapeHtml(workflowName)}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Failed Node</td>
+            <td style="padding: 6px 0; font-weight: 700; color: #DC2626;">
+              ${escapeHtml(failedNode || 'Unspecified Node')}
+            </td>
+          </tr>
+          ${
+            executionId
+              ? `<tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Execution ID</td>
+            <td style="padding: 6px 0; color: #334155; font-family: monospace;">#${escapeHtml(executionId)}</td>
+          </tr>`
+              : ''
+          }
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Incident Time</td>
+            <td style="padding: 6px 0; color: #334155;">${tz.amsterdam} (AMS) · ${tz.dubai} (DXB)</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Error Details Box -->
+      <div style="margin-bottom: 28px;">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748B; margin-bottom: 8px;">
+          Error Details & Message:
+        </div>
+        <div style="background: #0B0F19; border: 1px solid #1E293B; border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5; color: #F87171; white-space: pre-wrap; word-break: break-all;">${escapeHtml(
+          errorMessage
+        )}</div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="text-align: center; margin: 30px 0 16px 0;">
+        <a href="${crmUrl}" style="background: #0F172A; border: 2px solid #D4AF37; color: #FFFFFF; font-size: 14px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; display: inline-block; box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2); margin: 4px;">
+          Inspect JobRuns in Social CRM →
+        </a>
+        ${
+          executionUrl
+            ? `
+        <a href="${escapeHtml(executionUrl)}" style="background: #FFFFFF; border: 1px solid #CBD5E1; color: #475569; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 8px; display: inline-block; margin: 4px;">
+          Open n8n Execution
+        </a>`
+            : ''
+        }
+      </div>
+
+    </div>
+
+    <!-- Luxury Executive Footer -->
+    <div style="background: #F8FAFC; border-top: 1px solid #E2E8F0; padding: 20px 32px; text-align: center;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: #94A3B8; text-transform: uppercase;">
+        Leaders Performance · Social CRM Automation
+      </div>
+      <div style="font-size: 11px; color: #94A3B8; margin-top: 4px;">
+        Automated Operations & Workflow Diagnostics · Confidential
+      </div>
+    </div>
+
   </div>
 </body>
 </html>`;

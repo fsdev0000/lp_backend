@@ -6,7 +6,7 @@ import { digestService } from '../hardening/digest.service';
 import { maintenanceService } from '../hardening/maintenance.service';
 import { inventoryService } from '../hardening/inventory.service';
 import { calendarVerificationService } from '../hardening/calendarVerification.service';
-import { notificationService, getRecipientLists } from '../notifications/notification.service';
+import { notificationService, getRecipientLists, buildLeadersPerformanceWorkflowErrorHtml } from '../notifications/notification.service';
 import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 
 export class HardeningController {
@@ -133,6 +133,8 @@ export class HardeningController {
       const failedNode = req.body?.failedNode ? String(req.body.failedNode).trim() : undefined;
       const errorMessage = String(req.body?.errorMessage || req.body?.error || 'Workflow execution failed');
       const executionId = req.body?.executionId ? String(req.body.executionId) : undefined;
+      const executionUrl = req.body?.executionUrl ? String(req.body.executionUrl) : undefined;
+      const isTest = req.body?.isTest === true || workflowName === 'Example Workflow' || failedNode === 'Node With Error';
 
       const jobRun = await automationPrisma.jobRun.create({
         data: {
@@ -140,7 +142,12 @@ export class HardeningController {
           startedAt: new Date(),
           finishedAt: new Date(),
           error: failedNode ? `[${failedNode}] ${errorMessage}` : errorMessage,
-          stats: { executionId: executionId || null, failedNode: failedNode || null },
+          stats: {
+            executionId: executionId || null,
+            executionUrl: executionUrl || null,
+            failedNode: failedNode || null,
+            isTest,
+          },
         },
       });
 
@@ -149,9 +156,11 @@ export class HardeningController {
         failedNode,
         errorMessage,
         executionId,
+        executionUrl,
+        isTest,
       });
 
-      // Dispatch emergency crash notification via verified SMTP
+      // Dispatch emergency crash notification via verified SMTP with Leaders Performance branding
       try {
         const admins = getRecipientLists().admin
           .filter(
@@ -161,17 +170,18 @@ export class HardeningController {
               !e.toLowerCase().includes('sarath@leadersperformance.ae')
           );
         if (admins.length > 0) {
+          const html = buildLeadersPerformanceWorkflowErrorHtml({
+            workflowName,
+            failedNode,
+            errorMessage,
+            executionId,
+            executionUrl,
+            isTest,
+          });
           await sendSmtpEmail({
             to: admins,
             subject: queued.notification.subject,
-            html: `<div style="font-family: sans-serif; padding: 20px; border: 1px solid #EF4444; border-radius: 8px;">
-              <h2 style="color: #DC2626;">🚨 Workflow Crash Alert</h2>
-              <p><strong>Workflow:</strong> ${workflowName}</p>
-              <p><strong>Failed Node:</strong> ${failedNode || 'N/A'}</p>
-              <p><strong>Error:</strong> <pre style="background: #F8FAFC; padding: 10px; border-radius: 4px;">${errorMessage}</pre></p>
-              <p><strong>Execution ID:</strong> ${executionId || 'N/A'}</p>
-              <p style="font-size: 11px; color: #94A3B8; margin-top: 20px;">Leaders Performance Automation Engine</p>
-            </div>`,
+            html,
           });
           await notificationService.markSent(queued.notification.id);
         }
