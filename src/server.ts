@@ -143,6 +143,7 @@ app.get('/robots.txt', (_req, res) => {
 app.use(cors(corsOptions));
 app.use(
   express.json({
+    limit: '25mb',
     verify: (req: any, _res, buf) => {
       req.rawBody = buf;
     },
