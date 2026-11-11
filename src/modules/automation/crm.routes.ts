@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { requireCrmAuth, requireCrmRoles } from '../../middleware/crmRoleAuth';
+import { requireCrmAuth, requireCrmRoles, optionalCrmAuth } from '../../middleware/crmRoleAuth';
 import { crmPostsController } from './controllers/crmPosts.controller';
 import { hardeningController } from './controllers/hardening.controller';
 
@@ -11,13 +11,15 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-// All CRM automation routes require a valid logged-in CRM session token
+// Caption/document file content preview (accessible to reviewer/approver with optional auth)
+crmAutomationRouter.get('/posts/:id/caption-file-content', optionalCrmAuth, crmPostsController.getCaptionFileContent);
+
+// All CRM automation write routes and admin management require a valid logged-in CRM session token
 crmAutomationRouter.use(requireCrmAuth);
 
 // Read endpoints (accessible to approver, editor, admin)
 crmAutomationRouter.get('/posts', crmPostsController.listPosts);
 crmAutomationRouter.get('/posts/:id', crmPostsController.getPostDetail);
-crmAutomationRouter.get('/posts/:id/caption-file-content', crmPostsController.getCaptionFileContent);
 
 // Editor & Admin actions (edit, replace media, resubmit, manual-done)
 crmAutomationRouter.patch(

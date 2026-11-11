@@ -6,7 +6,24 @@ export const LINKEDIN_MEMBER_PLATFORM = 'LINKEDIN';
 export const LINKEDIN_PAGE_PLATFORM = 'LINKEDIN_PAGE';
 
 export const LINKEDIN_MEMBER_SCOPES = ['openid', 'profile', 'email', 'w_member_social'];
-export const LINKEDIN_PAGE_SCOPES = ['r_organization_social', 'rw_organization_admin'];
+
+/**
+ * Returns LinkedIn Company Page scopes configured in environment, or safe defaults.
+ * Notice: 'rw_organization_admin' is intentionally omitted by default because standard
+ * Community Management API apps reject it with 'invalid_scope_error'.
+ */
+export function getLinkedInPageScopes(): string[] {
+  if (process.env.LINKEDIN_PAGE_SCOPES) {
+    const parsed = process.env.LINKEDIN_PAGE_SCOPES
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parsed.length > 0) return parsed;
+  }
+  return ['r_organization_social', 'w_organization_social'];
+}
+
+export const LINKEDIN_PAGE_SCOPES = getLinkedInPageScopes();
 
 /**
  * Kill switch: nothing may be posted to LinkedIn unless LINKEDIN_PUBLISHING_ENABLED === 'true'.

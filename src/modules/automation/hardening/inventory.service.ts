@@ -497,7 +497,7 @@ export class InventoryService {
               html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1E293B; max-width: 640px; margin: 20px auto; padding: 24px; border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
                 <div style="height: 4px; background: linear-gradient(90deg, #D4AF37 0%, #C5A880 100%); margin: -24px -24px 20px -24px; border-radius: 12px 12px 0 0;"></div>
                 <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-                  <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 12px; border: 0;" border="0" />
+                  <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 12px; border: 0;" border="0" />
                 </a>
                 <div style="font-size: 11px; font-weight: 700; color: #D4AF37; letter-spacing: 2px; text-transform: uppercase;">LEADERS PERFORMANCE · CONTENT OPS</div>
                 <h2 style="color: #0F172A; margin: 6px 0 16px 0;">${subject}</h2>

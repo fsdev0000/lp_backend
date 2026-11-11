@@ -851,15 +851,32 @@ export class CrmPostsService {
     }
 
     // 2. Locate targeted asset or CAPTION_SOURCE asset
-    let targetMedia = post.media.find((m) => assetId && (m.assetId === assetId || m.asset.fileName === assetId));
+    let targetMedia = post.media.find(
+      (m) =>
+        assetId &&
+        (m.assetId === assetId ||
+          m.asset.id === assetId ||
+          m.asset.fileName === assetId ||
+          m.asset.fileName?.toLowerCase() === assetId.toLowerCase())
+    );
     if (!targetMedia) {
       targetMedia = post.media.find((m) => m.role === 'CAPTION_SOURCE');
     }
     if (!targetMedia) {
-      targetMedia = post.media.find((m) =>
-        m.asset.fileName?.toLowerCase().includes('caption') ||
-        m.asset.fileName?.toLowerCase().endsWith('.docx') ||
-        m.asset.fileName?.toLowerCase().endsWith('.txt')
+      targetMedia = post.media.find(
+        (m) =>
+          m.asset.fileName?.toLowerCase().includes('caption') ||
+          m.asset.fileName?.toLowerCase().endsWith('.docx') ||
+          m.asset.fileName?.toLowerCase().endsWith('.txt') ||
+          m.asset.fileName?.toLowerCase().endsWith('.md') ||
+          m.asset.mimeType?.includes('word') ||
+          m.asset.mimeType?.includes('document') ||
+          m.asset.mimeType?.startsWith('text/')
+      );
+    }
+    if (!targetMedia && assetId) {
+      targetMedia = post.media.find(
+        (m) => m.assetId === assetId || m.asset.id === assetId || m.asset.fileName === assetId
       );
     }
 
@@ -892,10 +909,23 @@ export class CrmPostsService {
     try {
       const buf = await this.storage.get(objectKey, asset.bucket);
       if (buf && buf.length > 0) {
+        // Try docx parsing first (validates zip structure)
         try {
           extractedText = extractDocxText(buf);
         } catch {
-          extractedText = buf.toString('utf8');
+          // If not docx, check if plain text, markdown, or RTF
+          const str = buf.toString('utf8');
+          if (!/[\x00-\x08\x0E-\x1F]/.test(str.slice(0, 200))) {
+            if (str.startsWith('{\\rtf')) {
+              extractedText = str
+                .replace(/\\par[d]?/g, '\n')
+                .replace(/\\[a-zA-Z0-9]+[ ]?/g, '')
+                .replace(/[{}]/g, '')
+                .trim();
+            } else {
+              extractedText = str.trim();
+            }
+          }
         }
       }
     } catch (err: any) {

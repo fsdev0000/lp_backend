@@ -870,7 +870,7 @@ export function buildLeadersPerformanceNotificationHtml(params: {
         <tr>
           <td>
             <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-              <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
+              <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
             </a>
             <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
               LEADERS PERFORMANCE
@@ -1006,7 +1006,7 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
         <tr>
           <td>
             <a href="https://leadersperformance.ae" target="_blank" style="text-decoration: none; display: inline-block;">
-              <img src="https://leadersperformance.ae/assets/logo-gold-D-ngdQt_.webp" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
+              <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; margin-bottom: 10px; border: 0;" border="0" />
             </a>
             <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
               LEADERS PERFORMANCE

@@ -87,6 +87,29 @@ export function requireCrmAuth(req: Request, res: Response, next: NextFunction):
 }
 
 /**
+ * Optional authentication: verifies session token if present, but does not block requests if omitted.
+ */
+export function optionalCrmAuth(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authHeader.startsWith('Bearer ')
+    ? authHeader.slice('Bearer '.length).trim()
+    : authHeader;
+
+  if (bearerToken) {
+    const verified = verifyCrmSessionToken(bearerToken);
+    if (verified) {
+      req.crmUser = {
+        id: verified.id,
+        email: verified.email,
+        name: verified.name || verified.email.split('@')[0],
+        role: mapEmailAndRoleToCrmRole(verified.email, verified.role),
+      };
+    }
+  }
+  next();
+}
+
+/**
  * Role guard enforcing Plan Section 1 & 7 role permissions:
  * - Mr. Lionel (approver): approve, request changes, reject, comment, publish-now
  * - Sarath & Asad (editor): edit post, replace media, resubmit, fix blocked posts, comment, manual-done
