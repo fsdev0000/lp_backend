@@ -211,6 +211,27 @@ import { cmsRouter } from './modules/cms';
 app.use('/api/cms', cmsRouter);
 app.use('/api/v1/cms', cmsRouter);
 
+const healthCheckHandler = (_req: express.Request, res: express.Response) => {
+  res.status(200).json({
+    status: 'ok',
+    message: 'Backend is running',
+    timestamp: new Date().toISOString(),
+  });
+};
+
+app.get('/health', healthCheckHandler);
+app.get('/healthz', healthCheckHandler);
+app.get('/api/health', healthCheckHandler);
+app.get('/api/healthz', healthCheckHandler);
+app.get('/api/v1/health', healthCheckHandler);
+app.get('/api/v1/healthz', healthCheckHandler);
+
+const pingHandler = (_req: express.Request, res: express.Response) => {
+  res.status(200).json({ message: 'pong' });
+};
+
+app.get('/ping', pingHandler);
+
 import { internalAutomationRouter } from './modules/automation/internal.routes';
 import { crmAutomationRouter } from './modules/automation/crm.routes';
 app.use('/internal', internalAutomationRouter);
@@ -306,23 +327,6 @@ app.use('/api-docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerS
 app.use('/api/docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/docs', swaggerBasicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-const healthCheckHandler = (_req: express.Request, res: express.Response) => {
-  res.status(200).json({
-    status: 'ok',
-    message: 'Backend is running',
-    timestamp: new Date().toISOString(),
-  });
-};
-
-app.get('/health', healthCheckHandler);
-app.get('/api/health', healthCheckHandler);
-app.get('/api/v1/health', healthCheckHandler);
-
-const pingHandler = (_req: express.Request, res: express.Response) => {
-  res.status(200).json({ message: 'pong' });
-};
-
-app.get('/ping', pingHandler);
 app.get('/api/ping', pingHandler);
 
 import { syncDefaultReferralsToDb } from './services/masterclassReferralService';
