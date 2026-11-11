@@ -109,6 +109,20 @@ export class CalendarVerificationService {
 
         const channels = splitChannelsCell(row.channelRaw || '');
         for (const ch of channels) {
+          const normCh = ch.toLowerCase().trim();
+          // Exclude manual channels from audit as requested (X, INSPO, MEDIUM, WEBSITE)
+          if (
+            normCh.includes('twitter') ||
+            normCh === 'x' ||
+            normCh.includes('inspo') ||
+            normCh.includes('medium') ||
+            normCh.includes('website') ||
+            normCh.includes('blog') ||
+            normCh.includes('cms')
+          ) {
+            continue;
+          }
+
           total++;
           const targetTime = row.timeHhMm || '09:00';
           const scheduledDate = new Date(`${row.dateYmd}T${targetTime}:00`);
@@ -194,6 +208,15 @@ export class CalendarVerificationService {
     } else {
       // 3. Fallback: Audit purely from lp_backend DB records
       for (const p of dbPosts) {
+        if (
+          p.platform === 'X' ||
+          p.platform === 'INSPO' ||
+          p.platform === 'MEDIUM' ||
+          p.platform === 'WEBSITE'
+        ) {
+          continue;
+        }
+
         total++;
         const pDate = p.scheduledAt.toISOString().split('T')[0];
         const pTime = p.scheduledAt.toISOString().split('T')[1].slice(0, 5);

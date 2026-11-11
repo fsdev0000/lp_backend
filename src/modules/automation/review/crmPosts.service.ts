@@ -136,6 +136,11 @@ export class CrmPostsService {
       } else if (platforms.length > 1) {
         where.platform = { in: platforms };
       }
+    } else {
+      // By default hide manual channels (X, INSPO, MEDIUM, WEBSITE) from CRM feeds
+      where.platform = {
+        notIn: ['X', 'INSPO', 'MEDIUM', 'WEBSITE'],
+      };
     }
 
     if (query.from || query.to) {

@@ -256,6 +256,16 @@ export class IngestService {
           activeAccounts
         );
 
+        // Hide / Skip manual posting channels (X, INSPO, MEDIUM, WEBSITE) from automated post creation
+        if (
+          resolved.platform === 'X' ||
+          resolved.platform === 'INSPO' ||
+          resolved.platform === 'MEDIUM' ||
+          resolved.platform === 'WEBSITE'
+        ) {
+          continue;
+        }
+
         const idempotencyKey = resolved.known
           ? `${contentItem.id}|${resolved.platform}|${resolved.accountId || 'default'}`
           : `${contentItem.id}|UNKNOWN:${resolved.normalizedAlias}|none`;
