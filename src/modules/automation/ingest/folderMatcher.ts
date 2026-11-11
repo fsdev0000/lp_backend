@@ -24,7 +24,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '01_Linkedin/01_Quotes',
     platform: 'LINKEDIN',
     postKind: 'Image',
-    contentTypeAliases: ['quote', 'quotes', 'quote image', 'quote post', 'citaten'],
+    contentTypeAliases: ['quote', 'quotes', 'quote image', 'quote post', 'citaten', 'quote fps', 'quote pls', 'quote profit leak scan', 'quote founder pressure scan'],
     mode: 'AUTO',
     expectedFiles: '1 image + caption',
   },
@@ -32,7 +32,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '01_Linkedin/02_Poster',
     platform: 'LINKEDIN',
     postKind: 'Image',
-    contentTypeAliases: ['poster', 'posters', 'image', 'single image', 'photo', 'infographic', 'carousel'],
+    contentTypeAliases: ['poster', 'posters', 'image', 'single image', 'photo', 'infographic', 'carousel', 'carousels', 'avatar picture / photo', 'avatar picture', 'avatar photo'],
     mode: 'AUTO',
     expectedFiles: '1 image + caption',
   },
@@ -48,7 +48,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '01_Linkedin/04_Newsletter_Article',
     platform: 'LINKEDIN_NEWSLETTER',
     postKind: 'Article',
-    contentTypeAliases: ['newsletter', 'article', 'newsletter article', 'linkedin newsletter', 'linkedin article'],
+    contentTypeAliases: ['newsletter', 'article', 'newsletter article', 'linkedin newsletter', 'linkedin article', 'linkedin article post', 'article post'],
     mode: 'MANUAL',
     expectedFiles: 'article .docx + cover image',
   },
@@ -56,7 +56,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '02_Instagram/01_Video',
     platform: 'INSTAGRAM',
     postKind: 'Reel',
-    contentTypeAliases: ['video', 'videos', 'reel', 'reels', 'short', 'ig reel'],
+    contentTypeAliases: ['video', 'videos', 'reel', 'reels', 'short', 'ig reel', 'video (script chloë)', 'video script chloë', 'video script'],
     mode: 'AUTO',
     expectedFiles: '1 video + caption',
   },
@@ -64,7 +64,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '02_Instagram/02_Photo',
     platform: 'INSTAGRAM',
     postKind: 'Image',
-    contentTypeAliases: ['photo', 'photos', 'image', 'single image', 'quote', 'quotes', 'poster', 'posters', 'carousel', 'carousels'],
+    contentTypeAliases: ['photo', 'photos', 'image', 'single image', 'quote', 'quotes', 'quote fps', 'quote pls', 'poster', 'posters', 'carousel', 'carousels', 'avatar picture / photo', 'avatar picture', 'avatar photo'],
     mode: 'AUTO',
     expectedFiles: '1 image, or 2-10 images sorted by file name + caption',
   },
@@ -80,7 +80,7 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '04_Tiktok',
     platform: 'TIKTOK',
     postKind: 'Video',
-    contentTypeAliases: ['video', 'videos', 'tiktok', 'short', 'reel', 'dutch tiktok'],
+    contentTypeAliases: ['video', 'videos', 'tiktok', 'short', 'reel', 'dutch tiktok', 'dutch video', 'dutch video from the series'],
     mode: 'AUTO',
     expectedFiles: '1 video (.mov/.mp4) + caption',
   },
@@ -95,6 +95,7 @@ const BUILTIN_CHANNEL_ALIASES: Record<
   'linkedin personal': { platform: 'LINKEDIN', mode: 'AUTO' },
   'linkedin lionel': { platform: 'LINKEDIN', mode: 'AUTO' },
   'linkedin company': { platform: 'LINKEDIN', mode: 'AUTO' },
+  'linkedin business': { platform: 'LINKEDIN', mode: 'AUTO' },
   'linkedin page': { platform: 'LINKEDIN', mode: 'AUTO' },
   'leaders performance linkedin': { platform: 'LINKEDIN', mode: 'AUTO' },
   'linkedin newsletter': { platform: 'LINKEDIN_NEWSLETTER', mode: 'MANUAL' },
@@ -107,10 +108,13 @@ const BUILTIN_CHANNEL_ALIASES: Record<
   yt: { platform: 'YOUTUBE', mode: 'AUTO' },
   'youtube video': { platform: 'YOUTUBE', mode: 'AUTO' },
   'youtube shorts': { platform: 'YOUTUBE', mode: 'AUTO' },
+  'youtube account': { platform: 'YOUTUBE', mode: 'AUTO' },
+  'youtube dutch account': { platform: 'YOUTUBE', mode: 'AUTO' },
   tiktok: { platform: 'TIKTOK', mode: 'AUTO' },
   'tiktok nl': { platform: 'TIKTOK', mode: 'AUTO' },
   'dutch tiktok': { platform: 'TIKTOK', mode: 'AUTO' },
   'tiktok dutch': { platform: 'TIKTOK', mode: 'AUTO' },
+  'tiktok dutch account': { platform: 'TIKTOK', mode: 'AUTO' },
   tt: { platform: 'TIKTOK', mode: 'AUTO' },
   medium: { platform: 'MEDIUM', mode: 'MANUAL' },
   inspo: { platform: 'INSPO', mode: 'MANUAL' },
@@ -161,8 +165,8 @@ export function resolveChannelAlias(
 
   // Special case: LinkedIn + Newsletter/Article in column D -> LINKEDIN_NEWSLETTER (MANUAL)
   if (
-    (normalizedAlias === 'linkedin' || normalizedAlias === 'li') &&
-    (normalizedType.includes('newsletter') || normalizedType === 'article')
+    (normalizedAlias.includes('linkedin') || normalizedAlias === 'li') &&
+    (normalizedType.includes('newsletter') || normalizedType.includes('article'))
   ) {
     return {
       known: true,
