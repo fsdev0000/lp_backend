@@ -6,7 +6,8 @@ import { digestService } from '../hardening/digest.service';
 import { maintenanceService } from '../hardening/maintenance.service';
 import { inventoryService } from '../hardening/inventory.service';
 import { calendarVerificationService } from '../hardening/calendarVerification.service';
-import { notificationService } from '../notifications/notification.service';
+import { notificationService, getRecipientLists } from '../notifications/notification.service';
+import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 
 export class HardeningController {
   /**
@@ -143,6 +144,34 @@ export class HardeningController {
         errorMessage,
         executionId,
       });
+
+      // Dispatch emergency crash notification via verified SMTP
+      try {
+        const admins = getRecipientLists().admin
+          .filter(
+            (e) =>
+              !e.toLowerCase().includes('lionel') &&
+              !e.toLowerCase().includes('asad') &&
+              !e.toLowerCase().includes('sarath@leadersperformance.ae')
+          );
+        if (admins.length > 0) {
+          await sendSmtpEmail({
+            to: admins,
+            subject: queued.notification.subject,
+            html: `<div style="font-family: sans-serif; padding: 20px; border: 1px solid #EF4444; border-radius: 8px;">
+              <h2 style="color: #DC2626;">🚨 Workflow Crash Alert</h2>
+              <p><strong>Workflow:</strong> ${workflowName}</p>
+              <p><strong>Failed Node:</strong> ${failedNode || 'N/A'}</p>
+              <p><strong>Error:</strong> <pre style="background: #F8FAFC; padding: 10px; border-radius: 4px;">${errorMessage}</pre></p>
+              <p><strong>Execution ID:</strong> ${executionId || 'N/A'}</p>
+              <p style="font-size: 11px; color: #94A3B8; margin-top: 20px;">Leaders Performance Automation Engine</p>
+            </div>`,
+          });
+          await notificationService.markSent(queued.notification.id);
+        }
+      } catch (emailErr: any) {
+        console.error('[HardeningController] Failed to dispatch crash email via SMTP:', emailErr?.message);
+      }
 
       res.status(200).json({
         success: true,

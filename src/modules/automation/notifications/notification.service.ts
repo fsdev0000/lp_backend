@@ -1,4 +1,5 @@
 import { automationPrisma } from '../state/transition';
+import { sendSmtpEmail } from './smtpDispatcher';
 
 export interface DualTimezoneFormatted {
   amsterdam: string;
@@ -694,6 +695,64 @@ export class NotificationService {
       `[Notification] postId=${updated.postId || 'none'} notificationId=${updated.id} attempt=${nextAttempt} status=${nextStatus}`
     );
     return updated;
+  }
+
+  /**
+   * Automatically dispatches all pending outbox notifications via verified SMTP.
+   * Handles deduplication, recipient filtering, and updates status to SENT or FAILED.
+   */
+  public async dispatchPendingOutbox(): Promise<{ sent: number; failed: number }> {
+    const pending = await automationPrisma.notification.findMany({
+      where: { status: 'PENDING' },
+      take: 50,
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const notif of pending) {
+      try {
+        const recipients = [...notif.recipients, ...(notif.cc || [])]
+          .filter(
+            (e) =>
+              !e.toLowerCase().includes('lionel') &&
+              !e.toLowerCase().includes('asad') &&
+              !e.toLowerCase().includes('sarath@leadersperformance.ae')
+          )
+          .filter((val, idx, arr) => arr.indexOf(val) === idx);
+
+        if (recipients.length === 0) {
+          await this.markSent(notif.id);
+          continue;
+        }
+
+        const success = await sendSmtpEmail({
+          to: recipients,
+          subject: notif.subject,
+          html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1E293B; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #E2E8F0; border-radius: 8px;">
+            <h3 style="color: #0F172A; margin-top: 0;">${notif.subject}</h3>
+            <div style="white-space: pre-wrap; font-size: 14px;">${notif.body}</div>
+            <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #E2E8F0; font-size: 11px; color: #94A3B8;">
+              Leaders Performance Content Ops · Automated Notification
+            </div>
+          </div>`,
+        });
+
+        if (success) {
+          await this.markSent(notif.id);
+          sent++;
+        } else {
+          await this.markFailed(notif.id, 'SMTP dispatcher returned false');
+          failed++;
+        }
+      } catch (err: any) {
+        await this.markFailed(notif.id, err?.message || 'SMTP exception');
+        failed++;
+      }
+    }
+
+    return { sent, failed };
   }
 }
 
