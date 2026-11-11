@@ -17,6 +17,7 @@ crmAutomationRouter.use(requireCrmAuth);
 // Read endpoints (accessible to approver, editor, admin)
 crmAutomationRouter.get('/posts', crmPostsController.listPosts);
 crmAutomationRouter.get('/posts/:id', crmPostsController.getPostDetail);
+crmAutomationRouter.get('/posts/:id/caption-file-content', crmPostsController.getCaptionFileContent);
 
 // Editor & Admin actions (edit, replace media, resubmit, manual-done)
 crmAutomationRouter.patch(

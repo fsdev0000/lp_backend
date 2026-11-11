@@ -18,6 +18,7 @@ import {
 import {
   probeMediaBuffer,
   validateMediaForPlatform,
+  extractDocxText,
 } from '../ingest/fileParsers';
 import { PLATFORM_LIMITS } from './geminiDraft.service';
 import { AuthenticatedCrmUser } from '../../../middleware/crmRoleAuth';
@@ -813,6 +814,119 @@ export class CrmPostsService {
     });
 
     return this.getPostDetail(postId);
+  }
+
+  /**
+   * GET /posts/:id/caption-file-content
+   * Loads and extracts text content from the post's caption or attached document file.
+   */
+  public async getCaptionFileContent(postId: string, assetId?: string) {
+    const post = await automationPrisma.post.findUnique({
+      where: { id: postId },
+      include: {
+        media: {
+          include: { asset: true },
+          orderBy: { position: 'asc' },
+        },
+      },
+    });
+
+    if (!post) {
+      throw new Error(`Post ${postId} not found`);
+    }
+
+    // 1. If post already has non-empty caption text and no specific alternative asset requested
+    if (post.caption && post.caption.trim() && !assetId) {
+      const captionMedia = post.media.find((m) => m.role === 'CAPTION_SOURCE') || post.media[0];
+      return {
+        caption: post.caption.trim(),
+        source: post.captionSource || 'DATABASE',
+        fileName: captionMedia?.asset?.fileName || 'Caption',
+        mimeType: captionMedia?.asset?.mimeType || 'text/plain',
+        sizeBytes: Number(captionMedia?.asset?.sizeBytes || 0),
+        signedUrl: captionMedia?.asset?.objectKey
+          ? await this.storage.signedUrl(captionMedia.asset.objectKey, 3600, captionMedia.asset.bucket).catch(() => null)
+          : null,
+      };
+    }
+
+    // 2. Locate targeted asset or CAPTION_SOURCE asset
+    let targetMedia = post.media.find((m) => assetId && (m.assetId === assetId || m.asset.fileName === assetId));
+    if (!targetMedia) {
+      targetMedia = post.media.find((m) => m.role === 'CAPTION_SOURCE');
+    }
+    if (!targetMedia) {
+      targetMedia = post.media.find((m) =>
+        m.asset.fileName?.toLowerCase().includes('caption') ||
+        m.asset.fileName?.toLowerCase().endsWith('.docx') ||
+        m.asset.fileName?.toLowerCase().endsWith('.txt')
+      );
+    }
+
+    if (!targetMedia || !targetMedia.asset?.objectKey) {
+      return {
+        caption: post.caption || null,
+        source: 'EMPTY',
+        fileName: targetMedia?.asset?.fileName || null,
+        mimeType: targetMedia?.asset?.mimeType || null,
+        sizeBytes: 0,
+        signedUrl: null,
+      };
+    }
+
+    const asset = targetMedia.asset;
+    const objectKey = asset.objectKey;
+    if (!objectKey) {
+      return {
+        caption: post.caption || null,
+        source: 'EMPTY',
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        sizeBytes: 0,
+        signedUrl: null,
+      };
+    }
+
+    let extractedText: string | null = null;
+
+    try {
+      const buf = await this.storage.get(objectKey, asset.bucket);
+      if (buf && buf.length > 0) {
+        try {
+          extractedText = extractDocxText(buf);
+        } catch {
+          extractedText = buf.toString('utf8');
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[getCaptionFileContent] failed to read buffer for asset ${asset.id}:`, err?.message);
+    }
+
+    if (extractedText && extractedText.trim()) {
+      await automationPrisma.post.update({
+        where: { id: post.id },
+        data: {
+          caption: extractedText.trim(),
+          captionSource: 'DRIVE_FILE',
+        },
+      });
+    }
+
+    let signedUrl: string | null = null;
+    try {
+      signedUrl = await this.storage.signedUrl(objectKey, 3600, asset.bucket);
+    } catch {
+      signedUrl = null;
+    }
+
+    return {
+      caption: extractedText?.trim() || post.caption || null,
+      source: extractedText ? 'FILE_EXTRACTED' : 'UNEXTRACTED',
+      fileName: asset.fileName,
+      mimeType: asset.mimeType,
+      sizeBytes: Number(asset.sizeBytes || 0),
+      signedUrl,
+    };
   }
 }
 

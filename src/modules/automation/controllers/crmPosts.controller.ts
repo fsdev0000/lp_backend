@@ -64,6 +64,20 @@ export class CrmPostsController {
     }
   };
 
+  public getCaptionFileContent = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const postId = String(req.params.id || '').trim();
+      const assetId = req.query.assetId ? String(req.query.assetId) : undefined;
+      const content = await crmPostsService.getCaptionFileContent(postId, assetId);
+      res.status(200).json({
+        success: true,
+        data: content,
+      });
+    } catch (err) {
+      handleControllerError(res, err, 'Failed to get caption file content');
+    }
+  };
+
   public updatePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const postId = String(req.params.id || '').trim();
