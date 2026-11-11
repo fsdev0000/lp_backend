@@ -7,6 +7,7 @@ import {
   LINKEDIN_MEMBER_SCOPES,
   LINKEDIN_PAGE_PLATFORM,
   LINKEDIN_PAGE_SCOPES,
+  getLinkedInPageScopes,
 } from '../config/linkedin.config';
 import { LinkedInAnalyticsAdapter } from '../../analytics/adapters/linkedinAnalytics.adapter';
 import { contentPrisma } from '../../content/services/content.service';
@@ -69,6 +70,10 @@ export class LinkedInService {
     return entry;
   }
 
+  public static getState(state: string): PendingOAuthState | undefined {
+    return this.pendingStates.get(state);
+  }
+
   /**
    * Generates OAuth 2.0 authorization URL for LinkedIn.
    * Defaults to company page read-only analytics scopes ('r_organization_social', 'rw_organization_admin')
@@ -96,7 +101,7 @@ export class LinkedInService {
       );
     }
 
-    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES;
+    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : getLinkedInPageScopes();
     const activeScopes =
       scopes && scopes.length > 0
         ? scopes
@@ -108,7 +113,7 @@ export class LinkedInService {
         ? activeScopes.filter((s) => s !== 'w_member_social' && s !== 'w_organization_social')
         : activeScopes;
 
-    const finalScopes = sanitizedScopes.length > 0 ? sanitizedScopes : LINKEDIN_PAGE_SCOPES;
+    const finalScopes = sanitizedScopes.length > 0 ? sanitizedScopes : getLinkedInPageScopes();
     const authState = state?.trim() || `li_${target}_${randomBytes(16).toString('hex')}`;
 
     LinkedInService.registerOAuthState(authState, {

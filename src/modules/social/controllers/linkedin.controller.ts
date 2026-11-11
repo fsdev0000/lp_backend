@@ -61,9 +61,25 @@ export class LinkedInController {
       const returnTo = req.query.return_to as string | undefined;
 
       if (error) {
+        const stateEntry = state ? LinkedInService.getState(state) : undefined;
+        console.error(`[LinkedInCallback] OAuth failed: ${error} - ${errorDescription}`, {
+          state,
+          stateEntry,
+          pageClientId: process.env.LINKEDIN_PAGE_CLIENT_ID || '78ocx3kz1moo0s',
+        });
         res.status(400).json({
           success: false,
           error: `LinkedIn authorization failed: ${error} - ${errorDescription || 'No description provided'}`,
+          diagnostics: {
+            requestedScopes: stateEntry?.scopes || getLinkedInPageScopes(),
+            target: stateEntry?.target || 'page',
+            clientId:
+              stateEntry?.target === 'member'
+                ? process.env.LINKEDIN_CLIENT_ID || '86mkbep31a3f0n'
+                : process.env.LINKEDIN_PAGE_CLIENT_ID || '78ocx3kz1moo0s',
+            actionRequired:
+              'Check your LinkedIn Developer Portal (https://www.linkedin.com/developers/apps). Under Products, ensure "Community Management API" is approved, and under the Auth tab verify what scopes are listed under "OAuth 2.0 scopes".',
+          },
         });
         return;
       }

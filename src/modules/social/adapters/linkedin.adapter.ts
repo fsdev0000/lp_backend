@@ -10,6 +10,7 @@ import {
   LINKEDIN_MEMBER_SCOPES,
   LINKEDIN_PAGE_PLATFORM,
   LINKEDIN_PAGE_SCOPES,
+  getLinkedInPageScopes,
 } from '../config/linkedin.config';
 
 export const socialPrisma = new PrismaClient();
@@ -118,7 +119,7 @@ export class LinkedInAdapter {
     const creds = this.getCredentials(target);
     const uri = redirectUri || creds.redirectUri;
     const authState = state || `state_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES;
+    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : getLinkedInPageScopes();
     const activeScopes = customScopes && customScopes.length > 0 ? customScopes : defaultScopes;
     const scopes = activeScopes.map((s) => encodeURIComponent(s.trim())).join('%20');
 
@@ -901,7 +902,7 @@ export class LinkedInAdapter {
     metadata?: Record<string, any> | null;
   }) {
     const platform = data.platform || LINKEDIN_MEMBER_PLATFORM;
-    const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? LINKEDIN_PAGE_SCOPES : LINKEDIN_MEMBER_SCOPES;
+    const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? getLinkedInPageScopes() : LINKEDIN_MEMBER_SCOPES;
     const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000);
     const refreshExpiresAt = data.refreshTokenExpiresIn
       ? new Date(Date.now() + data.refreshTokenExpiresIn * 1000)
