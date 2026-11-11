@@ -138,6 +138,43 @@ export class IngestController {
       });
     }
   };
+
+  /**
+   * POST /internal/ingest/dump-from-drive
+   * Autonomous Flow 1 endpoint:
+   * 1. Fetches Content Calendar from Google Drive using Service Account
+   * 2. Upserts ContentItems & Posts in the window
+   * 3. Scans 07_Social_media date folders for ready assets
+   * 4. Downloads media & captions directly into DB/Storage
+   * 5. Transitions posts with complete assets to PENDING_REVIEW
+   * 6. Dispatches approval notification email to configured approvers
+   */
+  public dumpFromDrive = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const body = req.body || {};
+      const result = await ingestService.dumpFromDrive({
+        sheetId: body.sheetId,
+        referenceDate: body.referenceDate,
+        daysAhead: body.daysAhead,
+        windowStartYmd: body.windowStartYmd,
+        windowEndYmd: body.windowEndYmd,
+        timeZone: body.timeZone,
+        sendNotification: body.sendNotification,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[IngestController] dumpFromDrive error:', err?.message);
+      res.status(500).json({
+        success: false,
+        code: 'DUMP_FROM_DRIVE_ERROR',
+        error: err?.message || 'Failed to dump content from Google Drive',
+      });
+    }
+  };
 }
 
 export const ingestController = new IngestController();

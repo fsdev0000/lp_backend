@@ -191,8 +191,26 @@ export class CrmPostsService {
       const mediaWithUrls = await this.enrichMediaWithSignedUrls(currentMedia);
       const timeLeftMinutes = Math.round((p.scheduledAt.getTime() - nowMs) / 60000);
 
+      const primaryMedia = mediaWithUrls.find((m) => m.role === 'MAIN') || mediaWithUrls[0] || null;
+      let mediaUrl: string | null = primaryMedia?.asset?.signedUrl || null;
+      if (!mediaUrl && primaryMedia?.asset?.driveFileId) {
+        mediaUrl = `https://drive.google.com/file/d/${primaryMedia.asset.driveFileId}/view`;
+      }
+      let mediaType: 'video' | 'image' | 'article' = 'article';
+      if (primaryMedia) {
+        const mime = (primaryMedia.asset?.mimeType || '').toLowerCase();
+        const fn = (primaryMedia.asset?.fileName || '').toLowerCase();
+        if (mime.startsWith('video/') || fn.endsWith('.mp4') || fn.endsWith('.mov')) {
+          mediaType = 'video';
+        } else if (mime.startsWith('image/') || fn.endsWith('.jpg') || fn.endsWith('.png') || fn.endsWith('.jpeg')) {
+          mediaType = 'image';
+        }
+      }
+
       enriched.push({
         ...p,
+        mediaUrl,
+        mediaType,
         scheduledAtAmsterdam: tz.amsterdam,
         scheduledAtDubai: tz.dubai,
         timeLeftMinutes,
@@ -253,6 +271,22 @@ export class CrmPostsService {
     const mediaWithUrls = await this.enrichMediaWithSignedUrls(post.media);
     const limits = PLATFORM_LIMITS[post.platform] || PLATFORM_LIMITS.DEFAULT;
 
+    const primaryMedia = mediaWithUrls.find((m) => m.role === 'MAIN') || mediaWithUrls[0] || null;
+    let mediaUrl: string | null = primaryMedia?.asset?.signedUrl || null;
+    if (!mediaUrl && primaryMedia?.asset?.driveFileId) {
+      mediaUrl = `https://drive.google.com/file/d/${primaryMedia.asset.driveFileId}/view`;
+    }
+    let mediaType: 'video' | 'image' | 'article' = 'article';
+    if (primaryMedia) {
+      const mime = (primaryMedia.asset?.mimeType || '').toLowerCase();
+      const fn = (primaryMedia.asset?.fileName || '').toLowerCase();
+      if (mime.startsWith('video/') || fn.endsWith('.mp4') || fn.endsWith('.mov')) {
+        mediaType = 'video';
+      } else if (mime.startsWith('image/') || fn.endsWith('.jpg') || fn.endsWith('.png') || fn.endsWith('.jpeg')) {
+        mediaType = 'image';
+      }
+    }
+
     const revisionsWithDiff = post.revisions.map((rev, idx) => {
       const prev = idx > 0 ? post.revisions[idx - 1] : null;
       return {
@@ -263,6 +297,8 @@ export class CrmPostsService {
 
     return {
       ...post,
+      mediaUrl,
+      mediaType,
       scheduledAtAmsterdam: tz.amsterdam,
       scheduledAtDubai: tz.dubai,
       characterCount: (post.caption || '').length,

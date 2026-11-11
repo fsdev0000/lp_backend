@@ -30,6 +30,16 @@ import {
   probeMediaBuffer,
   validateMediaForPlatform,
 } from './fileParsers';
+import {
+  getGoogleDriveClient,
+  fetchCalendarSpreadsheetBuffer,
+  parseAllCalendarSections,
+  scanSocialMediaDriveFolders,
+  downloadDriveFileBuffer,
+  DriveFolderListing,
+} from './driveClient';
+import { notificationService } from '../notifications/notification.service';
+import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 
 export interface IngestRowsInput {
   sheetId?: string;
@@ -1140,6 +1150,191 @@ export class IngestService {
       },
       extractedCaption,
       transitionedPosts,
+    };
+  }
+
+  /**
+   * Autonomous Flow 1 Dump:
+   * 1. Fetches Content Calendar from Google Drive via service_account.json
+   * 2. Upserts ContentItems & Posts in the window
+   * 3. Scans 07_Social_media date folders for ready assets (.mp4, .mov, .jpg, .png, Caption.docx)
+   * 4. Downloads matched files and saves to Storage, probing metadata & extracting docx captions
+   * 5. Automatically transitions posts with complete assets to PENDING_REVIEW
+   * 6. Queues and dispatches approval request email to configured approvers
+   */
+  public async dumpFromDrive(options?: {
+    sheetId?: string;
+    referenceDate?: string | Date;
+    daysAhead?: number;
+    windowStartYmd?: string;
+    windowEndYmd?: string;
+    timeZone?: string;
+    sendNotification?: boolean;
+  }): Promise<{
+    windowStartYmd: string;
+    windowEndYmd: string;
+    totalCalendarRows: number;
+    postsCreated: number;
+    postsUpdated: number;
+    postsNeedingFolders: number;
+    downloadedAssetsCount: number;
+    transitionedToReview: string[];
+    notificationsQueued: number;
+  }> {
+    console.log('[DumpFromDrive] Starting autonomous content dump from Google Drive...');
+    const ctx = getGoogleDriveClient();
+    if (!ctx) {
+      throw new Error('Google service account credentials not found in candidate paths');
+    }
+
+    const sheetId = options?.sheetId || process.env.CALENDAR_FILE_ID || '1eb9XK1hvhX-ABd4nHjpmMBdtTH6cmMgL';
+    console.log(`[DumpFromDrive] Fetching calendar sheet ${sheetId}...`);
+    const calBuf = await fetchCalendarSpreadsheetBuffer(ctx.drive, sheetId);
+    const sheets = parseXlsxBuffer(calBuf);
+    const calendarRows = parseAllCalendarSections(sheets, {
+      fromDate: options?.windowStartYmd,
+      toDate: options?.windowEndYmd,
+    });
+    console.log(`[DumpFromDrive] Extracted ${calendarRows.length} calendar rows across all sheet sections.`);
+
+    const rawRows: RawCalendarRowInput[] = calendarRows.map((cr) => ({
+      rowNumber: cr.rowNumber || 1,
+      tab: cr.tab,
+      date: cr.dateYmd,
+      time: cr.timeHhMm || '09:00',
+      channel: cr.channelRaw,
+      type: cr.contentType || null,
+      subject: cr.subject || null,
+      cells: [cr.dateYmd, cr.timeHhMm || '09:00', cr.channelRaw, cr.contentType || null, cr.subject || null],
+    }));
+
+    const ingestResult = await this.ingestRows({
+      sheetId,
+      rows: rawRows,
+      referenceDate: options?.referenceDate,
+      dumpDaysBefore: options?.daysAhead ?? 14,
+      windowStartYmd: options?.windowStartYmd,
+      windowEndYmd: options?.windowEndYmd,
+      timeZone: options?.timeZone,
+    });
+
+    console.log(
+      `[DumpFromDrive] Ingest completed: created=${ingestResult.postsCreated}, updated=${ingestResult.postsUpdated}, needingFolders=${ingestResult.postsNeedingFolders.length}`
+    );
+
+    console.log('[DumpFromDrive] Scanning Google Drive folders for ready assets...');
+    const folderListings = await scanSocialMediaDriveFolders(ctx.drive);
+    const listingsMap = new Map<string, DriveFolderListing>();
+    for (const fl of folderListings) {
+      const clean = (fl.drivePath || '').replace(/^\/+|\/+$/g, '');
+      listingsMap.set(clean, fl);
+    }
+
+    const folderListingInputs: FolderListingItemInput[] = ingestResult.postsNeedingFolders.map((p) => {
+      const clean = p.drivePath.replace(/^\/+|\/+$/g, '');
+      const shortClean = clean.replace(/^07_Social_media\//, '');
+      const found = listingsMap.get(clean) || listingsMap.get(shortClean);
+      return {
+        postId: p.postId,
+        drivePath: p.drivePath,
+        folderFound: Boolean(found && found.folderFound !== false),
+        files: found?.files || [],
+        subfolders: found?.subfolders || [],
+      };
+    });
+
+    const folderProcResult = await this.processFolderListings({
+      listings: folderListingInputs,
+    });
+
+    let downloadedAssetsCount = 0;
+    const allTransitioned = new Set<string>();
+
+    for (const res of folderProcResult.results) {
+      for (const upl of res.uploadsNeeded) {
+        try {
+          console.log(`[DumpFromDrive] Downloading asset "${upl.fileName}" (${upl.driveFileId})...`);
+          const fileBuf = await downloadDriveFileBuffer(ctx.drive, upl.driveFileId, upl.mimeType);
+          const completed = await this.completeMediaUpload(upl.mediaAssetId, {
+            base64Data: fileBuf.toString('base64'),
+            sizeBytes: fileBuf.length,
+          });
+          downloadedAssetsCount++;
+          for (const pid of completed.transitionedPosts) {
+            allTransitioned.add(pid);
+          }
+        } catch (dlErr: any) {
+          console.error(
+            `[DumpFromDrive] Failed to download/complete asset "${upl.fileName}" (${upl.driveFileId}):`,
+            dlErr?.message
+          );
+        }
+      }
+    }
+
+    // Identify all posts that are now in PENDING_REVIEW
+    const candidatePostIds = Array.from(
+      new Set([
+        ...Array.from(allTransitioned),
+        ...ingestResult.postsNeedingFolders.map((p) => p.postId),
+      ])
+    );
+
+    const pendingPosts = await automationPrisma.post.findMany({
+      where: {
+        id: { in: candidatePostIds },
+        status: 'PENDING_REVIEW',
+      },
+    });
+
+    let notificationsQueued = 0;
+    if (options?.sendNotification !== false) {
+      for (const p of pendingPosts) {
+        try {
+          const queued = await notificationService.queueReviewRequest({
+            id: p.id,
+            platform: p.platform,
+            scheduledAt: p.scheduledAt,
+            title: p.title,
+            caption: p.caption,
+            revision: p.revision,
+          });
+          if (queued.created) {
+            notificationsQueued++;
+            try {
+              const allRecipients = Array.from(
+                new Set([...queued.notification.recipients, ...(queued.notification.cc || [])])
+              );
+              await sendSmtpEmail({
+                to: allRecipients,
+                subject: queued.notification.subject,
+                html: queued.notification.body.replace(/\n/g, '<br/>'),
+              });
+              await notificationService.markSent(queued.notification.id);
+            } catch (smtpErr: any) {
+              console.warn(`[DumpFromDrive] SMTP dispatch notice for post ${p.id}:`, smtpErr?.message);
+            }
+          }
+        } catch (notifErr: any) {
+          console.warn(`[DumpFromDrive] Failed to queue review request for post ${p.id}:`, notifErr?.message);
+        }
+      }
+    }
+
+    console.log(
+      `[DumpFromDrive] Done: downloaded=${downloadedAssetsCount} assets, transitioned=${allTransitioned.size} posts, notificationsQueued=${notificationsQueued}.`
+    );
+
+    return {
+      windowStartYmd: ingestResult.windowStartYmd,
+      windowEndYmd: ingestResult.windowEndYmd,
+      totalCalendarRows: calendarRows.length,
+      postsCreated: ingestResult.postsCreated,
+      postsUpdated: ingestResult.postsUpdated,
+      postsNeedingFolders: ingestResult.postsNeedingFolders.length,
+      downloadedAssetsCount,
+      transitionedToReview: Array.from(allTransitioned),
+      notificationsQueued,
     };
   }
 }

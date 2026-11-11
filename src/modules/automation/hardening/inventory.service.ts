@@ -1,6 +1,5 @@
 import path from 'path';
 import fs from 'fs';
-import { google } from 'googleapis';
 import { automationPrisma } from '../state/transition';
 import {
   DEFAULT_FOLDER_RULES,
@@ -18,6 +17,12 @@ import {
   parseCalendarTimeToHhMm,
 } from '../ingest/calendarParser';
 import { parseXlsxBuffer } from '../ingest/fileParsers';
+import {
+  getGoogleDriveClient,
+  fetchCalendarSpreadsheetBuffer,
+  parseAllCalendarSections,
+  scanSocialMediaDriveFolders,
+} from '../ingest/driveClient';
 import { notificationService, getRecipientLists } from '../notifications/notification.service';
 import { sendSmtpEmail } from '../notifications/smtpDispatcher';
 
@@ -92,210 +97,43 @@ async function fetchLiveCalendarRowsAndDriveFolders(
   checkedFromDate: string,
   checkedToDate: string
 ): Promise<{ rows: InventoryCalendarRowInput[]; folderListings: InventoryFolderListingInput[] }> {
-  const candidatePaths = [
-    process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    path.resolve(process.cwd(), process.env.GOOGLE_APPLICATION_CREDENTIALS || './private/service_account.json'),
-    path.resolve(process.cwd(), 'lp_backend', process.env.GOOGLE_APPLICATION_CREDENTIALS || './private/service_account.json'),
-    path.resolve(__dirname, '../../../../private/service_account.json'),
-    path.resolve(__dirname, '../../../../../private/service_account.json'),
-    '/opt/leadersperformance/lp_backend/private/service_account.json',
-  ].filter(Boolean) as string[];
-
-  const saPath = candidatePaths.find((p) => fs.existsSync(p));
-  if (!saPath) {
-    console.warn('[InventoryCheck] Google service account not found in candidate paths:', candidatePaths);
+  const ctx = getGoogleDriveClient();
+  if (!ctx) {
     return { rows: [], folderListings: [] };
   }
-
-  const auth = new google.auth.GoogleAuth({
-    keyFile: saPath,
-    scopes: [
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/spreadsheets.readonly',
-    ],
-  });
-  const drive = google.drive({ version: 'v3', auth });
 
   const calFileId = process.env.CALENDAR_FILE_ID || '1eb9XK1hvhX-ABd4nHjpmMBdtTH6cmMgL';
   const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || '177ptcsSWKiBveriapQmPo1KQwFhsi44C';
 
-  const rows: InventoryCalendarRowInput[] = [];
-  const folderListings: InventoryFolderListingInput[] = [];
+  let rows: InventoryCalendarRowInput[] = [];
+  let folderListings: InventoryFolderListingInput[] = [];
 
-  // 1. Fetch & parse Calendar from Google Drive
   try {
     console.log(`[InventoryCheck] Fetching calendar ${calFileId} from Google Drive...`);
-    const calRes = await drive.files.get(
-      { fileId: calFileId, alt: 'media', supportsAllDrives: true },
-      { responseType: 'arraybuffer' }
-    );
-    const buf = Buffer.from(calRes.data as ArrayBuffer);
-    const sheets = parseXlsxBuffer(buf);
-
-    for (const sheet of sheets) {
-      if (!sheet.name.toLowerCase().includes('calendar')) continue;
-      let lastKnownDateYmd: string | null = null;
-
-      for (const r of sheet.rows) {
-        if (!r.cells || r.cells.length === 0) continue;
-        const c0 = r.cells[0];
-        const c0Str = String(c0 || '').trim();
-
-        // 1. Detect section header (e.g. "Content Calender 7-11-2026 till 13-11-2026")
-        if (c0Str.toLowerCase().includes('content calender') || c0Str.toLowerCase().includes('content calendar')) {
-          lastKnownDateYmd = null;
-          continue;
-        }
-
-        // 2. Skip table column headers (e.g. "Date post", "Time post")
-        if (c0Str.toLowerCase().includes('date post') || c0Str.toLowerCase() === 'date') {
-          continue;
-        }
-
-        // 3. Resolve date: direct cell value OR inherited from merged cells within section
-        let dateYmd = parseCalendarDateToYmd(c0);
-        if (dateYmd) {
-          lastKnownDateYmd = dateYmd;
-        } else if (lastKnownDateYmd && (c0 === null || c0 === undefined || c0 === '')) {
-          dateYmd = lastKnownDateYmd;
-        }
-
-        if (!dateYmd || dateYmd < checkedFromDate || dateYmd > checkedToDate) continue;
-
-        const timeRaw = r.cells[1];
-        const timeHhMm = parseCalendarTimeToHhMm(timeRaw) || '09:00';
-        const channelRaw = String(r.cells[2] ?? '').trim();
-        const contentType = String(r.cells[3] ?? '').trim();
-        const subject = String(r.cells[4] ?? '').trim();
-        if (!channelRaw && !subject && !contentType) continue;
-
-        rows.push({
-          dateYmd,
-          timeHhMm,
-          channelRaw,
-          contentType,
-          subject,
-          tab: sheet.name,
-          rowNumber: r.rowNumber,
-        });
-      }
-    }
+    const calBuf = await fetchCalendarSpreadsheetBuffer(ctx.drive, calFileId);
+    const sheets = parseXlsxBuffer(calBuf);
+    const rawItems = parseAllCalendarSections(sheets, {
+      fromDate: checkedFromDate,
+      toDate: checkedToDate,
+    });
+    rows = rawItems.map((r) => ({
+      dateYmd: r.dateYmd,
+      timeHhMm: r.timeHhMm,
+      channelRaw: r.channelRaw,
+      contentType: r.contentType,
+      subject: r.subject,
+      tab: r.tab,
+      rowNumber: r.rowNumber,
+    }));
     console.log(`[InventoryCheck] Extracted ${rows.length} calendar rows between ${checkedFromDate} and ${checkedToDate} across all sheet sections.`);
   } catch (err: any) {
     console.error('[InventoryCheck] Failed to fetch/parse calendar from Google Drive:', err?.message);
   }
 
-  // 2. Scan Google Drive for 07_Social_media date folders
   try {
     console.log(`[InventoryCheck] Scanning Google Drive root ${rootFolderId} for 07_Social_media folders...`);
-    const rootChildren = await drive.files.list({
-      q: `'${rootFolderId}' in parents and trashed = false`,
-      fields: 'files(id, name, mimeType)',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
-
-    const socialFolder = (rootChildren.data.files || []).find(
-      (f) => f.name && (f.name.includes('07_Social_media') || f.name.includes('Social'))
-    );
-
-    if (socialFolder && socialFolder.id) {
-      const platformFolders = await drive.files.list({
-        q: `'${socialFolder.id}' in parents and trashed = false`,
-        fields: 'files(id, name, mimeType)',
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      });
-
-      for (const plat of platformFolders.data.files || []) {
-        if (!plat.id || !plat.name) continue;
-
-        const subList = await drive.files.list({
-          q: `'${plat.id}' in parents and trashed = false`,
-          fields: 'files(id, name, mimeType)',
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-          pageSize: 50,
-        });
-
-        for (const item of subList.data.files || []) {
-          if (!item.id || !item.name) continue;
-          if (/^\d{4}-\d{2}-\d{2}$/.test(item.name)) {
-            // Direct date folder (e.g. 03_Youtube/2026-11-05 or 04_Tiktok/2026-11-05)
-            let files: DriveFileInput[] = [];
-            try {
-              const filesRes = await drive.files.list({
-                q: `'${item.id}' in parents and trashed = false`,
-                fields: 'files(id, name, mimeType, size)',
-                supportsAllDrives: true,
-                includeItemsFromAllDrives: true,
-              });
-              files = (filesRes.data.files || []).map((f) => ({
-                id: f.id || 'drive_file',
-                name: f.name || '',
-                mimeType: f.mimeType || 'application/octet-stream',
-                size: Number(f.size || 0),
-              }));
-            } catch (err: any) {
-              console.warn(`[InventoryCheck] Could not list files for ${plat.name}/${item.name}:`, err?.message);
-            }
-
-            folderListings.push({
-              drivePath: `${plat.name}/${item.name}`,
-              folderFound: true,
-              files,
-            });
-            folderListings.push({
-              drivePath: `${socialFolder.name}/${plat.name}/${item.name}`,
-              folderFound: true,
-              files,
-            });
-          } else {
-            // Category subfolder (e.g. 01_Linkedin/01_Quotes, 02_Instagram/02_Photo)
-            const dateFolders = await drive.files.list({
-              q: `'${item.id}' in parents and trashed = false`,
-              fields: 'files(id, name, mimeType)',
-              supportsAllDrives: true,
-              includeItemsFromAllDrives: true,
-              pageSize: 50,
-            });
-            for (const df of dateFolders.data.files || []) {
-              if (df.id && df.name && /^\d{4}-\d{2}-\d{2}$/.test(df.name)) {
-                let files: DriveFileInput[] = [];
-                try {
-                  const filesRes = await drive.files.list({
-                    q: `'${df.id}' in parents and trashed = false`,
-                    fields: 'files(id, name, mimeType, size)',
-                    supportsAllDrives: true,
-                    includeItemsFromAllDrives: true,
-                  });
-                  files = (filesRes.data.files || []).map((f) => ({
-                    id: f.id || 'drive_file',
-                    name: f.name || '',
-                    mimeType: f.mimeType || 'application/octet-stream',
-                    size: Number(f.size || 0),
-                  }));
-                } catch (err: any) {
-                  console.warn(`[InventoryCheck] Could not list files for ${plat.name}/${item.name}/${df.name}:`, err?.message);
-                }
-
-                folderListings.push({
-                  drivePath: `${plat.name}/${item.name}/${df.name}`,
-                  folderFound: true,
-                  files,
-                });
-                folderListings.push({
-                  drivePath: `${socialFolder.name}/${plat.name}/${item.name}/${df.name}`,
-                  folderFound: true,
-                  files,
-                });
-              }
-            }
-          }
-        }
-      }
-      console.log(`[InventoryCheck] Found ${folderListings.length} matching date folders in Google Drive.`);
-    }
+    folderListings = await scanSocialMediaDriveFolders(ctx.drive, rootFolderId);
+    console.log(`[InventoryCheck] Found ${folderListings.length} matching date folders in Google Drive.`);
   } catch (err: any) {
     console.error('[InventoryCheck] Failed to scan Google Drive folders:', err?.message);
   }

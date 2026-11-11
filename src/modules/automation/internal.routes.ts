@@ -20,6 +20,7 @@ internalAutomationRouter.post('/job-runs/error-alert', hardeningController.repor
 internalAutomationRouter.post('/ingest/rows', ingestController.ingestRows);
 internalAutomationRouter.post('/ingest/folder-listing', ingestController.processFolderListing);
 internalAutomationRouter.post('/media/:id/complete', ingestController.completeMediaUpload);
+internalAutomationRouter.post('/ingest/dump-from-drive', ingestController.dumpFromDrive);
 
 // Step 3 Review Loop: Gemini draft & Email Notification Outbox
 internalAutomationRouter.post('/posts/:id/draft', internalReviewController.saveDraft);
