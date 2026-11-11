@@ -77,12 +77,15 @@ export function getRecipientLists(): {
   };
 
   return {
-    approver: parseList(process.env.EMAIL_APPROVER, ['lionel@leadersperformance.ae']),
+    approver: parseList(process.env.EMAIL_APPROVER, ['asif@leadersperformance.ae']),
     editors: parseList(process.env.EMAIL_EDITORS, [
-      'sarath@leadersperformance.ae',
-      'asad@leadersperformance.ae',
+      'sharathkiranpr@gmail.com',
+      'mirza@leadersperformance.ae',
     ]),
-    admin: parseList(process.env.EMAIL_ADMIN, ['asif@leadersperformance.ae']),
+    admin: parseList(process.env.EMAIL_ADMIN, [
+      'asif@leadersperformance.ae',
+      'mirza@leadersperformance.ae',
+    ]),
     info: parseList(process.env.EMAIL_INFO, ['info@leadersperformance.ae']),
   };
 }

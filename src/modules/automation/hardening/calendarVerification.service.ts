@@ -247,7 +247,10 @@ export class CalendarVerificationService {
 
     const auditDateStr = now.toISOString().split('T')[0];
     const recipients = getRecipientLists();
-    const recipientEmails = [...recipients.approver, ...recipients.editors, ...recipients.admin].join(', ');
+    const recipientEmails = [...recipients.approver, ...recipients.editors, ...recipients.admin]
+      .filter((e) => !e.toLowerCase().includes('lionel') && !e.toLowerCase().includes('asad') && !e.toLowerCase().includes('sarath@leadersperformance.ae'))
+      .filter((val, idx, arr) => arr.indexOf(val) === idx)
+      .join(', ');
 
     const emailSubject = `[Content Ops] Content Calendar Publishing Audit (${published}/${total} Published, ${overdue} Overdue) — ${auditDateStr}`;
     const emailHtml = this.buildEmailHtml({
@@ -258,6 +261,7 @@ export class CalendarVerificationService {
 
     // Automatically dispatch email notification via verified SMTP
     try {
+      console.log(`[CalendarVerification] Dispatching audit email to recipients: ${recipientEmails}`);
       await sendSmtpEmail({
         to: recipientEmails,
         subject: emailSubject,

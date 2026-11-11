@@ -22,18 +22,18 @@ function mapEmailAndRoleToCrmRole(email: string, rawRole: string): SocialCrmRole
   const lowerEmail = (email || '').toLowerCase().trim();
   const lowerRole = (rawRole || '').toLowerCase().trim();
 
-  const approverEnv = (process.env.EMAIL_APPROVER || 'lionel@leadersperformance.ae')
+  const approverEnv = (process.env.EMAIL_APPROVER || 'asif@leadersperformance.ae')
     .toLowerCase()
     .split(',')
     .map((s) => s.trim());
   const editorsEnv = (
     process.env.EMAIL_EDITORS ||
-    'sarath@leadersperformance.ae,asad@leadersperformance.ae'
+    'sharathkiranpr@gmail.com,mirza@leadersperformance.ae'
   )
     .toLowerCase()
     .split(',')
     .map((s) => s.trim());
-  const adminEnv = (process.env.EMAIL_ADMIN || 'asif@leadersperformance.ae')
+  const adminEnv = (process.env.EMAIL_ADMIN || 'asif@leadersperformance.ae,mirza@leadersperformance.ae')
     .toLowerCase()
     .split(',')
     .map((s) => s.trim());
