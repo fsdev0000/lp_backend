@@ -943,6 +943,7 @@ export class IngestService {
     mediaId: string,
     payload: {
       base64Data?: string;
+      buffer?: Buffer;
       width?: number;
       height?: number;
       durationSec?: number;
@@ -970,7 +971,23 @@ export class IngestService {
     const objectKey = asset.objectKey || buildStorageObjectKey(asset.id, asset.fileName);
     let fileBuffer: Buffer | null = null;
 
-    if (payload.base64Data) {
+    if (payload.buffer) {
+      fileBuffer = payload.buffer;
+      if (!payload.skipStoragePut) {
+        try {
+          await this.storage.put({
+            bucket: asset.bucket,
+            objectKey,
+            data: fileBuffer,
+            contentType: asset.mimeType,
+          });
+        } catch (err: any) {
+          console.warn(
+            `[MediaComplete] postId=multi assetId=${asset.id} storage.put notice: ${err?.message}`
+          );
+        }
+      }
+    } else if (payload.base64Data) {
       fileBuffer = Buffer.from(payload.base64Data, 'base64');
       if (!payload.skipStoragePut) {
         try {
@@ -1171,6 +1188,9 @@ export class IngestService {
     windowEndYmd?: string;
     timeZone?: string;
     sendNotification?: boolean;
+    async?: boolean;
+    jobRunId?: string;
+    concurrency?: number;
   }): Promise<{
     windowStartYmd: string;
     windowEndYmd: string;
@@ -1181,6 +1201,7 @@ export class IngestService {
     downloadedAssetsCount: number;
     transitionedToReview: string[];
     notificationsQueued: number;
+    status?: string;
   }> {
     console.log('[DumpFromDrive] Starting autonomous content dump from Google Drive...');
     const ctx = getGoogleDriveClient();
@@ -1251,83 +1272,160 @@ export class IngestService {
       listings: folderListingInputs,
     });
 
-    let downloadedAssetsCount = 0;
-    const allTransitioned = new Set<string>();
-
+    const allUploads: Array<{
+      mediaAssetId: string;
+      driveFileId: string;
+      fileName: string;
+      mimeType: string;
+    }> = [];
     for (const res of folderProcResult.results) {
       for (const upl of res.uploadsNeeded) {
-        try {
-          console.log(`[DumpFromDrive] Downloading asset "${upl.fileName}" (${upl.driveFileId})...`);
-          const fileBuf = await downloadDriveFileBuffer(ctx.drive, upl.driveFileId, upl.mimeType);
-          const completed = await this.completeMediaUpload(upl.mediaAssetId, {
-            base64Data: fileBuf.toString('base64'),
-            sizeBytes: fileBuf.length,
-          });
-          downloadedAssetsCount++;
-          for (const pid of completed.transitionedPosts) {
-            allTransitioned.add(pid);
-          }
-        } catch (dlErr: any) {
-          console.error(
-            `[DumpFromDrive] Failed to download/complete asset "${upl.fileName}" (${upl.driveFileId}):`,
-            dlErr?.message
-          );
-        }
+        allUploads.push(upl);
       }
     }
 
-    // Identify all posts that are now in PENDING_REVIEW
     const candidatePostIds = Array.from(
-      new Set([
-        ...Array.from(allTransitioned),
-        ...ingestResult.postsNeedingFolders.map((p) => p.postId),
-      ])
+      new Set(ingestResult.postsNeedingFolders.map((p) => p.postId))
     );
 
-    const pendingPosts = await automationPrisma.post.findMany({
-      where: {
-        id: { in: candidatePostIds },
-        status: 'PENDING_REVIEW',
-      },
-    });
+    const runDownloads = async () => {
+      let downloadedAssetsCount = 0;
+      const allTransitioned = new Set<string>();
+      const concurrency = options?.concurrency && options.concurrency > 0 ? options.concurrency : 4;
 
-    let notificationsQueued = 0;
-    if (options?.sendNotification !== false) {
-      for (const p of pendingPosts) {
-        try {
-          const queued = await notificationService.queueReviewRequest({
-            id: p.id,
-            platform: p.platform,
-            scheduledAt: p.scheduledAt,
-            title: p.title,
-            caption: p.caption,
-            revision: p.revision,
-          });
-          if (queued.created) {
-            notificationsQueued++;
+      console.log(
+        `[DumpFromDrive] Processing ${allUploads.length} uploads with concurrency=${concurrency}...`
+      );
+
+      for (let i = 0; i < allUploads.length; i += concurrency) {
+        const batch = allUploads.slice(i, i + concurrency);
+        await Promise.all(
+          batch.map(async (upl) => {
             try {
-              const allRecipients = Array.from(
-                new Set([...queued.notification.recipients, ...(queued.notification.cc || [])])
-              );
-              await sendSmtpEmail({
-                to: allRecipients,
-                subject: queued.notification.subject,
-                html: queued.notification.body.replace(/\n/g, '<br/>'),
+              console.log(`[DumpFromDrive] Downloading asset "${upl.fileName}" (${upl.driveFileId})...`);
+              const fileBuf = await downloadDriveFileBuffer(ctx.drive, upl.driveFileId, upl.mimeType);
+              const completed = await this.completeMediaUpload(upl.mediaAssetId, {
+                buffer: fileBuf,
+                sizeBytes: fileBuf.length,
               });
-              await notificationService.markSent(queued.notification.id);
-            } catch (smtpErr: any) {
-              console.warn(`[DumpFromDrive] SMTP dispatch notice for post ${p.id}:`, smtpErr?.message);
+              downloadedAssetsCount++;
+              for (const pid of completed.transitionedPosts) {
+                allTransitioned.add(pid);
+              }
+            } catch (dlErr: any) {
+              console.error(
+                `[DumpFromDrive] Failed to download/complete asset "${upl.fileName}" (${upl.driveFileId}):`,
+                dlErr?.message
+              );
             }
+          })
+        );
+      }
+
+      // Identify all posts that are now in PENDING_REVIEW
+      const checkPostIds = Array.from(
+        new Set([...Array.from(allTransitioned), ...candidatePostIds])
+      );
+
+      const pendingPosts = await automationPrisma.post.findMany({
+        where: {
+          id: { in: checkPostIds },
+          status: 'PENDING_REVIEW',
+        },
+      });
+
+      let notificationsQueued = 0;
+      if (options?.sendNotification !== false) {
+        for (const p of pendingPosts) {
+          try {
+            const queued = await notificationService.queueReviewRequest({
+              id: p.id,
+              platform: p.platform,
+              scheduledAt: p.scheduledAt,
+              title: p.title,
+              caption: p.caption,
+              revision: p.revision,
+            });
+            if (queued.created) {
+              notificationsQueued++;
+              try {
+                const allRecipients = Array.from(
+                  new Set([...queued.notification.recipients, ...(queued.notification.cc || [])])
+                );
+                await sendSmtpEmail({
+                  to: allRecipients,
+                  subject: queued.notification.subject,
+                  html: queued.notification.body.replace(/\n/g, '<br/>'),
+                });
+                await notificationService.markSent(queued.notification.id);
+              } catch (smtpErr: any) {
+                console.warn(`[DumpFromDrive] SMTP dispatch notice for post ${p.id}:`, smtpErr?.message);
+              }
+            }
+          } catch (notifErr: any) {
+            console.warn(`[DumpFromDrive] Failed to queue review request for post ${p.id}:`, notifErr?.message);
           }
-        } catch (notifErr: any) {
-          console.warn(`[DumpFromDrive] Failed to queue review request for post ${p.id}:`, notifErr?.message);
         }
       }
+
+      console.log(
+        `[DumpFromDrive] Completed download/review cycle: downloaded=${downloadedAssetsCount} assets, transitioned=${allTransitioned.size} posts, notificationsQueued=${notificationsQueued}.`
+      );
+
+      if (options?.jobRunId) {
+        try {
+          await automationPrisma.jobRun.update({
+            where: { id: options.jobRunId },
+            data: {
+              finishedAt: new Date(),
+              status: 'SUCCESS',
+              stats: {
+                windowStartYmd: ingestResult.windowStartYmd,
+                windowEndYmd: ingestResult.windowEndYmd,
+                totalCalendarRows: calendarRows.length,
+                postsCreated: ingestResult.postsCreated,
+                postsUpdated: ingestResult.postsUpdated,
+                downloadedAssetsCount,
+                transitionedToReview: Array.from(allTransitioned),
+                notificationsQueued,
+              },
+            },
+          });
+        } catch {
+          // ignore jobRun update error
+        }
+      }
+
+      return {
+        downloadedAssetsCount,
+        transitionedToReview: Array.from(allTransitioned),
+        notificationsQueued,
+      };
+    };
+
+    if (options?.async) {
+      console.log('[DumpFromDrive] Async mode requested. Running download tasks in background.');
+      setImmediate(() => {
+        runDownloads().catch((err) => {
+          console.error('[DumpFromDrive] Async background run error:', err?.message);
+        });
+      });
+
+      return {
+        windowStartYmd: ingestResult.windowStartYmd,
+        windowEndYmd: ingestResult.windowEndYmd,
+        totalCalendarRows: calendarRows.length,
+        postsCreated: ingestResult.postsCreated,
+        postsUpdated: ingestResult.postsUpdated,
+        postsNeedingFolders: ingestResult.postsNeedingFolders.length,
+        downloadedAssetsCount: 0,
+        transitionedToReview: [],
+        notificationsQueued: 0,
+        status: 'PROCESSING_IN_BACKGROUND',
+      };
     }
 
-    console.log(
-      `[DumpFromDrive] Done: downloaded=${downloadedAssetsCount} assets, transitioned=${allTransitioned.size} posts, notificationsQueued=${notificationsQueued}.`
-    );
+    const runResult = await runDownloads();
 
     return {
       windowStartYmd: ingestResult.windowStartYmd,
@@ -1336,9 +1434,10 @@ export class IngestService {
       postsCreated: ingestResult.postsCreated,
       postsUpdated: ingestResult.postsUpdated,
       postsNeedingFolders: ingestResult.postsNeedingFolders.length,
-      downloadedAssetsCount,
-      transitionedToReview: Array.from(allTransitioned),
-      notificationsQueued,
+      downloadedAssetsCount: runResult.downloadedAssetsCount,
+      transitionedToReview: runResult.transitionedToReview,
+      notificationsQueued: runResult.notificationsQueued,
+      status: 'SUCCESS',
     };
   }
 }

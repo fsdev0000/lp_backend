@@ -160,6 +160,9 @@ export class IngestController {
         windowEndYmd: body.windowEndYmd,
         timeZone: body.timeZone,
         sendNotification: body.sendNotification,
+        async: body.async === true || body.isAsync === true,
+        jobRunId: body.jobRunId,
+        concurrency: typeof body.concurrency === 'number' ? body.concurrency : 4,
       });
 
       res.status(200).json({
