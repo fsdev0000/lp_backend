@@ -95,7 +95,14 @@ export class CalendarVerificationService {
     // 2. If input calendar rows were provided (from Google Sheets / Excel)
     if (Array.isArray(options.rows) && options.rows.length > 0) {
       for (const row of options.rows) {
-        if (!row.dateYmd || isRowMarkedSkipped({ subject: row.subject, channelRaw: row.channelRaw, statusCell: row.statusSheet })) {
+        const skipCheck = isRowMarkedSkipped({
+          subject: row.subject,
+          channelRaw: row.channelRaw,
+          contentType: row.contentType,
+          statusCell: row.statusSheet,
+          fileLocation: row.fileLocation,
+        });
+        if (!row.dateYmd || skipCheck.skipped) {
           continue;
         }
 
