@@ -589,13 +589,16 @@ export class NotificationService {
       'https://social.leadersperformance.ae'
     ).replace(/\/+$/, '');
 
-    const isTest = params.isTest || params.workflowName === 'Example Workflow';
-    const prefix = isTest ? '[Test · Workflow Error]' : '[Workflow Error]';
-    const testTag = isTest ? ' (n8n Simulation)' : '';
+    const isTest =
+      params.isTest ||
+      params.workflowName === 'Example Workflow' ||
+      params.failedNode === 'Node With Error';
 
-    const subject = `${prefix} ${params.workflowName} failed${
-      params.failedNode ? ` at "${params.failedNode}"` : ''
-    }${testTag}`;
+    const subject = isTest
+      ? '✅ [System Test] Leaders Performance Alert Workflow is Connected & Operational'
+      : `[Workflow Error] ${params.workflowName} failed${
+          params.failedNode ? ` at "${params.failedNode}"` : ''
+        }`;
     const body = [
       `n8n workflow "${params.workflowName}" crashed.`,
       `Failed node: ${params.failedNode || 'unknown'}`,
@@ -866,13 +869,23 @@ export function buildLeadersPerformanceNotificationHtml(params: {
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td>
-            <img src="https://social.leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" style="height: 38px; display: block; margin-bottom: 12px;" />
-            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 6px;">
-              LEADERS PERFORMANCE
-            </div>
-            <div style="font-size: 20px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px;">
-              Social CRM & Content Ops
-            </div>
+            <table style="border-collapse: collapse; margin-bottom: 8px;">
+              <tr>
+                <td style="vertical-align: middle; padding-right: 12px;">
+                  <div style="background: linear-gradient(135deg, #D4AF37 0%, #AA771C 100%); width: 38px; height: 38px; border-radius: 8px; text-align: center; line-height: 38px; font-weight: 900; color: #0F172A; font-size: 18px; letter-spacing: -0.5px; box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);">
+                    LP
+                  </div>
+                </td>
+                <td style="vertical-align: middle;">
+                  <div style="font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; line-height: 1.2;">
+                    LEADERS PERFORMANCE
+                  </div>
+                  <div style="font-size: 19px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
+                    Social CRM & Content Ops
+                  </div>
+                </td>
+              </tr>
+            </table>
           </td>
           <td style="text-align: right; vertical-align: middle;">
             <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">
@@ -977,17 +990,17 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
   const tz = formatDualTimezone(now);
 
   const isMockSimulation = isTest || workflowName === 'Example Workflow' || failedNode === 'Node With Error';
-  const badgeText = isMockSimulation ? '🧪 SIMULATION TEST' : '🚨 WORKFLOW CRASH';
-  const badgeBg = isMockSimulation ? '#FEF3C7' : '#FEE2E2';
-  const badgeColor = isMockSimulation ? '#92400E' : '#991B1B';
-  const badgeBorder = isMockSimulation ? '#FCD34D' : '#FCA5A5';
+  const badgeText = isMockSimulation ? '🟢 SYSTEM CONNECTED' : '🚨 WORKFLOW CRASH';
+  const badgeBg = isMockSimulation ? '#D1FAE5' : '#FEE2E2';
+  const badgeColor = isMockSimulation ? '#065F46' : '#991B1B';
+  const badgeBorder = isMockSimulation ? '#6EE7B7' : '#FCA5A5';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Workflow Alert · ${escapeHtml(workflowName)}</title>
+  <title>${isMockSimulation ? 'Alert System Connected' : `Workflow Alert · ${escapeHtml(workflowName)}`}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1E293B;">
   <div style="max-width: 640px; margin: 30px auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); border: 1px solid #E2E8F0;">
@@ -996,17 +1009,27 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
     <div style="height: 4px; background: linear-gradient(90deg, #D4AF37 0%, #F3E5AB 50%, #C5A880 100%);"></div>
 
     <!-- Executive Header with Leaders Performance Branding -->
-    <div style="background: #0F172A; padding: 26px 32px; color: #FFFFFF;">
+    <div style="background: #0F172A; padding: 24px 32px; color: #FFFFFF;">
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td>
-            <img src="https://social.leadersperformance.ae/assets/home/logo-gold.png" alt="Leaders Performance" style="height: 38px; display: block; margin-bottom: 12px;" />
-            <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
-              LEADERS PERFORMANCE
-            </div>
-            <div style="font-size: 19px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px;">
-              Social CRM & Automation Engine
-            </div>
+            <table style="border-collapse: collapse; margin-bottom: 4px;">
+              <tr>
+                <td style="vertical-align: middle; padding-right: 12px;">
+                  <div style="background: linear-gradient(135deg, #D4AF37 0%, #AA771C 100%); width: 36px; height: 36px; border-radius: 8px; text-align: center; line-height: 36px; font-weight: 900; color: #0F172A; font-size: 17px; letter-spacing: -0.5px; box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);">
+                    LP
+                  </div>
+                </td>
+                <td style="vertical-align: middle;">
+                  <div style="font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; line-height: 1.2;">
+                    LEADERS PERFORMANCE
+                  </div>
+                  <div style="font-size: 18px; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; line-height: 1.2;">
+                    Social CRM & Automation Engine
+                  </div>
+                </td>
+              </tr>
+            </table>
           </td>
           <td style="text-align: right; vertical-align: middle;">
             <span style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">
@@ -1023,18 +1046,43 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
       ${
         isMockSimulation
           ? `
-      <div style="background: #FFFBEB; border-left: 4px solid #F59E0B; border-top: 1px solid #FDE68A; border-right: 1px solid #FDE68A; border-bottom: 1px solid #FDE68A; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; color: #92400E; line-height: 1.5;">
-        <strong>ℹ️ n8n Error Trigger Simulation:</strong> This email was dispatched by a manual test run in n8n using sample data (<em>"Example Workflow"</em>). When an active production workflow (such as Flow 1, 2, 3, 4, or 5) encounters an issue, this alert will dynamically display the exact workflow name and the failing node.
-      </div>`
-          : ''
-      }
+      <div style="font-size: 20px; font-weight: 800; color: #0F172A; margin-bottom: 8px; letter-spacing: -0.5px;">
+        Alert System Connected Successfully
+      </div>
+      <div style="font-size: 14px; color: #64748B; margin-bottom: 20px; line-height: 1.5;">
+        Your n8n Error Alert workflow executed a simulation test and communicated with the backend successfully.
+      </div>
 
+      <!-- Test Diagnostic Card -->
+      <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; width: 150px; font-weight: 600;">System Component</td>
+            <td style="padding: 6px 0; font-weight: 700; color: #0F172A;">Social CRM Error & Alert Dispatcher</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Integration Status</td>
+            <td style="padding: 6px 0; font-weight: 700; color: #059669;">✅ Connected to Backend API & Verified SMTP</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Monitored Workflows</td>
+            <td style="padding: 6px 0; color: #1E293B;">Flow 1 (Dump), Flow 2 (Publisher), Flow 3 (Inventory), Flow 4 (Audit), Flow 5 (Digest)</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Verification Time</td>
+            <td style="padding: 6px 0; color: #334155;">${tz.amsterdam} (AMS) · ${tz.dubai} (DXB)</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Explanation Notice -->
+      <div style="background: #F1F5F9; border-left: 4px solid #D4AF37; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; color: #334155; line-height: 1.6;">
+        <strong>💡 How this workflow operates in production:</strong><br />
+        You do not need to trigger this workflow manually. It stands by in the background as an automatic crash listener. Whenever an active production workflow encounters a real failure, you will immediately receive an alert displaying the exact workflow name, failing step, and full diagnostic logs.
+      </div>`
+          : `
       <div style="font-size: 18px; font-weight: 700; color: #0F172A; margin-bottom: 14px; line-height: 1.4;">
-        ${
-          isMockSimulation
-            ? 'Workflow Crash Notification Test'
-            : `Execution Failure in <span style="color: #DC2626;">${escapeHtml(workflowName)}</span>`
-        }
+        Execution Failure in <span style="color: #DC2626;">${escapeHtml(workflowName)}</span>
       </div>
 
       <!-- Failure Metadata Card -->
@@ -1077,12 +1125,13 @@ export function buildLeadersPerformanceWorkflowErrorHtml(params: {
         <div style="background: #0B0F19; border: 1px solid #1E293B; border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5; color: #F87171; white-space: pre-wrap; word-break: break-all;">${escapeHtml(
           errorMessage
         )}</div>
-      </div>
+      </div>`
+      }
 
       <!-- Action Buttons -->
       <div style="text-align: center; margin: 30px 0 16px 0;">
         <a href="${crmUrl}" style="background: #0F172A; border: 2px solid #D4AF37; color: #FFFFFF; font-size: 14px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; display: inline-block; box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2); margin: 4px;">
-          Inspect JobRuns in Social CRM →
+          ${isMockSimulation ? 'View Workflows in Social CRM →' : 'Inspect JobRuns in Social CRM →'}
         </a>
         ${
           executionUrl
