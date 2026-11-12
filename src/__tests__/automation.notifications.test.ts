@@ -207,6 +207,58 @@ describe('Social CRM Notifications & Reminders (Tasks 1, 2, 3, 4)', () => {
       expect(res.body.data.maxReminders).toBe(2);
     });
 
+    it('PUT /api/v1/social-crm/settings/notifications rejects empty approver list', async () => {
+      const res = await request(app)
+        .put('/api/v1/social-crm/settings/notifications')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          approverEmails: [],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('approverEmails must contain at least one valid email address');
+    });
+
+    it('PUT /api/v1/social-crm/settings/notifications rejects invalid email strings', async () => {
+      const res = await request(app)
+        .put('/api/v1/social-crm/settings/notifications')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          reportCcEmails: ['not-an-email'],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid email address in reportCcEmails: "not-an-email"');
+    });
+
+    it('PUT /api/v1/social-crm/settings/notifications persists an empty CC list as empty array', async () => {
+      const res = await request(app)
+        .put('/api/v1/social-crm/settings/notifications')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          reportCcEmails: [],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.reportCcEmails).toEqual([]);
+
+      // Verify GET also returns empty array
+      const getRes = await request(app)
+        .get('/api/v1/social-crm/settings/notifications')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.data.reportCcEmails).toEqual([]);
+
+      // Restore testing CC
+      await request(app)
+        .put('/api/v1/social-crm/settings/notifications')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          reportCcEmails: ['asif@leadersperformance.ae'],
+        });
+    });
+
     it('POST /internal/reminders/process runs via internal key', async () => {
       const res = await request(app)
         .post('/internal/reminders/process')

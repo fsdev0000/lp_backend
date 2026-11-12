@@ -150,10 +150,10 @@ class NotificationSettingsService {
 
     const updated: NotificationSettingsConfig = {
       approverEmails: nextApprover.length > 0 ? nextApprover : ['lionel@leadersperformance.ae'],
-      reportCcEmails: nextReportCc.length > 0 ? nextReportCc : ['danielle@eersteling.nl'],
-      editorEmails: nextEditors,
-      adminEmails: nextAdmin,
-      infoEmails: nextInfo,
+      reportCcEmails: nextReportCc !== undefined ? nextReportCc : current.reportCcEmails,
+      editorEmails: nextEditors ?? current.editorEmails,
+      adminEmails: nextAdmin ?? current.adminEmails,
+      infoEmails: nextInfo ?? current.infoEmails,
       reminderIntervalHours: nextIntervals,
       maxReminders: nextMaxReminders,
       dryRunTestingMode: nextDryRun,
@@ -202,9 +202,10 @@ class NotificationSettingsService {
       return { ...DEFAULT_NOTIFICATION_SETTINGS };
     }
 
-    const toStringArray = (val: any, fallback: string[]): string[] => {
+    const toStringArray = (val: any, fallback: string[], allowEmpty = false): string[] => {
       if (!Array.isArray(val)) return fallback;
       const res = val.map((x) => String(x || '').trim().toLowerCase()).filter((x) => x.includes('@'));
+      if (allowEmpty) return res;
       return res.length > 0 ? res : fallback;
     };
 
@@ -215,11 +216,11 @@ class NotificationSettingsService {
     };
 
     return {
-      approverEmails: toStringArray(raw.approverEmails, DEFAULT_NOTIFICATION_SETTINGS.approverEmails),
-      reportCcEmails: toStringArray(raw.reportCcEmails, DEFAULT_NOTIFICATION_SETTINGS.reportCcEmails),
-      editorEmails: toStringArray(raw.editorEmails, DEFAULT_NOTIFICATION_SETTINGS.editorEmails),
-      adminEmails: toStringArray(raw.adminEmails, DEFAULT_NOTIFICATION_SETTINGS.adminEmails),
-      infoEmails: toStringArray(raw.infoEmails, DEFAULT_NOTIFICATION_SETTINGS.infoEmails),
+      approverEmails: toStringArray(raw.approverEmails, DEFAULT_NOTIFICATION_SETTINGS.approverEmails, false),
+      reportCcEmails: toStringArray(raw.reportCcEmails, DEFAULT_NOTIFICATION_SETTINGS.reportCcEmails, true),
+      editorEmails: toStringArray(raw.editorEmails, DEFAULT_NOTIFICATION_SETTINGS.editorEmails, true),
+      adminEmails: toStringArray(raw.adminEmails, DEFAULT_NOTIFICATION_SETTINGS.adminEmails, true),
+      infoEmails: toStringArray(raw.infoEmails, DEFAULT_NOTIFICATION_SETTINGS.infoEmails, true),
       reminderIntervalHours: toNumArray(raw.reminderIntervalHours, DEFAULT_NOTIFICATION_SETTINGS.reminderIntervalHours),
       maxReminders: typeof raw.maxReminders === 'number' ? raw.maxReminders : DEFAULT_NOTIFICATION_SETTINGS.maxReminders,
       dryRunTestingMode:

@@ -4,6 +4,7 @@ import { analyticsRoutes } from '../modules/analytics/analytics.routes';
 import { internalAutomationRouter } from '../modules/automation/internal.routes';
 import { analyticsReportGeneratorService } from '../modules/analytics/services/analyticsReportGenerator.service';
 import { notificationSettingsService } from '../modules/automation/notifications/settings.service';
+import { generateCrmSessionToken } from '../utils/sessionToken';
 
 jest.setTimeout(60000);
 
@@ -19,6 +20,7 @@ function createTestApp() {
 
 describe('Section B: Automated Analytics & CRM Reports (Tasks 5 & 6)', () => {
   const app = createTestApp();
+  let adminToken: string;
 
   beforeAll(() => {
     process.env.INTERNAL_API_KEY = INTERNAL_KEY;
@@ -26,6 +28,13 @@ describe('Section B: Automated Analytics & CRM Reports (Tasks 5 & 6)', () => {
     process.env.TEST_EMAIL_RECIPIENT = 'asif@leadersperformance.ae';
     process.env.EMAIL_APPROVER = 'asif@leadersperformance.ae';
     process.env.REPORT_CC_EMAILS = 'asif@leadersperformance.ae';
+
+    adminToken = generateCrmSessionToken({
+      id: 'admin_test_user_id',
+      email: 'asif@leadersperformance.ae',
+      name: 'Asif',
+      role: 'admin',
+    });
   });
 
   describe('Task 5: Data Aggregation & Document Generation', () => {
@@ -78,9 +87,18 @@ describe('Section B: Automated Analytics & CRM Reports (Tasks 5 & 6)', () => {
   });
 
   describe('Task 6: On-Demand Report Export API Endpoints', () => {
-    it('GET /api/v1/analytics/reports/export?format=pdf streams valid PDF', async () => {
+    it('GET /api/v1/analytics/reports/export requires CRM authentication', async () => {
       const res = await request(app)
         .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=pdf');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toContain('Valid CRM session token is required');
+    });
+
+    it('GET /api/v1/analytics/reports/export?format=pdf streams valid PDF', async () => {
+      const res = await request(app)
+        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=pdf')
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('application/pdf');
@@ -91,7 +109,8 @@ describe('Section B: Automated Analytics & CRM Reports (Tasks 5 & 6)', () => {
 
     it('GET /api/v1/analytics/reports/export?format=csv returns CSV file', async () => {
       const res = await request(app)
-        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=csv');
+        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=csv')
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/csv');
@@ -100,12 +119,22 @@ describe('Section B: Automated Analytics & CRM Reports (Tasks 5 & 6)', () => {
 
     it('GET /api/v1/analytics/reports/export?format=json returns structured JSON', async () => {
       const res = await request(app)
-        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=json');
+        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=json')
+        .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.kpis).toBeDefined();
       expect(res.body.data.socialCrm).toBeDefined();
+    });
+
+    it('GET /api/v1/analytics/reports/export?format=xlsx returns 400 UNSUPPORTED_FORMAT', async () => {
+      const res = await request(app)
+        .get('/api/v1/analytics/reports/export?domain=leadersperformance.ae&range=7d&format=xlsx')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('UNSUPPORTED_FORMAT');
     });
 
     it('POST /internal/reports/analytics triggers automated dispatch (safe during testing)', async () => {

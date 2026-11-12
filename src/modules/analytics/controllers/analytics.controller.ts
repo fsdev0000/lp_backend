@@ -360,11 +360,20 @@ export class AnalyticsController {
         return;
       }
 
-      // Default: PDF
-      const pdf = analyticsReportGeneratorService.generatePdfReport(data);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="analytics-report-${domain}-${dateStr}.pdf"`);
-      res.status(200).send(pdf);
+      if (format === 'pdf') {
+        const pdf = analyticsReportGeneratorService.generatePdfReport(data);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="analytics-report-${domain}-${dateStr}.pdf"`);
+        res.status(200).send(pdf);
+        return;
+      }
+
+      res.status(400).json({
+        success: false,
+        code: 'UNSUPPORTED_FORMAT',
+        error: `Unsupported format "${format}". Supported formats are: pdf, csv, json. Note: CSV exports are RFC 4180 / UTF-8 compliant and open natively in Microsoft Excel.`,
+      });
+      return;
     } catch (error: any) {
       console.error('[AnalyticsController] exportReport failed:', error);
       res.status(502).json({
