@@ -11,12 +11,24 @@ export class RealtimePollingJob {
     this.interval = setInterval(async () => {
       try {
         const streamManager = SseStreamManager.getInstance();
-        if (streamManager.getActiveClientCount() === 0) {
+        const activeDomains = streamManager.getActiveDomains();
+        if (activeDomains.length === 0) {
           return; // No active subscribers connected, save CPU and quota
         }
 
-        const data = await this.ga4Adapter.getRealtimeActiveUsers();
-        streamManager.broadcastActiveVisitors(data.activeUsers, { byCountry: data.byCountry });
+        // Poll and broadcast independently for each active domain
+        for (const domain of activeDomains) {
+          try {
+            const data = await this.ga4Adapter.getRealtimeActiveUsers(domain);
+            streamManager.broadcastActiveVisitors(
+              data.activeUsers,
+              { byCountry: data.byCountry },
+              domain
+            );
+          } catch (domainErr) {
+            console.error(`[RealtimePollingJob] Polling error for ${domain}:`, domainErr);
+          }
+        }
       } catch (err) {
         console.error('[RealtimePollingJob] Polling error:', err);
       }

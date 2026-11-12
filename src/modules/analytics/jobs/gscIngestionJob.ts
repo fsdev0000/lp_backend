@@ -24,9 +24,16 @@ export class GscIngestionJob {
   }
 
   public static async runSync(): Promise<void> {
-    console.log('[GscIngestionJob] Starting 12-hour GSC keyword ingestion...');
-    const result = await this.gscAdapter.syncKeywords(30, 50);
-    console.log(`[GscIngestionJob] Completed GSC sync: ${result.upserted} keywords synced for ${result.siteUrl}`);
+    console.log('[GscIngestionJob] Starting 12-hour multi-domain GSC keyword ingestion...');
+    const domains = ['leadersperformance.ae', 'lioneleersteling.com'];
+    for (const domain of domains) {
+      try {
+        const result = await this.gscAdapter.syncKeywords(30, 50, domain);
+        console.log(`[GscIngestionJob] Completed GSC sync: ${result.upserted} keywords synced for ${result.siteUrl}`);
+      } catch (err: any) {
+        console.error(`[GscIngestionJob] Error syncing GSC keywords for ${domain}:`, err?.message || err);
+      }
+    }
   }
 
   public static stop(): void {

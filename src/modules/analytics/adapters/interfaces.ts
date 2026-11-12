@@ -134,10 +134,12 @@ export interface ReportsSnapshotData {
     startDate: string;
     endDate: string;
   };
+  status?: 'healthy' | 'not_configured' | 'unavailable' | 'unsupported_domain' | 'error';
+  domain?: string;
 }
 
 export interface IGa4Adapter {
-  getRealtimeActiveUsers(): Promise<{ activeUsers: number; byCountry: Record<string, number> }>;
+  getRealtimeActiveUsers(domain?: string): Promise<{ activeUsers: number; byCountry: Record<string, number>; domain?: string; isConfigured?: boolean }>;
   getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;

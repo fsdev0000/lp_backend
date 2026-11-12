@@ -94,27 +94,33 @@ export class Ga4Adapter implements IGa4Adapter {
 
   /**
    * 3.1: runRealtimeReport with dimensions [country, city, unifiedScreenName] and metrics [activeUsers]
+   * Dynamically resolves GA4 property per domain (LP: 551289575, LE: 563767597).
    * Fallback gracefully if quota limits hit (Google quota tier: 10,000 tokens/day).
    */
-  public async runRealtimeReport(): Promise<{
+  public async runRealtimeReport(domain?: string): Promise<{
     activeUsers: number;
     byCountry: Record<string, number>;
     byCity: Record<string, number>;
     screens: Array<{ screen: string; activeUsers: number }>;
+    domain: string;
+    isConfigured: boolean;
   }> {
-    if (!this.client || !this.propertyId) {
+    const target = this.resolveGa4Target(domain);
+    if (!this.client || !target.propertyId) {
       return {
         activeUsers: 0,
         byCountry: {},
         byCity: {},
         screens: [],
+        domain: target.domain,
+        isConfigured: target.isConfigured,
       };
     }
 
     try {
       const response = await this.executeWithBackoff(async () => {
         const [res] = await this.client!.runRealtimeReport({
-          property: `properties/${this.propertyId}`,
+          property: `properties/${target.propertyId}`,
           dimensions: [{ name: 'country' }, { name: 'city' }, { name: 'unifiedScreenName' }],
           metrics: [{ name: 'activeUsers' }],
         });
@@ -148,6 +154,8 @@ export class Ga4Adapter implements IGa4Adapter {
         byCountry,
         byCity,
         screens,
+        domain: target.domain,
+        isConfigured: true,
       };
     } catch (error: any) {
       await LiveErrorBoundary.logUpstreamError('GA4', 'runRealtimeReport', error);
@@ -156,15 +164,24 @@ export class Ga4Adapter implements IGa4Adapter {
         byCountry: {},
         byCity: {},
         screens: [],
+        domain: target.domain,
+        isConfigured: target.isConfigured,
       };
     }
   }
 
-  public async getRealtimeActiveUsers(): Promise<{ activeUsers: number; byCountry: Record<string, number> }> {
-    const report = await this.runRealtimeReport();
+  public async getRealtimeActiveUsers(domain?: string): Promise<{
+    activeUsers: number;
+    byCountry: Record<string, number>;
+    domain: string;
+    isConfigured: boolean;
+  }> {
+    const report = await this.runRealtimeReport(domain);
     return {
       activeUsers: report.activeUsers,
       byCountry: report.byCountry,
+      domain: report.domain,
+      isConfigured: report.isConfigured,
     };
   }
 
@@ -292,17 +309,42 @@ export class Ga4Adapter implements IGa4Adapter {
     }
   }
 
-  public resolveGa4Target(domain?: string): { propertyId: string | null; hostNameFilter: string | null } {
-    const norm = (domain || 'leadersperformance.ae').toLowerCase().trim();
-    if (norm.includes('lioneleersteling') || norm === 'le') {
-      const leProp = process.env.GA4_LE_PROPERTY_ID || process.env.GA4_PROPERTY_ID_LIONEL_EERSTELING || null;
-      if (leProp) {
-        return { propertyId: leProp, hostNameFilter: null };
-      }
-      return { propertyId: null, hostNameFilter: 'lioneleersteling.com' };
+  public resolveGa4Target(domain?: string): {
+    propertyId: string | null;
+    hostNameFilter: string | null;
+    domain: string;
+    isConfigured: boolean;
+    isUnsupported?: boolean;
+  } {
+    const norm = (domain || 'leadersperformance.ae').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (norm === 'lioneleersteling.com' || norm.includes('lioneleersteling') || norm === 'le') {
+      const leProp = process.env.GA4_LE_PROPERTY_ID || process.env.GA4_PROPERTY_ID_LIONEL_EERSTELING || '563767597';
+      return {
+        propertyId: leProp || null,
+        hostNameFilter: null,
+        domain: 'lioneleersteling.com',
+        isConfigured: Boolean(leProp),
+        isUnsupported: false,
+      };
     }
-    const lpProp = process.env.GA4_LP_PROPERTY_ID || process.env.GA4_PROPERTY_ID || this.propertyId;
-    return { propertyId: lpProp, hostNameFilter: 'leadersperformance.ae' };
+    if (norm === 'leadersperformance.ae' || norm.includes('leadersperformance') || norm === 'lp' || !domain) {
+      const lpProp = process.env.GA4_LP_PROPERTY_ID || process.env.GA4_PROPERTY_ID || this.propertyId;
+      return {
+        propertyId: lpProp || null,
+        hostNameFilter: 'leadersperformance.ae',
+        domain: 'leadersperformance.ae',
+        isConfigured: Boolean(lpProp),
+        isUnsupported: false,
+      };
+    }
+    // Explicitly handle unsupported domains - DO NOT fall back to Leaders Performance!
+    return {
+      propertyId: null,
+      hostNameFilter: null,
+      domain: norm,
+      isConfigured: false,
+      isUnsupported: true,
+    };
   }
 
   public async getTrafficReport(
@@ -321,7 +363,8 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     if (!this.client || !target.propertyId) {
-      return this.getEmptyOrClarityTrafficHistory(resolvedStart, resolvedEnd, domain);
+      // Unconfigured or unsupported domain: return empty list, NEVER substitute Clarity or placeholder data
+      return [];
     }
 
     try {
@@ -351,7 +394,7 @@ export class Ga4Adapter implements IGa4Adapter {
       });
 
       if (!response.rows || response.rows.length === 0) {
-        return this.getEmptyOrClarityTrafficHistory(resolvedStart, resolvedEnd, domain);
+        return [];
       }
 
       const mapByDate = new Map<string, { visitors: number; pageviews: number; leads: number }>();
@@ -397,7 +440,7 @@ export class Ga4Adapter implements IGa4Adapter {
         }));
     } catch (error: any) {
       await LiveErrorBoundary.logUpstreamError('GA4', 'runReport', error);
-      return this.getEmptyOrClarityTrafficHistory(resolvedStart, resolvedEnd, domain);
+      return [];
     }
   }
 
@@ -635,7 +678,28 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     if (!this.client || !target.propertyId) {
-      return this.getEmptyOrClarityReportsSnapshot(resolvedStart, resolvedEnd, domain);
+      const status = target.isUnsupported ? 'unsupported_domain' : 'not_configured';
+      return {
+        status,
+        domain: target.domain,
+        summary: {
+          activeUsers: 0,
+          newUsers: 0,
+          averageEngagementTimeSeconds: 0,
+          averageEngagementTimeFormatted: '0s',
+          eventCount: 0,
+        },
+        topPages: [],
+        usersBySourceMedium: [],
+        sessionsBySourceMedium: [],
+        usersByCountry: [],
+        usersByCity: [],
+        geographicHierarchy: [],
+        reportingPeriod: {
+          startDate: resolvedStart,
+          endDate: resolvedEnd,
+        },
+      };
     }
 
     const dimensionFilter = target.hostNameFilter
@@ -782,6 +846,8 @@ export class Ga4Adapter implements IGa4Adapter {
         .sort((a, b) => b.activeUsers - a.activeUsers);
 
       return {
+        status: 'healthy',
+        domain: target.domain,
         summary: {
           activeUsers,
           newUsers,
@@ -802,7 +868,27 @@ export class Ga4Adapter implements IGa4Adapter {
       };
     } catch (error: any) {
       await LiveErrorBoundary.logUpstreamError('GA4', 'getReportsSnapshot', error);
-      return this.getEmptyOrClarityReportsSnapshot(resolvedStart, resolvedEnd, domain);
+      return {
+        status: 'unavailable',
+        domain: target.domain,
+        summary: {
+          activeUsers: 0,
+          newUsers: 0,
+          averageEngagementTimeSeconds: 0,
+          averageEngagementTimeFormatted: '0s',
+          eventCount: 0,
+        },
+        topPages: [],
+        usersBySourceMedium: [],
+        sessionsBySourceMedium: [],
+        usersByCountry: [],
+        usersByCity: [],
+        geographicHierarchy: [],
+        reportingPeriod: {
+          startDate: resolvedStart,
+          endDate: resolvedEnd,
+        },
+      };
     }
   }
 
@@ -1168,65 +1254,6 @@ export class Ga4Adapter implements IGa4Adapter {
       leads: totalConversions,
       breakdown,
     };
-  }
-
-  private async getEmptyOrClarityReportsSnapshot(
-    startDate: string,
-    endDate: string,
-    _domain?: string
-  ): Promise<ReportsSnapshotData> {
-    return {
-      summary: {
-        activeUsers: 0,
-        newUsers: 0,
-        averageEngagementTimeSeconds: 0,
-        averageEngagementTimeFormatted: '0s',
-        eventCount: 0,
-      },
-      topPages: [],
-      usersBySourceMedium: [],
-      sessionsBySourceMedium: [],
-      usersByCountry: [],
-      usersByCity: [],
-      geographicHierarchy: [],
-      reportingPeriod: {
-        startDate,
-        endDate,
-      },
-    };
-  }
-
-  private async getEmptyOrClarityTrafficHistory(
-    startDate?: string,
-    endDate?: string,
-    _domain?: string
-  ): Promise<TrafficMetricRow[]> {
-    const win = resolveWindow('30d', 1, startDate, endDate);
-    // For range=all, return empty list ("khali list aani chahiye")
-    if (win.range === 'all') {
-      return [];
-    }
-    const start = new Date(win.startDate);
-    const end = new Date(win.endDate);
-    const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-
-    if (diffDays > 120) {
-      return [];
-    }
-
-    const rows: TrafficMetricRow[] = [];
-    const curr = new Date(start);
-    while (curr <= end) {
-      const iso = curr.toISOString().slice(0, 10);
-      rows.push({
-        date: iso,
-        visitors: 0,
-        pageviews: 0,
-        leads: 0,
-      });
-      curr.setUTCDate(curr.getUTCDate() + 1);
-    }
-    return rows;
   }
 }
 

@@ -57,7 +57,7 @@ export class AnalyticsService {
         this.sovereign.getAttributedLeadsCount(win.startDate, win.endDate, domain),
         this.sovereign.getAttributedPipelineValue(win.startDate, win.endDate, domain),
         this.sovereign.getRecentFounderInbound(4, win.startDate, win.endDate, domain),
-        this.ga4.getRealtimeActiveUsers(),
+        this.ga4.getRealtimeActiveUsers(domain),
       ]);
 
     // Previous window extraction for growth comparison (if applicable)
