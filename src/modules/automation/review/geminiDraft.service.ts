@@ -33,6 +33,74 @@ export interface GeminiDraftOutput {
 }
 
 /**
+ * Strips AI prompt artifacts, intro phrases ("Here is a caption:"), leading hashtag dumps,
+ * and wrapping quotes from captions before saving to database (Task 10).
+ */
+export function cleanCaptionBoilerplate(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let text = raw.trim();
+
+  const prefixPatterns = [
+    /^(here\s+(is|are)\s+(a\s+|the\s+)?(draft\s+|suggested\s+)?(caption|post|text|copy)[:\s\-]*)/i,
+    /^(here'?s\s+(a\s+|the\s+)?(draft\s+|suggested\s+)?(caption|post|text|copy)[:\s\-]*)/i,
+    /^(option\s+\d+[:\s\-]*)/i,
+    /^(draft\s+\d+[:\s\-]*)/i,
+    /^(caption\s*[:\-]\s*)/i,
+    /^(post\s*[:\-]\s*)/i,
+    /^(title\s*[:\-]\s*)/i,
+    /^(hook\s*[:\-]\s*)/i,
+    /^(main title\s*[:\-]\s*)/i,
+    /^(full description\s*[:\-]\s*)/i,
+    /^(sure[!,.]?\s*(here\s+is.*)?[:\s\-]*)/i,
+    /^(certainly[!,.]?\s*(here\s+is.*)?[:\s\-]*)/i,
+  ];
+
+  let cleaned = true;
+  while (cleaned) {
+    cleaned = false;
+    for (const pat of prefixPatterns) {
+      if (pat.test(text)) {
+        text = text.replace(pat, '').trim();
+        cleaned = true;
+      }
+    }
+  }
+
+  // Strip leading hashtag dumps
+  const lines = text.split('\n');
+  while (lines.length > 0) {
+    const firstLine = lines[0].trim();
+    if (firstLine.length > 0 && /^(\s*#\w+)+$/.test(firstLine)) {
+      lines.shift();
+    } else {
+      break;
+    }
+  }
+  text = lines.join('\n').trim();
+
+  // Unwrap quotes
+  if (
+    (text.startsWith('"') && text.endsWith('"') && text.length > 2) ||
+    (text.startsWith('“') && text.endsWith('”') && text.length > 2)
+  ) {
+    text = text.slice(1, -1).trim();
+  }
+
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text;
+}
+
+export function cleanTitleBoilerplate(rawTitle?: string | null): string | null {
+  if (!rawTitle || typeof rawTitle !== 'string') return null;
+  let t = rawTitle.trim();
+  t = t.replace(/^(title|main title|hook|topic)\s*[:\-]\s*/i, '').trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith('“') && t.endsWith('”'))) {
+    t = t.slice(1, -1).trim();
+  }
+  return t || null;
+}
+
+/**
  * Validates a Gemini draft output against all Plan Section 6 Step 9-10 rules:
  * - No word "coach" (unless already present verbatim in Drive file, though rule says "Never use the word coach")
  * - Valid category (one of the 7 allowed categories)
@@ -46,13 +114,15 @@ export function validateGeminiDraftOutput(
     return { valid: false, reason: 'Draft output is not a JSON object' };
   }
 
-  const caption = typeof draft.caption === 'string' ? draft.caption.trim() : '';
+  const rawCaption = typeof draft.caption === 'string' ? draft.caption : '';
+  const caption = cleanCaptionBoilerplate(rawCaption);
   if (!caption) {
     return { valid: false, reason: 'Draft caption is empty' };
   }
 
-  const title =
+  const rawTitle =
     typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : null;
+  const title = cleanTitleBoilerplate(rawTitle);
 
   // Hard rule: Never use the word "coach"
   if (/\bcoach(ing|es|ed)?\b/i.test(caption) || (title && /\bcoach(ing|es|ed)?\b/i.test(title))) {

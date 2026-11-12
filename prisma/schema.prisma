@@ -542,7 +542,8 @@ model SocialPost {
 
 model SocialAccountConnection {
   id                    String    @id @default(uuid())
-  platform              String    @unique // LINKEDIN
+  platform              String    @unique // LINKEDIN, LINKEDIN_PAGE
+  accountType           String    @default("BUSINESS") @map("account_type")
   accountName           String?   @map("account_name")
   accountUrn           String?   @map("account_urn") // urn:li:person:...
   accountEmail          String?   @map("account_email")
@@ -559,6 +560,7 @@ model SocialAccountConnection {
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
+  @@index([platform, accountType])
   @@map("social_account_connections")
 }
 
@@ -882,6 +884,7 @@ model FolderRule {
 model SocialAccount {
   id               String    @id @default(uuid())
   platform         Platform
+  accountType      String    @default("BUSINESS") @map("account_type")
   label            String    // "LinkedIn Lionel personal", "TikTok NL"
   externalId       String    @map("external_id") // person URN, org URN, IG user id, channel id, open_id
   tokenEncrypted   String?   @db.Text @map("token_encrypted") // AES-GCM with key from env
@@ -893,6 +896,7 @@ model SocialAccount {
   posts            Post[]
 
   @@index([platform, isActive])
+  @@index([platform, accountType])
   @@map("crm_social_accounts")
 }
 
@@ -1109,10 +1113,37 @@ model PostMetricSnapshot {
   comments    Int?
   shares      Int?
   saves       Int?
+  accountType String?  @default("BUSINESS") @map("account_type")
   raw         Json?
 
   post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId, capturedAt])
   @@map("crm_post_metric_snapshots")
+}
+
+model CrmSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("crm_settings")
+}
+
+model NotificationReminder {
+  id             String    @id @default(uuid())
+  notificationId String    @map("notification_id")
+  type           String
+  relatedItemId  String?   @map("related_item_id")
+  sentAt         DateTime? @map("sent_at")
+  reminderCount  Int       @default(0) @map("reminder_count")
+  nextReminderAt DateTime? @map("next_reminder_at")
+  resolvedAt     DateTime? @map("resolved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([notificationId])
+  @@index([relatedItemId])
+  @@index([resolvedAt, nextReminderAt])
+  @@map("crm_notification_reminders")
 }

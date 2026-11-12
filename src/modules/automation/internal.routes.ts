@@ -5,6 +5,8 @@ import { ingestController } from './controllers/ingest.controller';
 import { internalReviewController } from './controllers/internalReview.controller';
 import { publisherController } from './controllers/publisher.controller';
 import { hardeningController } from './controllers/hardening.controller';
+import { notificationSettingsController } from './controllers/notificationSettings.controller';
+import { analyticsReportGeneratorService } from '../analytics/services/analyticsReportGenerator.service';
 
 export const internalAutomationRouter = Router();
 
@@ -35,6 +37,22 @@ internalAutomationRouter.post('/publisher/run', publisherController.runPublisher
 internalAutomationRouter.get('/digest', hardeningController.getDailyDigest);
 internalAutomationRouter.post('/maintenance/run', hardeningController.runMaintenance);
 internalAutomationRouter.post('/inventory/check', hardeningController.checkInventory);
+internalAutomationRouter.get('/inventory', hardeningController.getInventory);
 internalAutomationRouter.post('/calendar/verify', hardeningController.verifyCalendar);
+
+// Scheduled Reminder Processing (Called by n8n cron or background worker)
+internalAutomationRouter.post('/reminders/process', notificationSettingsController.processReminders);
+
+// Automated Weekly & Monthly Analytics Report Dispatch (Triggered by n8n cron: Mon 8 AM / 1st of month)
+internalAutomationRouter.post('/reports/analytics', async (req, res) => {
+  try {
+    const frequency = ((req.body?.frequency || req.query.frequency || 'WEEKLY') as string).toUpperCase() as any;
+    const domain = (req.body?.domain || req.query.domain || 'leadersperformance.ae') as string;
+    const result = await analyticsReportGeneratorService.dispatchExecutiveAnalyticsReport({ frequency, domain });
+    res.status(200).json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Report dispatch failed' });
+  }
+});
 
 export default internalAutomationRouter;

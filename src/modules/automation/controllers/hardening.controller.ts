@@ -97,6 +97,35 @@ export class HardeningController {
   };
 
   /**
+   * GET /inventory & GET /api/v1/crm/inventory
+   * Two-Tier Inventory Model (Task 7):
+   * Returns total available stock = raw_unscheduled + date_scheduled, burn rate, and days of coverage.
+   */
+  public getInventory = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const daysAhead = req.query.daysAhead ? Number(req.query.daysAhead) : 30;
+      const now = req.query.now ? new Date(String(req.query.now)) : new Date();
+
+      const result = await inventoryService.getTwoTierInventory({
+        daysAhead,
+        now,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[HardeningController] getInventory error:', err?.message);
+      res.status(500).json({
+        success: false,
+        code: 'INVENTORY_FETCH_ERROR',
+        error: err?.message || 'Failed to retrieve two-tier inventory',
+      });
+    }
+  };
+
+  /**
    * POST /internal/calendar/verify
    * Flow 4: Reconciles Content Calendar rows against database posts & publishing state.
    */

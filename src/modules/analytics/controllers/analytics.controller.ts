@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AnalyticsService } from '../services/analytics.service';
 import { SseStreamManager } from '../realtime/sseStreamManager';
+import { analyticsReportGeneratorService } from '../services/analyticsReportGenerator.service';
 
 export class AnalyticsController {
   private service = new AnalyticsService();
@@ -272,7 +273,8 @@ export class AnalyticsController {
     try {
       const refresh = req.query.refresh === 'true';
       const range = ((req.query.range as string) || '7d').toLowerCase();
-      const data = await this.service.getLinkedInAnalytics(range, refresh);
+      const accountType = (req.query.accountType as string) || (req.query.type as string) || 'all';
+      const data = await this.service.getLinkedInAnalytics(range, refresh, accountType as any);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
       console.error('[AnalyticsController] getLinkedInAnalytics failed:', error);
@@ -322,6 +324,76 @@ export class AnalyticsController {
       res.status(502).json({
         success: false,
         error: error?.message || 'Failed to retrieve Instagram posts',
+      });
+    }
+  };
+
+  public exportReport = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const format = ((req.query.format as string) || 'pdf').toLowerCase();
+      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const range = (req.query.range as string) || '30d';
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      const frequency = (range === '7d' ? 'WEEKLY' : range === '30d' ? 'MONTHLY' : 'ON_DEMAND') as any;
+
+      const data = await analyticsReportGeneratorService.collectReportData({
+        range,
+        domain,
+        startDate,
+        endDate,
+        frequency,
+      });
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+
+      if (format === 'csv') {
+        const csv = analyticsReportGeneratorService.generateCsvReport(data);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="analytics-report-${domain}-${dateStr}.csv"`);
+        res.status(200).send(csv);
+        return;
+      }
+
+      if (format === 'json') {
+        res.status(200).json({ success: true, data });
+        return;
+      }
+
+      // Default: PDF
+      const pdf = analyticsReportGeneratorService.generatePdfReport(data);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="analytics-report-${domain}-${dateStr}.pdf"`);
+      res.status(200).send(pdf);
+    } catch (error: any) {
+      console.error('[AnalyticsController] exportReport failed:', error);
+      res.status(502).json({
+        success: false,
+        error: error?.message || 'Failed to export analytics report',
+      });
+    }
+  };
+
+  public dispatchReport = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const frequency = ((req.body?.frequency || req.query.frequency || 'WEEKLY') as string).toUpperCase() as any;
+      const domain = (req.body?.domain || req.query.domain || 'leadersperformance.ae') as string;
+
+      const result = await analyticsReportGeneratorService.dispatchExecutiveAnalyticsReport({
+        frequency,
+        domain,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: `Analytics report successfully dispatched (${frequency})`,
+        data: result,
+      });
+    } catch (error: any) {
+      console.error('[AnalyticsController] dispatchReport failed:', error);
+      res.status(502).json({
+        success: false,
+        error: error?.message || 'Failed to dispatch analytics report',
       });
     }
   };

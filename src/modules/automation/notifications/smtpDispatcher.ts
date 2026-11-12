@@ -1,10 +1,17 @@
 import tls from 'tls';
 
+export interface SmtpAttachment {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+}
+
 export interface SmtpEmailOptions {
   to: string | string[];
   subject: string;
   html: string;
   from?: string;
+  attachments?: SmtpAttachment[];
 }
 
 /**
@@ -69,18 +76,63 @@ export async function sendSmtpEmail(options: SmtpEmailOptions): Promise<boolean>
           }
         } else if (step === 7 && msg.startsWith('354')) {
           step = 8;
-          const headers = [
-            `From: ${from}`,
-            `To: ${recipients.join(', ')}`,
-            `Subject: ${options.subject}`,
-            `MIME-Version: 1.0`,
-            `Content-Type: text/html; charset=UTF-8`,
-            ``,
-            options.html,
-            `.`,
-            ``,
-          ].join('\r\n');
-          client.write(headers);
+          let mimeBody: string;
+
+          if (options.attachments && options.attachments.length > 0) {
+            const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+            const headerLines = [
+              `From: ${from}`,
+              `To: ${recipients.join(', ')}`,
+              `Subject: ${options.subject}`,
+              `MIME-Version: 1.0`,
+              `Content-Type: multipart/mixed; boundary="${boundary}"`,
+              ``,
+              `--${boundary}`,
+              `Content-Type: text/html; charset=UTF-8`,
+              `Content-Transfer-Encoding: 8bit`,
+              ``,
+              options.html,
+              ``,
+            ];
+
+            for (const att of options.attachments) {
+              const fileContent = Buffer.isBuffer(att.content)
+                ? att.content
+                : Buffer.from(att.content, 'utf-8');
+              const base64Data = fileContent.toString('base64');
+              const mimeType = att.contentType || 'application/octet-stream';
+
+              headerLines.push(`--${boundary}`);
+              headerLines.push(`Content-Type: ${mimeType}; name="${att.filename}"`);
+              headerLines.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+              headerLines.push(`Content-Transfer-Encoding: base64`);
+              headerLines.push(``);
+              // Split base64 into standard 76-char chunks
+              for (let i = 0; i < base64Data.length; i += 76) {
+                headerLines.push(base64Data.substring(i, i + 76));
+              }
+              headerLines.push(``);
+            }
+
+            headerLines.push(`--${boundary}--`);
+            headerLines.push(`.`);
+            headerLines.push(``);
+            mimeBody = headerLines.join('\r\n');
+          } else {
+            mimeBody = [
+              `From: ${from}`,
+              `To: ${recipients.join(', ')}`,
+              `Subject: ${options.subject}`,
+              `MIME-Version: 1.0`,
+              `Content-Type: text/html; charset=UTF-8`,
+              ``,
+              options.html,
+              `.`,
+              ``,
+            ].join('\r\n');
+          }
+
+          client.write(mimeBody);
         } else if (step === 8 && msg.startsWith('250')) {
           console.log(`[SmtpDispatcher] Email delivered successfully to: ${recipients.join(', ')}`);
           client.write(`QUIT\r\n`);

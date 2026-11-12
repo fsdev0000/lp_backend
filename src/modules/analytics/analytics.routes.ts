@@ -116,5 +116,19 @@ analyticsRoutes.get('/instagram', controller.getInstagramAnalytics);
 analyticsRoutes.get('/social/instagram/posts', controller.getInstagramPosts);
 analyticsRoutes.get('/instagram/posts', controller.getInstagramPosts);
 
+/**
+ * @route GET /api/v1/analytics/reports/export
+ * @desc On-demand export of executive analytics & CRM report (format: pdf, csv, json)
+ */
+analyticsRoutes.get('/reports/export', controller.exportReport);
+
+/**
+ * @route POST /api/v1/analytics/reports/dispatch
+ * @desc Triggers weekly or monthly executive analytics email dispatch with PDF and CSV attachments
+ */
+analyticsRoutes.post('/reports/dispatch', controller.dispatchReport);
+analyticsRoutes.post('/reports/trigger', controller.dispatchReport);
+
+
 
 

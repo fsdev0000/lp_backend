@@ -32,7 +32,41 @@ export const DEFAULT_FOLDER_RULES: FolderRuleConfig[] = [
     drivePath: '01_Linkedin/02_Poster',
     platform: 'LINKEDIN',
     postKind: 'Image',
-    contentTypeAliases: ['poster', 'posters', 'image', 'single image', 'photo', 'infographic', 'carousel', 'carousels', 'avatar picture / photo', 'avatar picture', 'avatar photo'],
+    contentTypeAliases: [
+      'poster',
+      'posters',
+      'image',
+      'single image',
+      'photo',
+      'infographic',
+      'carousel',
+      'carousels',
+      'avatar picture / photo',
+      'avatar picture',
+      'avatar photo',
+      'post',
+      'posts',
+      'thought',
+      'thought leadership',
+      'update',
+      'text',
+      'graphic',
+      'banner',
+      'document',
+      'doc',
+      'pdf',
+      'pdf carousel',
+      'feed post',
+      'founder post',
+      'batch',
+      'poster nr 1',
+      'poster nr 2',
+      'poster nr 3',
+      'new batch',
+      'new batch poster',
+      'content',
+      'social post',
+    ],
     mode: 'AUTO',
     expectedFiles: '1 image + caption',
   },
@@ -276,7 +310,29 @@ export function resolveExpectedDrivePath(params: {
     }
   }
 
-  // Fallback for LinkedIn / Instagram when type is missing or unrecognised:
+  // Robust LinkedIn Resolution (Task 9): Never block valid LinkedIn posts with UNKNOWN_CONTENT_TYPE.
+  // Resolves variations such as "New batch (October 2026) poster nr 2", "Post", empty types, etc.
+  if (params.platform === 'LINKEDIN') {
+    const combinedKeywords = `${normType} ${(params.contentType || '').toLowerCase()}`;
+    let fallbackRule = platformRules.find((r) => r.drivePath === '01_Linkedin/02_Poster');
+    if (combinedKeywords.includes('video') || combinedKeywords.includes('clip') || combinedKeywords.includes('reel')) {
+      fallbackRule = platformRules.find((r) => r.drivePath === '01_Linkedin/03_Video') || fallbackRule;
+    } else if (combinedKeywords.includes('quote') || combinedKeywords.includes('citat')) {
+      fallbackRule = platformRules.find((r) => r.drivePath === '01_Linkedin/01_Quotes') || fallbackRule;
+    } else if (combinedKeywords.includes('newsletter') || combinedKeywords.includes('article')) {
+      fallbackRule = platformRules.find((r) => r.drivePath === '01_Linkedin/04_Newsletter_Article') || fallbackRule;
+    }
+
+    if (fallbackRule) {
+      return {
+        requiresDriveFolder: true,
+        drivePath: `${socialRoot}/${fallbackRule.drivePath}/${params.dateYmd}`,
+        rule: fallbackRule,
+      };
+    }
+  }
+
+  // Fallback for Instagram when type is missing or unrecognised:
   return {
     requiresDriveFolder: true,
     drivePath: null,

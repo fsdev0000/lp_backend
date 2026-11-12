@@ -19,6 +19,7 @@ import { YouTubePublishAdapter } from './adapters/youtube.adapter';
 import { LinkedInPublishAdapter } from './adapters/linkedin.adapter';
 import { InstagramPublishAdapter } from './adapters/instagram.adapter';
 import { TikTokPublishAdapter } from './adapters/tiktok.adapter';
+import { crmHealthService, PublishingFlags } from '../monitoring/crmHealth.service';
 
 export interface PublisherRunSummary {
   staleLocksReleased: number;
@@ -286,12 +287,6 @@ export class PublisherService {
   ): Promise<{ status: string; post: any }> {
     const now = options.now || new Date();
     const actorId = options.actorId || 'flow2-publisher';
-    const isDryRun =
-      options.dryRun ??
-      (process.env.PUBLISHER_DRY_RUN === 'true' ||
-        process.env.PUBLISHER_DRY_RUN === '1' ||
-        process.env.ENABLE_LIVE_PUBLISHING === 'false');
-
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
       include: {
@@ -303,6 +298,18 @@ export class PublisherService {
     if (!post) {
       throw new Error(`Post ${postId} not found`);
     }
+
+    // Check per-platform feature flags and global dry-run toggle (Task 14)
+    const flags = await crmHealthService.getPublishingFlags();
+    const platKey = (post.platform?.toLowerCase() || '') as keyof PublishingFlags;
+    const isPlatformFlagEnabled = typeof flags[platKey] === 'boolean' ? flags[platKey] : true;
+    const isDryRun =
+      options.dryRun ??
+      (flags.dryRunGlobal ||
+        !isPlatformFlagEnabled ||
+        process.env.PUBLISHER_DRY_RUN === 'true' ||
+        process.env.PUBLISHER_DRY_RUN === '1' ||
+        process.env.ENABLE_LIVE_PUBLISHING === 'false');
 
     // Hard rule: Never publish a post that is not APPROVED
     if (post.status !== 'APPROVED') {
@@ -646,9 +653,11 @@ export class PublisherService {
    */
   public async run(options: { now?: Date; dryRun?: boolean } = {}): Promise<PublisherRunSummary> {
     const now = options.now || new Date();
+    const flags = await crmHealthService.getPublishingFlags();
     const isDryRun =
       options.dryRun ??
-      (process.env.PUBLISHER_DRY_RUN === 'true' ||
+      (flags.dryRunGlobal ||
+        process.env.PUBLISHER_DRY_RUN === 'true' ||
         process.env.PUBLISHER_DRY_RUN === '1' ||
         process.env.ENABLE_LIVE_PUBLISHING === 'false');
     const graceMinutes = Number(process.env.PUBLISH_GRACE_MINUTES) || 120;

@@ -236,6 +236,22 @@ const pingHandler = (_req: express.Request, res: express.Response) => {
 
 app.get('/ping', pingHandler);
 
+import { crmHealthService } from './modules/automation/monitoring/crmHealth.service';
+
+const crmHealthHandler = async (_req: express.Request, res: express.Response) => {
+  try {
+    const report = await crmHealthService.getHealthStatus();
+    const code = report.status === 'UNHEALTHY' ? 503 : 200;
+    res.status(code).json(report);
+  } catch (err: any) {
+    res.status(500).json({ status: 'UNHEALTHY', error: err?.message });
+  }
+};
+
+app.get('/crm/health', crmHealthHandler);
+app.get('/api/crm/health', crmHealthHandler);
+app.get('/api/v1/crm/health', crmHealthHandler);
+
 import { internalAutomationRouter } from './modules/automation/internal.routes';
 import { crmAutomationRouter } from './modules/automation/crm.routes';
 app.use('/internal', internalAutomationRouter);
@@ -351,6 +367,7 @@ httpServer.listen(PORT, () => {
   LinkedInSchedulerJob.start();
   LinkedInAnalyticsSyncJob.start();
   InstagramAnalyticsSyncJob.start();
+  crmHealthService.startHealthDaemon();
   syncDefaultReferralsToDb().catch((e) => console.warn('[Startup] Referral sync notice:', e?.message));
   ensureAudiobookFromSupabase().catch((e) => console.warn('[Startup] Audiobook sync notice:', e?.message));
   initAppointmentReminderWorker();

@@ -15,6 +15,7 @@ import {
   notificationService,
   formatDualTimezone,
 } from '../notifications/notification.service';
+import { reminderService } from '../notifications/reminder.service';
 import {
   probeMediaBuffer,
   validateMediaForPlatform,
@@ -680,6 +681,9 @@ export class CrmPostsService {
       comment,
     });
 
+    // Auto-resolve pending SLA reminders upon executive action
+    await reminderService.resolveRemindersForPost(postId, 'APPROVED');
+
     await notificationService.queueApproved({
       id: updatedPost.id,
       platform: updatedPost.platform,
@@ -704,6 +708,9 @@ export class CrmPostsService {
       actorId: actor.email,
       comment,
     });
+
+    // Auto-resolve pending SLA reminders upon executive action
+    await reminderService.resolveRemindersForPost(postId, 'CHANGES_REQUESTED');
 
     await notificationService.queueChangesRequestedOrRejected({
       type: 'CHANGES_REQUESTED',
@@ -733,6 +740,9 @@ export class CrmPostsService {
       actorId: actor.email,
       comment,
     });
+
+    // Auto-resolve pending SLA reminders upon executive action
+    await reminderService.resolveRemindersForPost(postId, 'REJECTED');
 
     await notificationService.queueChangesRequestedOrRejected({
       type: 'REJECTED',

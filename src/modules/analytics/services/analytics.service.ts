@@ -498,7 +498,18 @@ export class AnalyticsService {
     return this.youtube.getPlaylists(forceRefresh);
   }
 
-  public async getLinkedInAnalytics(range = '7d', forceRefresh = false) {
+  public async getLinkedInAnalytics(
+    range = '7d',
+    forceRefresh = false,
+    accountType: 'business' | 'personal' | 'all' = 'all'
+  ) {
+    const normType = (accountType || 'all').toLowerCase();
+
+    if (normType === 'personal') {
+      const personalData = await this.linkedinAnalytics.getPersonalAnalytics(range, forceRefresh);
+      return personalData;
+    }
+
     const companyData = await this.linkedinAnalytics.getCompanyAnalytics(range, forceRefresh);
 
     const now = Date.now();
@@ -515,9 +526,22 @@ export class AnalyticsService {
       };
     }
 
+    if (normType === 'business') {
+      return {
+        ...companyData,
+        accountType: 'BUSINESS',
+        websiteVisitors,
+      };
+    }
+
+    // Default 'all': Return company data with embedded personal stats (Task 8)
+    const personalData = await this.linkedinAnalytics.getPersonalAnalytics(range, forceRefresh);
     return {
       ...companyData,
+      accountType: 'BUSINESS',
       websiteVisitors,
+      personal: personalData,
+      company: companyData,
     };
   }
 

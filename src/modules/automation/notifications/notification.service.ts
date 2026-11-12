@@ -1,5 +1,7 @@
 import { automationPrisma } from '../state/transition';
 import { sendSmtpEmail } from './smtpDispatcher';
+import { notificationSettingsService } from './settings.service';
+import { reminderService } from './reminder.service';
 
 export interface DualTimezoneFormatted {
   amsterdam: string;
@@ -67,27 +69,47 @@ export function getRecipientLists(): {
   editors: string[];
   admin: string[];
   info: string[];
+  reportCc: string[];
 } {
-  const parseList = (raw: string | undefined, fallback: string[]): string[] => {
-    const cleaned = (raw || '')
-      .split(',')
-      .map((e) => e.trim())
-      .filter(Boolean)
-      .filter((e) => !e.toLowerCase().includes('lionel') && !e.toLowerCase().includes('asad') && !e.toLowerCase().includes('sarath'));
-    return cleaned.length > 0 ? cleaned : fallback;
+  const cfg = notificationSettingsService.getSettingsSync();
+  const isTesting =
+    cfg.dryRunTestingMode ||
+    process.env.DRY_RUN_EMAIL_OVERRIDE === 'true' ||
+    process.env.NOTIFICATIONS_LIVE !== 'true';
+  const testSafety = cfg.testSafetyEmail || 'asif@leadersperformance.ae';
+
+  const sanitizeTestingList = (list: string[], fallback: string[]): string[] => {
+    const raw = list && list.length > 0 ? list : fallback;
+    if (!isTesting) return raw;
+    // CRITICAL SAFETY RULE: Lionel and Danielle explicitly disabled in testing phase; reroute to Asif
+    const filtered = raw.filter((e) => {
+      const low = e.toLowerCase();
+      return !low.includes('lionel') && !low.includes('danielle');
+    });
+    if (
+      filtered.length === 0 ||
+      raw.some((e) => e.toLowerCase().includes('lionel') || e.toLowerCase().includes('danielle'))
+    ) {
+      return Array.from(new Set([...filtered, testSafety]));
+    }
+    return filtered;
   };
 
   return {
-    approver: parseList(process.env.EMAIL_APPROVER, ['asif@leadersperformance.ae']),
-    editors: parseList(process.env.EMAIL_EDITORS, [
-      'sharathkiranpr@gmail.com',
-      'mirza@leadersperformance.ae',
-    ]),
-    admin: parseList(process.env.EMAIL_ADMIN, [
-      'asif@leadersperformance.ae',
-      'mirza@leadersperformance.ae',
-    ]),
-    info: parseList(process.env.EMAIL_INFO, ['info@leadersperformance.ae']),
+    approver: sanitizeTestingList(cfg.approverEmails, [testSafety]),
+    reportCc: sanitizeTestingList(cfg.reportCcEmails, [testSafety]),
+    editors:
+      cfg.editorEmails && cfg.editorEmails.length > 0
+        ? cfg.editorEmails
+        : ['sharathkiranpr@gmail.com', 'mirza@leadersperformance.ae'],
+    admin:
+      cfg.adminEmails && cfg.adminEmails.length > 0
+        ? cfg.adminEmails
+        : ['asif@leadersperformance.ae', 'mirza@leadersperformance.ae'],
+    info:
+      cfg.infoEmails && cfg.infoEmails.length > 0
+        ? cfg.infoEmails
+        : ['info@leadersperformance.ae'],
   };
 }
 
@@ -178,7 +200,7 @@ export class NotificationService {
       `Review in Social CRM: ${crmUrl}`,
     ].join('\n');
 
-    return this.enqueue({
+    const queued = await this.enqueue({
       type: 'REVIEW_REQUEST',
       postId: post.id,
       recipients: r.approver,
@@ -187,6 +209,15 @@ export class NotificationService {
       body,
       dedupeKey: `REVIEW_REQUEST:${post.id}:r${post.revision}`,
     });
+
+    if (queued.notification && queued.created) {
+      await reminderService.scheduleReminderForPost({
+        notificationId: queued.notification.id,
+        postId: post.id,
+      });
+    }
+
+    return queued;
   }
 
   /**
@@ -220,7 +251,7 @@ export class NotificationService {
       `Review in Social CRM: ${crmUrl}`,
     ].join('\n');
 
-    return this.enqueue({
+    const queued = await this.enqueue({
       type: 'REVISION_READY',
       postId: post.id,
       recipients: r.approver,
@@ -229,6 +260,15 @@ export class NotificationService {
       body,
       dedupeKey: `REVISION_READY:${post.id}:r${post.revision}`,
     });
+
+    if (queued.notification && queued.created) {
+      await reminderService.scheduleReminderForPost({
+        notificationId: queued.notification.id,
+        postId: post.id,
+      });
+    }
+
+    return queued;
   }
 
   /**
@@ -312,8 +352,8 @@ export class NotificationService {
   }
 
   /**
-   * 5. APPROVAL_SLA: Pending review within 24h or 6h of slot (max 2 per post).
-   * To: Lionel | Cc: Sarath, Asad
+   * 5. APPROVAL_SLA: Pending review reminders (24h reminder 1, 48h reminder 2, or SLA window 24h/6h before slot).
+   * To: Lionel (Approver) | Cc: Editors
    */
   public async queueApprovalSlaReminder(params: {
     post: {
@@ -324,22 +364,33 @@ export class NotificationService {
       caption?: string | null;
       revision: number;
     };
-    windowLabel: '24H' | '6H';
+    windowLabel?: '24H' | '6H';
+    reminderLevel?: number;
+    reminderLabel?: string;
+    hoursRemaining?: number;
   }) {
-    const { post, windowLabel } = params;
+    const { post, windowLabel, reminderLevel, reminderLabel } = params;
     const r = getRecipientLists();
     const tz = formatDualTimezone(post.scheduledAt);
     const platformLabel = formatPlatformDisplay(post.platform);
     const topic = post.title || (post.caption || '').slice(0, 48).trim() || 'Scheduled Post';
     const crmUrl = getCrmPostUrl(post.id);
 
-    const subject = `[Reminder <${windowLabel.toLowerCase()}>] ${platformLabel} · ${tz.shortSubjectDate} · ${topic}`;
+    const label =
+      reminderLabel ||
+      (reminderLevel ? `Reminder #${reminderLevel}` : windowLabel ? `<${windowLabel.toLowerCase()}>` : 'Follow-up');
+
+    const subject = `[${label}] ${platformLabel} · ${tz.shortSubjectDate} · ${topic}`;
     const body = [
-      `This ${platformLabel} post is scheduled in less than ${windowLabel === '24H' ? '24 hours' : '6 hours'} and is still awaiting approval.`,
+      `This ${platformLabel} post is awaiting executive review (${label}).`,
       `Topic: ${topic}`,
       `Scheduled: ${tz.amsterdam} (Europe/Amsterdam) · ${tz.dubai} (Asia/Dubai)`,
       `Approve or review in Social CRM: ${crmUrl}`,
     ].join('\n');
+
+    const dedupeKey = reminderLevel
+      ? `APPROVAL_SLA:${post.id}:rem${reminderLevel}`
+      : `APPROVAL_SLA:${post.id}:${windowLabel || '24H'}`;
 
     return this.enqueue({
       type: 'APPROVAL_SLA',
@@ -348,7 +399,7 @@ export class NotificationService {
       cc: r.editors,
       subject,
       body,
-      dedupeKey: `APPROVAL_SLA:${post.id}:${windowLabel}`,
+      dedupeKey,
     });
   }
 
@@ -526,7 +577,7 @@ export class NotificationService {
 
   /**
    * 10. DAILY_DIGEST: Queued at end of Flow 1 only if non-empty.
-   * To: Sarath, Asad, Asif | Cc: —
+   * To: Editors, Admin | Cc: Danielle (Report CC)
    */
   public async queueDailyDigest(params: {
     dateKey: string;
@@ -540,7 +591,7 @@ export class NotificationService {
       type: 'DAILY_DIGEST',
       postId: null,
       recipients,
-      cc: [],
+      cc: r.reportCc,
       subject: params.subject,
       body: params.body,
       dedupeKey: `DAILY_DIGEST:${params.dateKey}`,
@@ -549,7 +600,7 @@ export class NotificationService {
 
   /**
    * 11. INVENTORY_LOW: Sent by Flow 3 (weekly Monday 08:30, or manual Run Now) when gaps exist in the next 30 days.
-   * To: info@leadersperformance.ae, Sarath, Asad, Asif | Cc: —
+   * To: info@leadersperformance.ae, Editors, Admin | Cc: Danielle (Report CC)
    */
   public async queueInventoryLow(params: {
     dedupeSuffix: string;
@@ -563,7 +614,7 @@ export class NotificationService {
       type: 'INVENTORY_LOW',
       postId: null,
       recipients,
-      cc: [],
+      cc: r.reportCc,
       subject: params.subject,
       body: params.body,
       dedupeKey: `INVENTORY_LOW:${params.dedupeSuffix}`,
@@ -711,6 +762,8 @@ export class NotificationService {
   /**
    * Automatically dispatches all pending outbox notifications via verified SMTP.
    * Handles deduplication, recipient filtering, and updates status to SENT or FAILED.
+   * In testing mode (dryRunTestingMode=true), Mr. Lionel and Danielle NEVER receive live emails;
+   * transmissions are safely suppressed or re-routed to the safety test mailbox (asif@leadersperformance.ae).
    */
   public async dispatchPendingOutbox(): Promise<{ sent: number; failed: number }> {
     const pending = await automationPrisma.notification.findMany({
@@ -722,16 +775,40 @@ export class NotificationService {
     let sent = 0;
     let failed = 0;
 
+    const settings = await notificationSettingsService.getSettings();
+    const isDryRun = settings.dryRunTestingMode;
+    const safetyEmail = settings.testSafetyEmail || 'asif@leadersperformance.ae';
+
     for (const notif of pending) {
       try {
-        const recipients = [...notif.recipients, ...(notif.cc || [])]
-          .filter(
-            (e) =>
-              !e.toLowerCase().includes('lionel') &&
-              !e.toLowerCase().includes('asad') &&
-              !e.toLowerCase().includes('sarath@leadersperformance.ae')
-          )
-          .filter((val, idx, arr) => arr.indexOf(val) === idx);
+        const rawRecipients = [...notif.recipients, ...(notif.cc || [])];
+        let recipients: string[] = [];
+        let hadRestrictedRecipients = false;
+
+        if (isDryRun) {
+          // CRITICAL SAFETY RULE: Both Mr. Lionel and Danielle MUST NEVER receive live emails during testing phase.
+          const liveAllowed = rawRecipients.filter((e) => {
+            const low = e.trim().toLowerCase();
+            const isRestricted =
+              low.includes('lionel') ||
+              low.includes('danielle') ||
+              low.includes('asad') ||
+              low.includes('sarath@leadersperformance.ae');
+            if (low.includes('lionel') || low.includes('danielle')) {
+              hadRestrictedRecipients = true;
+            }
+            return !isRestricted;
+          });
+
+          if (hadRestrictedRecipients || liveAllowed.length === 0) {
+            recipients = Array.from(new Set([...liveAllowed, safetyEmail]));
+          } else {
+            recipients = Array.from(new Set(liveAllowed));
+          }
+        } else {
+          // Live production mode
+          recipients = Array.from(new Set(rawRecipients.map((e) => e.trim().toLowerCase()).filter(Boolean)));
+        }
 
         if (recipients.length === 0) {
           await this.markSent(notif.id);
@@ -761,9 +838,24 @@ export class NotificationService {
           });
         }
 
+        let subjectToSend = notif.subject;
+        if (isDryRun && hadRestrictedRecipients) {
+          subjectToSend = `[TEST DRY-RUN] ${notif.subject}`;
+          const dryRunBanner = `
+            <div style="background: #FEF3C7; border: 2px dashed #F59E0B; color: #92400E; padding: 12px 16px; margin: 0 0 16px 0; border-radius: 8px; font-family: monospace; font-size: 12px; line-height: 1.5;">
+              <strong>🛡️ DRY-RUN TESTING SAFETY GUARD ACTIVE</strong><br/>
+              Original Intended Recipients: <strong>${escapeHtml(notif.recipients.join(', '))}</strong><br/>
+              Original CC: <strong>${escapeHtml((notif.cc || []).join(', ') || 'none')}</strong><br/>
+              Live delivery suppressed for: <em>lionel@leadersperformance.ae, danielle@eersteling.nl</em><br/>
+              Re-routed to safety mailbox: <strong>${escapeHtml(safetyEmail)}</strong>
+            </div>
+          `;
+          html = dryRunBanner + html;
+        }
+
         const success = await sendSmtpEmail({
           to: recipients,
-          subject: notif.subject,
+          subject: subjectToSend,
           html,
         });
 

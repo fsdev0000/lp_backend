@@ -3,6 +3,8 @@ import multer from 'multer';
 import { requireCrmAuth, requireCrmRoles, optionalCrmAuth } from '../../middleware/crmRoleAuth';
 import { crmPostsController } from './controllers/crmPosts.controller';
 import { hardeningController } from './controllers/hardening.controller';
+import { notificationSettingsController } from './controllers/notificationSettings.controller';
+import { crmHealthService } from './monitoring/crmHealth.service';
 
 export const crmAutomationRouter = Router();
 
@@ -97,6 +99,82 @@ crmAutomationRouter.post(
   '/ingest/run-now',
   requireCrmRoles('admin'),
   hardeningController.triggerWebhookRunNow
+);
+
+// Notification Settings & SLA Reminders
+crmAutomationRouter.get(
+  '/settings/notifications',
+  requireCrmRoles('admin', 'approver', 'editor'),
+  notificationSettingsController.getSettings
+);
+crmAutomationRouter.put(
+  '/settings/notifications',
+  requireCrmRoles('admin', 'approver'),
+  notificationSettingsController.updateSettings
+);
+crmAutomationRouter.post(
+  '/reminders/process',
+  requireCrmRoles('admin'),
+  notificationSettingsController.processReminders
+);
+crmAutomationRouter.get(
+  '/posts/:id/reminders',
+  requireCrmRoles('admin', 'approver', 'editor'),
+  notificationSettingsController.getReminderStatus
+);
+crmAutomationRouter.get(
+  '/reminders/status',
+  requireCrmRoles('admin', 'approver', 'editor'),
+  notificationSettingsController.getReminderStatus
+);
+
+// Two-Tier Inventory Model (Task 7): available_stock = raw_unscheduled + date_scheduled
+crmAutomationRouter.get(
+  '/inventory',
+  requireCrmRoles('admin', 'approver', 'editor'),
+  hardeningController.getInventory
+);
+
+// System Health Status (Task 13)
+crmAutomationRouter.get(
+  ['/health', '/crm/health'],
+  requireCrmRoles('admin', 'approver', 'editor'),
+  async (_req, res) => {
+    try {
+      const report = await crmHealthService.getHealthStatus();
+      const code = report.status === 'UNHEALTHY' ? 503 : 200;
+      res.status(code).json({ success: true, data: report });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  }
+);
+
+// Per-platform Auto-Publishing Feature Flags (Task 14)
+crmAutomationRouter.get(
+  ['/settings/publishing-flags', '/crm/settings/publishing-flags'],
+  requireCrmRoles('admin', 'approver', 'editor'),
+  async (_req, res) => {
+    try {
+      const flags = await crmHealthService.getPublishingFlags();
+      res.json({ success: true, data: flags });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  }
+);
+
+crmAutomationRouter.put(
+  ['/settings/publishing-flags', '/crm/settings/publishing-flags'],
+  requireCrmRoles('admin', 'approver'),
+  async (req, res) => {
+    try {
+      const updated = await crmHealthService.updatePublishingFlags(req.body);
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  }
 );
 
 export default crmAutomationRouter;
