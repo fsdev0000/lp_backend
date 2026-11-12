@@ -18,7 +18,22 @@ const prisma = new PrismaClient();
 const db = prisma as any;
 
 export const newsletterRouter = Router();
-
+// Public: resolves the current month's newsletter PDF to a fresh signed URL on every request.
+newsletterRouter.get('/newsletter/pdf', async (_req: Request, res: Response) => {
+  try {
+    const now = new Date();
+    const campaignKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const signedUrl = await getNewsletterPdfAttachmentUrl(campaignKey);
+    if (!signedUrl) {
+      return res.status(404).json({ success: false, message: 'Newsletter PDF not available for the current month' });
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.redirect(302, signedUrl);
+  } catch (error: any) {
+    console.error('[Newsletter] Failed to resolve current PDF:', error?.message || error);
+    return res.status(500).json({ success: false, message: 'Failed to resolve newsletter PDF' });
+  }
+});
 // Public Rate Limiter: Max 10 newsletter subscriptions per IP per hour
 const newsletterRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
