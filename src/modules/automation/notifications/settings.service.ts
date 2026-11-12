@@ -98,18 +98,31 @@ class NotificationSettingsService {
   public async updateSettings(patch: Partial<NotificationSettingsConfig>): Promise<NotificationSettingsConfig> {
     const current = await this.getSettings();
 
-    const cleanEmails = (list?: string[]): string[] | undefined => {
-      if (!list) return undefined;
-      return list
-        .map((e) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
-        .filter((e) => e.length > 0 && e.includes('@'));
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const validateAndCleanEmails = (fieldName: string, list?: string[], allowEmpty = false): string[] | undefined => {
+      if (list === undefined) return undefined;
+      if (!Array.isArray(list)) {
+        throw new Error(`${fieldName} must be an array of email strings.`);
+      }
+      if (!allowEmpty && list.length === 0) {
+        throw new Error(`${fieldName} must contain at least one valid email address.`);
+      }
+      const cleaned: string[] = [];
+      for (const item of list) {
+        if (typeof item !== 'string' || !emailRegex.test(item.trim())) {
+          throw new Error(`Invalid email address in ${fieldName}: "${item}"`);
+        }
+        cleaned.push(item.trim().toLowerCase());
+      }
+      return cleaned;
     };
 
-    const nextApprover = cleanEmails(patch.approverEmails) || current.approverEmails;
-    const nextReportCc = cleanEmails(patch.reportCcEmails) || current.reportCcEmails;
-    const nextEditors = cleanEmails(patch.editorEmails) || current.editorEmails;
-    const nextAdmin = cleanEmails(patch.adminEmails) || current.adminEmails;
-    const nextInfo = cleanEmails(patch.infoEmails) || current.infoEmails;
+    const nextApprover = validateAndCleanEmails('approverEmails', patch.approverEmails, false) ?? current.approverEmails;
+    const nextReportCc = validateAndCleanEmails('reportCcEmails', patch.reportCcEmails, true) ?? current.reportCcEmails;
+    const nextEditors = validateAndCleanEmails('editorEmails', patch.editorEmails, true) ?? current.editorEmails;
+    const nextAdmin = validateAndCleanEmails('adminEmails', patch.adminEmails, true) ?? current.adminEmails;
+    const nextInfo = validateAndCleanEmails('infoEmails', patch.infoEmails, true) ?? current.infoEmails;
 
     let nextIntervals = current.reminderIntervalHours;
     if (Array.isArray(patch.reminderIntervalHours) && patch.reminderIntervalHours.length > 0) {

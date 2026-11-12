@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AnalyticsController } from './controllers/analytics.controller';
+import { requireCrmAuth } from '../../middleware/crmRoleAuth';
 
 export const analyticsRoutes = Router();
 const controller = new AnalyticsController();
@@ -120,14 +121,14 @@ analyticsRoutes.get('/instagram/posts', controller.getInstagramPosts);
  * @route GET /api/v1/analytics/reports/export
  * @desc On-demand export of executive analytics & CRM report (format: pdf, csv, json)
  */
-analyticsRoutes.get('/reports/export', controller.exportReport);
+analyticsRoutes.get('/reports/export', requireCrmAuth, controller.exportReport);
 
 /**
  * @route POST /api/v1/analytics/reports/dispatch
  * @desc Triggers weekly or monthly executive analytics email dispatch with PDF and CSV attachments
  */
-analyticsRoutes.post('/reports/dispatch', controller.dispatchReport);
-analyticsRoutes.post('/reports/trigger', controller.dispatchReport);
+analyticsRoutes.post('/reports/dispatch', requireCrmAuth, controller.dispatchReport);
+analyticsRoutes.post('/reports/trigger', requireCrmAuth, controller.dispatchReport);
 
 
 

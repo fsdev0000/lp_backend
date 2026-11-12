@@ -29,9 +29,10 @@ export class NotificationSettingsController {
         data: updated,
       });
     } catch (error: any) {
-      console.error('[NotificationSettingsController] updateSettings error:', error);
-      res.status(500).json({
+      console.warn('[NotificationSettingsController] updateSettings validation error:', error?.message);
+      res.status(400).json({
         success: false,
+        code: 'VALIDATION_ERROR',
         error: error?.message || 'Failed to update notification settings',
       });
     }
