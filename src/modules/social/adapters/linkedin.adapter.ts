@@ -702,22 +702,22 @@ export class LinkedInAdapter {
               ? 'VIDEO'
               : 'IMAGE'
             : content.mediaUrl
-            ? 'ARTICLE'
-            : 'NONE',
+              ? 'ARTICLE'
+              : 'NONE',
           ...(assetUrn
             ? {
-                media: [
-                  {
-                    status: 'READY',
-                    media: assetUrn,
-                    title: {
-                      text: content.title || 'Leaders Performance Executive Thought Leadership',
-                    },
+              media: [
+                {
+                  status: 'READY',
+                  media: assetUrn,
+                  title: {
+                    text: content.title || 'Leaders Performance Executive Thought Leadership',
                   },
-                ],
-              }
+                },
+              ],
+            }
             : content.mediaUrl
-            ? {
+              ? {
                 media: [
                   {
                     status: 'READY',
@@ -728,7 +728,7 @@ export class LinkedInAdapter {
                   },
                 ],
               }
-            : {}),
+              : {}),
         },
       },
       visibility: {
