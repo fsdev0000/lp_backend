@@ -514,6 +514,9 @@ export class AnalyticsReportGeneratorService {
         <div style="max-width: 620px; margin: 30px auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; border: 1px solid #E2E8F0; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
           <div style="height: 4px; background: linear-gradient(90deg, #D4AF37 0%, #F3E5AB 50%, #C5A880 100%);"></div>
           <div style="background: #0F172A; padding: 24px 30px; color: #FFFFFF;">
+            <div style="margin-bottom: 16px;">
+              <img src="https://tpyudbsbzrhhngulxyxp.supabase.co/storage/v1/object/public/avatars/branding/logo-gold.png" alt="Leaders Performance" height="38" style="height: 38px; width: auto; max-width: 220px; display: block; border: 0; outline: none;" border="0" />
+            </div>
             <div style="font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #D4AF37; text-transform: uppercase; margin-bottom: 4px;">
               LEADERS PERFORMANCE · EXECUTIVE INTELLIGENCE
             </div>
