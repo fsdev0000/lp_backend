@@ -1,6 +1,48 @@
 import { Request, Response, NextFunction } from 'express';
-import { getSupabaseClient } from '../services/supabaseStorageService';
 import { verifyCrmSessionToken } from '../utils/sessionToken';
+import {
+  crmUserFromSupabase,
+  isStaffSupabaseUser,
+  mapEmailAndRoleToCrmRole,
+  verifySupabaseToken,
+} from './crmRoleAuth';
+
+function bearerOf(authHeader?: string): string | undefined {
+  if (!authHeader || authHeader.startsWith('Basic ')) return undefined;
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+  return token || undefined;
+}
+
+/** A signed CRM session token as the CRM user, with the same role mapping as requireCrmAuth. */
+function crmUserFromSession(sessionUser: { id: string; email: string; name?: string; role: string }) {
+  return {
+    ...sessionUser,
+    name: sessionUser.name || sessionUser.email.split('@')[0],
+    role: mapEmailAndRoleToCrmRole(sessionUser.email, sessionUser.role),
+    workspaces: ['leaders_performance', 'lionel_eersteling'],
+  };
+}
+
+/**
+ * The request passed on its API key; if it also carries a signed-in user's token (the CRM's proxy adds the key to
+ * every call), note who that is, so audit logs name them and role checks apply. Never blocks the request.
+ */
+async function attachSignedInUser(req: Request, token: string | undefined, validKeys: string[]) {
+  if (!token || validKeys.includes(token)) return;
+  if (token.startsWith('lp_sess.')) {
+    const sessionUser = verifyCrmSessionToken(token);
+    if (sessionUser) {
+      (req as any).user = sessionUser;
+      (req as any).crmUser = crmUserFromSession(sessionUser);
+    }
+    return;
+  }
+  const user = await verifySupabaseToken(token);
+  if (user && isStaffSupabaseUser(user)) {
+    (req as any).user = user;
+    (req as any).crmUser = crmUserFromSupabase(user);
+  }
+}
 
 /**
  * Validates x-api-key, Authorization: Bearer <key|jwt>, or Basic Auth
@@ -22,10 +64,11 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     .filter(Boolean) as string[];
 
   // 1. Check x-api-key header or query param
-  if (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) {
-    return next();
-  }
-  if (queryKey && validKeys.includes(queryKey.trim())) {
+  if (
+    (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) ||
+    (queryKey && validKeys.includes(queryKey.trim()))
+  ) {
+    await attachSignedInUser(req, bearerOf(authHeader), validKeys);
     return next();
   }
 
@@ -61,47 +104,26 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       const sessionUser = verifyCrmSessionToken(token);
       if (sessionUser) {
         (req as any).user = sessionUser;
-        (req as any).crmUser = sessionUser;
+        (req as any).crmUser = crmUserFromSession(sessionUser);
         return next();
       }
     }
 
     // 3. If token looks like a Supabase JWT (3 dot-separated parts), verify via Supabase Auth
     // Security: Only check app_metadata (Item 3: user_metadata can be edited by end-users)
-    // and require verified email for domain match
-    if (token && token.split('.').length === 3) {
-      try {
-        const supabase = await getSupabaseClient();
-        const { data, error } = await supabase.auth.getUser(token);
-        if (!error && data?.user) {
-          const user = data.user;
-          const role = (user.app_metadata?.role || '').toLowerCase();
-          const email = (user.email || '').toLowerCase();
-          const isEmailConfirmed = Boolean(user.email_confirmed_at || (user as any).confirmed_at);
-          const isStaff =
-            ['admin', 'staff', 'crm', 'editor'].includes(role) ||
-            (isEmailConfirmed && email.endsWith('@leadersperformance.ae')) ||
-            (process.env.CRM_ADMIN_EMAIL && email === process.env.CRM_ADMIN_EMAIL.toLowerCase());
-
-          if (isStaff) {
-            (req as any).user = user;
-            (req as any).crmUser = {
-              id: user.id,
-              email: user.email || '',
-              name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Authenticated User',
-              role: role === 'admin' ? 'admin' : (role === 'approver' ? 'approver' : 'editor'),
-              workspaces: ['leaders_performance', 'lionel_eersteling'],
-            };
-            return next();
-          } else {
-            return res.status(403).json({
-              success: false,
-              error: 'Forbidden: User is not authorized to access Social CRM resources.',
-            });
-          }
+    // and require verified email for domain match. Same rules and role mapping as requireCrmAuth.
+    if (token) {
+      const user = await verifySupabaseToken(token);
+      if (user) {
+        if (!isStaffSupabaseUser(user)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: User is not authorized to access Social CRM resources.',
+          });
         }
-      } catch {
-        // Ignore Supabase auth lookup errors and fall through to 401
+        (req as any).user = user;
+        (req as any).crmUser = crmUserFromSupabase(user);
+        return next();
       }
     }
   }

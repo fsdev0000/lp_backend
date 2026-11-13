@@ -28,11 +28,16 @@ export function normalizeWorkspace(raw?: string): string {
   return 'leaders_performance';
 }
 
-function mapEmailAndRoleToCrmRole(email: string, rawRole: string): SocialCrmRole {
+const ALL_WORKSPACES = ['leaders_performance', 'lionel_eersteling'];
+
+/** Default approver while EMAIL_APPROVER is unset. Stays Asif's address for now (owner's decision, 13 Nov 2026). */
+export const DEFAULT_APPROVER_EMAIL = 'asif@leadersperformance.ae';
+
+export function mapEmailAndRoleToCrmRole(email: string, rawRole: string): SocialCrmRole {
   const lowerEmail = (email || '').toLowerCase().trim();
   const lowerRole = (rawRole || '').toLowerCase().trim();
 
-  const approverEnv = (process.env.EMAIL_APPROVER || 'asif@leadersperformance.ae')
+  const approverEnv = (process.env.EMAIL_APPROVER || DEFAULT_APPROVER_EMAIL)
     .toLowerCase()
     .split(',')
     .map((s) => s.trim());
@@ -63,6 +68,55 @@ function mapEmailAndRoleToCrmRole(email: string, rawRole: string): SocialCrmRole
     return 'editor';
   }
   return 'editor';
+}
+
+type VerifiedSupabaseUser = {
+  id: string;
+  email?: string;
+  email_confirmed_at?: string | null;
+  confirmed_at?: string | null;
+  app_metadata?: Record<string, any>;
+  user_metadata?: Record<string, any>;
+};
+
+/**
+ * A Supabase JWT, verified by Supabase itself. Returns null for a token Supabase doesn't accept (or when it can't be
+ * reached): the token's own payload is never trusted, because anyone can write a token claiming any email or role.
+ */
+export async function verifySupabaseToken(token: string): Promise<VerifiedSupabaseUser | null> {
+  if (token.split('.').length !== 3) return null;
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.auth.getUser(token);
+    return !error && data?.user ? (data.user as VerifiedSupabaseUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Same staff rule as requireApiKey: a CRM role in app_metadata, or a confirmed @leadersperformance.ae address. */
+export function isStaffSupabaseUser(user: VerifiedSupabaseUser): boolean {
+  const role = String(user.app_metadata?.role || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  const confirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+  return (
+    ['admin', 'approver', 'founder', 'staff', 'crm', 'editor', 'content_manager'].includes(role) ||
+    (confirmed && email.endsWith('@leadersperformance.ae')) ||
+    Boolean(process.env.CRM_ADMIN_EMAIL && email === process.env.CRM_ADMIN_EMAIL.toLowerCase())
+  );
+}
+
+/** The CRM user for a verified Supabase staff account. Role comes from app_metadata (users can't edit it) and the email lists. */
+export function crmUserFromSupabase(user: VerifiedSupabaseUser): AuthenticatedCrmUser {
+  const email = (user.email || '').toLowerCase();
+  const workspaces = user.app_metadata?.workspaces;
+  return {
+    id: user.id,
+    email,
+    name: user.user_metadata?.full_name || user.user_metadata?.name || email.split('@')[0] || 'CRM User',
+    role: mapEmailAndRoleToCrmRole(email, String(user.app_metadata?.role || 'staff')),
+    workspaces: Array.isArray(workspaces) && workspaces.length > 0 ? workspaces : ALL_WORKSPACES,
+  };
 }
 
 /**
@@ -107,19 +161,10 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
     .filter(Boolean) as string[];
 
   const candidateKey = apiKeyHeader?.trim() || bearerToken;
-  if (candidateKey && validKeys.includes(candidateKey)) {
-    req.crmUser = {
-      id: 'api-key-admin',
-      email: process.env.CRM_ADMIN_EMAIL || 'admin@leadersperformance.ae',
-      name: 'API Key Administrator',
-      role: 'admin',
-      workspaces: ['leaders_performance', 'lionel_eersteling'],
-    };
-    next();
-    return;
-  }
 
-  if (bearerToken) {
+  // A signed-in user comes first, also when the request carries an API key (the CRM's proxy adds the key to
+  // every call): audit logs then name the person and role checks apply. The key alone acts as an administrator.
+  if (bearerToken && !validKeys.includes(bearerToken)) {
     // 1. Internal signed CRM session token (lp_sess.*)
     if (bearerToken.startsWith('lp_sess.')) {
       const verified = verifyCrmSessionToken(bearerToken);
@@ -136,46 +181,34 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
       }
     }
 
-    // 2. Item 7.7: Supabase Auth JWT token
-    if (bearerToken.split('.').length === 3) {
-      try {
-        const [, payloadB64] = bearerToken.split('.');
-        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-        const now = Math.floor(Date.now() / 1000);
-
-        if (payload && (!payload.exp || payload.exp > now)) {
-          let verifiedUser: any = null;
-          try {
-            const supabase = await getSupabaseClient();
-            const { data, error } = await supabase.auth.getUser(bearerToken);
-            if (!error && data?.user) {
-              verifiedUser = data.user;
-            }
-          } catch {
-            // Offline/fallback to verified payload
-          }
-
-          const email = verifiedUser?.email || payload.email || '';
-          const roleRaw = verifiedUser?.app_metadata?.role || payload.app_metadata?.role || payload.role || 'staff';
-          const name = verifiedUser?.user_metadata?.name || payload.user_metadata?.name || (email ? email.split('@')[0] : 'CRM User');
-          const workspaces = verifiedUser?.app_metadata?.workspaces || payload.app_metadata?.workspaces || ['leaders_performance', 'lionel_eersteling'];
-
-          if (email) {
-            req.crmUser = {
-              id: verifiedUser?.id || payload.sub || 'supabase-user',
-              email: email.toLowerCase(),
-              name,
-              role: mapEmailAndRoleToCrmRole(email, roleRaw),
-              workspaces,
-            };
-            next();
-            return;
-          }
-        }
-      } catch {
-        // Fall through to 401
+    // 2. Item 7.7: Supabase Auth JWT, only when Supabase verifies it, and only for staff.
+    const supabaseUser = await verifySupabaseToken(bearerToken);
+    if (supabaseUser) {
+      if (!isStaffSupabaseUser(supabaseUser)) {
+        // 403, not 401: the sign-in is real, it just isn't a CRM account.
+        res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN',
+          error: 'This account is not authorized to use the Social CRM.',
+        });
+        return;
       }
+      req.crmUser = crmUserFromSupabase(supabaseUser);
+      next();
+      return;
     }
+  }
+
+  if (candidateKey && validKeys.includes(candidateKey)) {
+    req.crmUser = {
+      id: 'api-key-admin',
+      email: process.env.CRM_ADMIN_EMAIL || 'admin@leadersperformance.ae',
+      name: 'API Key Administrator',
+      role: 'admin',
+      workspaces: ['leaders_performance', 'lionel_eersteling'],
+    };
+    next();
+    return;
   }
 
   res.status(401).json({
@@ -206,21 +239,12 @@ export async function optionalCrmAuth(req: Request, res: Response, next: NextFun
           workspaces: ['leaders_performance', 'lionel_eersteling'],
         };
       }
-    } else if (bearerToken.split('.').length === 3) {
-      try {
-        const [, payloadB64] = bearerToken.split('.');
-        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload && (!payload.exp || payload.exp > now) && payload.email) {
-          req.crmUser = {
-            id: payload.sub || 'supabase-user',
-            email: payload.email.toLowerCase(),
-            name: payload.user_metadata?.name || payload.email.split('@')[0],
-            role: mapEmailAndRoleToCrmRole(payload.email, payload.app_metadata?.role || payload.role || 'staff'),
-            workspaces: payload.app_metadata?.workspaces || ['leaders_performance', 'lionel_eersteling'],
-          };
-        }
-      } catch {}
+    } else {
+      // Verified by Supabase only; an unverified payload never sets a user.
+      const supabaseUser = await verifySupabaseToken(bearerToken);
+      if (supabaseUser && isStaffSupabaseUser(supabaseUser)) {
+        req.crmUser = crmUserFromSupabase(supabaseUser);
+      }
     }
   }
   next();

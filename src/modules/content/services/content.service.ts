@@ -187,7 +187,7 @@ export class ContentService {
   /**
    * Creates a new post in DRAFT or PENDING_REVIEW
    */
-  public async createPost(dto: CreatePostDto, ipAddress?: string): Promise<SocialPost> {
+  public async createPost(dto: CreatePostDto, ipAddress?: string, actor?: string): Promise<SocialPost> {
     const status = dto.requireApproval ? 'PENDING_REVIEW' : 'DRAFT';
     const scheduledFor = dto.scheduledFor ? new Date(dto.scheduledFor) : null;
     const resolvedMediaType = this.resolveMediaType(dto.mediaType, dto.mediaUrl);
@@ -200,7 +200,7 @@ export class ContentService {
         body: dto.body || null,
         platform: (dto.platform || 'LINKEDIN').toUpperCase(),
         status,
-        author: dto.author || 'Lieke (Marketing Ops)',
+        author: dto.author || actor || 'Unknown author',
         scheduledFor,
         mediaUrl: dto.mediaUrl || null,
         mediaType: resolvedMediaType,
@@ -209,7 +209,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: dto.author || 'Lieke (Marketing Ops)',
+      actor: actor || dto.author || 'Unknown user',
       action: dto.requireApproval ? 'PENDING_REVIEW_REQUESTED' : 'DRAFT_CREATED',
       entity: `ContentPost #${post.id}`,
       details: `Created ${post.platform} post "${post.title}" with status ${status}.`,
@@ -225,7 +225,12 @@ export class ContentService {
    * clears its approval signature and sends it back to PENDING_REVIEW.
    * Published posts cannot be edited.
    */
-  public async updatePost(id: string, updates: Partial<CreatePostDto>, ipAddress?: string): Promise<SocialPost> {
+  public async updatePost(
+    id: string,
+    updates: Partial<CreatePostDto>,
+    ipAddress?: string,
+    actor?: string
+  ): Promise<SocialPost> {
     const existing = await this.getPostById(id);
 
     if (existing.status === 'PUBLISHED') {
@@ -269,7 +274,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: 'Lieke (Marketing Ops)',
+      actor: actor || 'Unknown user',
       action: wasApprovedOrScheduled ? 'POST_UPDATED_SENT_TO_REVIEW' : 'POST_UPDATED',
       entity: `ContentPost #${post.id}`,
       details: wasApprovedOrScheduled
@@ -284,12 +289,12 @@ export class ContentService {
   /**
    * Deletes a post from CRM
    */
-  public async deletePost(id: string, ipAddress?: string): Promise<{ success: boolean }> {
+  public async deletePost(id: string, ipAddress?: string, actor?: string): Promise<{ success: boolean }> {
     const post = await this.getPostById(id);
     await contentPrisma.socialPost.delete({ where: { id } });
 
     await this.logAudit({
-      actor: 'Lieke (Marketing Ops)',
+      actor: actor || 'Unknown user',
       action: 'POST_DELETED',
       entity: `ContentPost #${id}`,
       details: `Deleted post "${post.title}".`,
@@ -302,7 +307,7 @@ export class ContentService {
   /**
    * Requests executive approval, moving post to PENDING_REVIEW
    */
-  public async requestApproval(id: string, ipAddress?: string): Promise<SocialPost> {
+  public async requestApproval(id: string, ipAddress?: string, actor?: string): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
     if (post.status === 'PUBLISHED') {
@@ -319,7 +324,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: post.author || 'Lieke (Marketing Ops)',
+      actor: actor || post.author || 'Unknown user',
       action: 'DRAFT_SUBMITTED_FOR_REVIEW',
       entity: `ContentPost #${post.id}`,
       details: `Submitted post "${post.title}" for Mr. Lionel's executive sign-off.`,
@@ -360,7 +365,7 @@ export class ContentService {
       platform: post.platform,
       mediaUrl: post.mediaUrl,
     });
-    const approvedBy = approvalData.approvedBy || 'Lionel Eersteling (Owner)';
+    const approvedBy = approvalData.approvedBy || 'Approver';
     const approvedAt = new Date();
     const publishingEnabled = isLinkedInPublishingEnabled();
 

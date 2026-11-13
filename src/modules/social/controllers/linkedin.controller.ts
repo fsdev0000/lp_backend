@@ -189,7 +189,8 @@ export class LinkedInController {
         ? (rawTarget as LinkedInOAuthTarget)
         : 'all';
 
-      const result = await this.service.disconnect(target);
+      const user = (req as any).crmUser || (req as any).user;
+      const result = await this.service.disconnect(target, user?.name || user?.email || 'API key', req.ip);
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[LinkedInController] disconnect error:', error);

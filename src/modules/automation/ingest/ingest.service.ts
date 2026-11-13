@@ -1,3 +1,4 @@
+import { workspaceForPlatform } from '../workspace';
 import { Platform, PublishMode } from '@prisma/client';
 import {
   automationPrisma,
@@ -266,12 +267,15 @@ export class IngestService {
           activeAccounts
         );
 
-        // Hide / Skip manual posting channels (X, INSPO, MEDIUM, WEBSITE) from automated post creation
+        // Hide / Skip manual posting channels (X, INSPO, MEDIUM, WEBSITE) from automated post creation.
+        // Only known ones: an unknown channel also resolves to WEBSITE, and it must reach the BLOCKED branch
+        // below so a typo in the calendar shows up in the CRM instead of disappearing.
         if (
-          resolved.platform === 'X' ||
-          resolved.platform === 'INSPO' ||
-          resolved.platform === 'MEDIUM' ||
-          resolved.platform === 'WEBSITE'
+          resolved.known &&
+          (resolved.platform === 'X' ||
+            resolved.platform === 'INSPO' ||
+            resolved.platform === 'MEDIUM' ||
+            resolved.platform === 'WEBSITE')
         ) {
           continue;
         }
@@ -305,6 +309,7 @@ export class IngestService {
                 contentItemId: contentItem.id,
                 accountId: resolved.accountId,
                 platform: resolved.platform,
+                workspace: workspaceForPlatform(resolved.platform),
                 mode: resolved.mode,
                 status: tr.nextStatus,
                 scheduledAt: row.scheduledAtUtc,
@@ -350,6 +355,7 @@ export class IngestService {
                 contentItemId: contentItem.id,
                 accountId: null,
                 platform: 'WEBSITE',
+                workspace: workspaceForPlatform('WEBSITE'),
                 mode: 'MANUAL',
                 status: tr.nextStatus,
                 blockedReason,
@@ -403,6 +409,7 @@ export class IngestService {
                 contentItemId: contentItem.id,
                 accountId: resolved.accountId,
                 platform: resolved.platform,
+                workspace: workspaceForPlatform(resolved.platform),
                 mode: resolved.mode,
                 status: tr.nextStatus,
                 blockedReason: pathInfo.blockedReason,
@@ -441,6 +448,7 @@ export class IngestService {
                 contentItemId: contentItem.id,
                 accountId: resolved.accountId,
                 platform: resolved.platform,
+                workspace: workspaceForPlatform(resolved.platform),
                 mode: resolved.mode,
                 status: tr.nextStatus,
                 scheduledAt: row.scheduledAtUtc,
@@ -481,6 +489,7 @@ export class IngestService {
               contentItemId: contentItem.id,
               accountId: resolved.accountId,
               platform: resolved.platform,
+              workspace: workspaceForPlatform(resolved.platform),
               mode: pathInfo.rule?.mode || resolved.mode,
               status: tr.nextStatus,
               blockedReason: initialBlockedReason,

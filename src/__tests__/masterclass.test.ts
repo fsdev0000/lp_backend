@@ -11,31 +11,29 @@ app.use(express.json());
 app.use('/masterclass', masterclassRouter);
 app.use('/api/v1/masterclass', masterclassRouter);
 
+// Booking tests need bookable days, so they use weekdays about a week ahead instead of fixed dates that expire.
+const nextWeekday = (from: Date): Date => {
+  const d = new Date(from);
+  do {
+    d.setUTCDate(d.getUTCDate() + 1);
+  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d;
+};
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const BOOK_DAY = nextWeekday(new Date(Date.now() + 6 * 24 * 60 * 60 * 1000));
+const BOOK_DATE = ymd(BOOK_DAY);
+const RESCHEDULE_DATE = ymd(nextWeekday(BOOK_DAY));
+
+// Only the bookings these tests make. Deleting by date would also remove real bookings on those days.
+const TEST_BOOKING_EMAILS = ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'];
+
 describe('Masterclass API & Recognition Endpoints', () => {
   beforeAll(async () => {
-    await prisma.masterclassBooking.deleteMany({
-      where: {
-        OR: [
-          { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
-          { slotTime: { contains: '2026-11-10' } },
-          { slotTime: { contains: '2026-11-11' } },
-          { slotTime: { contains: '2026-11-12' } },
-        ],
-      },
-    });
+    await prisma.masterclassBooking.deleteMany({ where: { email: { in: TEST_BOOKING_EMAILS } } });
   });
 
   afterAll(async () => {
-    await prisma.masterclassBooking.deleteMany({
-      where: {
-        OR: [
-          { email: { in: ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'] } },
-          { slotTime: { contains: '2026-11-10' } },
-          { slotTime: { contains: '2026-11-11' } },
-          { slotTime: { contains: '2026-11-12' } },
-        ],
-      },
-    });
+    await prisma.masterclassBooking.deleteMany({ where: { email: { in: TEST_BOOKING_EMAILS } } });
     await prisma.$disconnect();
   });
 
@@ -235,13 +233,13 @@ describe('Masterclass API & Recognition Endpoints', () => {
     it('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
       const res = await request(app)
         .get('/api/v1/masterclass/availability/month')
-        .query({ year: 2026, month: 11 });
+        .query({ year: BOOK_DAY.getUTCFullYear(), month: BOOK_DAY.getUTCMonth() + 1 });
 
       expect(res.status).toBe(200);
       expect(typeof res.body).toBe('object');
-      expect(res.body).toHaveProperty('2026-11-09');
-      expect(Array.isArray(res.body['2026-11-09'])).toBe(true);
-      expect(res.body['2026-11-09']).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
+      expect(res.body).toHaveProperty(BOOK_DATE);
+      expect(Array.isArray(res.body[BOOK_DATE])).toBe(true);
+      expect(res.body[BOOK_DATE]).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
     });
 
     it('should accurately identify passed time slots and mark them unavailable with isPast: true', async () => {
@@ -306,14 +304,14 @@ describe('Masterclass API & Recognition Endpoints', () => {
           email: 'founder_alpha@enterprise.com',
           fullName: 'Founder Alpha',
           company: 'Alpha Corp',
-          selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+          selectedSlot: `${BOOK_DATE} at 1:30 PM – 2:15 PM`,
           timezone: 'GST (UTC+4)',
           submissionRef: 'FNM-2026-ALPHA',
         });
 
       expect(res1.status).toBe(200);
       expect(res1.body.success).toBe(true);
-      expect(res1.body.bookingRef).toMatch(/^MBK-2026-\d{4}$/);
+      expect(res1.body.bookingRef).toMatch(/^MBK-\d{4}-\d{4}$/);
 
       // Attempt conflicting booking for same date and slot
       const res2 = await request(app)
@@ -322,7 +320,7 @@ describe('Masterclass API & Recognition Endpoints', () => {
           email: 'founder_beta@enterprise.com',
           fullName: 'Founder Beta',
           company: 'Beta Corp',
-          selectedSlot: '2026-11-10 at 1:30 PM – 2:15 PM',
+          selectedSlot: `${BOOK_DATE} at 1:30 PM – 2:15 PM`,
           timezone: 'GST (UTC+4)',
           submissionRef: 'FNM-2026-BETA',
         });
@@ -336,7 +334,7 @@ describe('Masterclass API & Recognition Endpoints', () => {
         .post('/api/v1/masterclass/reschedule')
         .send({
           bookingRef: res1.body.bookingRef,
-          newDate: '2026-11-11',
+          newDate: RESCHEDULE_DATE,
           newSlotTime: '2:30 PM – 3:15 PM',
           timezone: 'GST (UTC+4)',
           reason: 'Founder board meeting rescheduled',
@@ -344,7 +342,7 @@ describe('Masterclass API & Recognition Endpoints', () => {
 
       expect(resResched.status).toBe(200);
       expect(resResched.body.success).toBe(true);
-      expect(resResched.body.slotTime).toContain('2026-11-11');
+      expect(resResched.body.slotTime).toContain(RESCHEDULE_DATE);
     }, 30000);
   });
 

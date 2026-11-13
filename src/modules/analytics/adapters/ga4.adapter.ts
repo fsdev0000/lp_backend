@@ -23,11 +23,18 @@ import {
   dubaiDateToEndOfDayUtc,
   formatDubaiDateString,
 } from '../utils/dateRange';
+import { inquiryVisitWhere, isLeDomain, scanWhere } from '../utils/inquiries';
 
 import path from 'path';
 import fs from 'fs';
 
 const prisma = new PrismaClient();
+
+/**
+ * Per-call GA4 deadline. 3.5 s (9e08470) is too short for reports the snapshot runs in parallel; 10 s still fails fast
+ * when GA4 doesn't answer (on 13 Nov 2026 runReport hung for minutes). Override with GA4_TIMEOUT_MS.
+ */
+const GA4_TIMEOUT_MS = Number(process.env.GA4_TIMEOUT_MS) || 10_000;
 
 export class Ga4Adapter implements IGa4Adapter {
   private client: BetaAnalyticsDataClient | null = null;
@@ -57,6 +64,10 @@ export class Ga4Adapter implements IGa4Adapter {
       } catch (err) {
         console.warn('[Ga4Adapter] Failed to initialize Google Analytics client:', err);
       }
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      // ADC would read the same missing file on every call, and one of its rejections goes unhandled and takes the
+      // whole server down. Leave GA4 unconfigured instead: its endpoints then report that.
+      console.warn(`[Ga4Adapter] GOOGLE_APPLICATION_CREDENTIALS points to a missing file (${keyPath}); GA4 stays off.`);
     } else {
       try {
         this.client = new BetaAnalyticsDataClient();
@@ -180,7 +191,7 @@ export class Ga4Adapter implements IGa4Adapter {
           metrics: [{ name: 'activeUsers' }],
           dimensionFilter,
         },
-        { timeout: 3500 }
+        { timeout: GA4_TIMEOUT_MS }
       );
       const val = parseInt(res.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
       return isNaN(val) ? 0 : val;
@@ -191,8 +202,10 @@ export class Ga4Adapter implements IGa4Adapter {
   }
 
   /**
-   * 3.1 & 3.2: runRealtimeReport without dimensions for total active users (preventing multi-page double counting)
-   * and with production-only hostname filter (excluding staging & localhost).
+   * 3.1 & 3.2: runRealtimeReport without dimensions for total active users (preventing multi-page double counting).
+   * No hostname filter: the GA4 Realtime API has no hostName dimension and rejects the request (INVALID_ARGUMENT,
+   * checked 13 Nov 2026), which left live visitors at 0. Staging and localhost stop counting once lp_frontend
+   * no longer loads GA4 there.
    * Returns explicit error status on API failure instead of fake zeros.
    */
   public async runRealtimeReport(domain?: string): Promise<{
@@ -220,17 +233,14 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     try {
-      const dimensionFilter = this.buildHostNameFilter(target.domain);
-
       // Query 1: Total active users without dimensions (Item 3.2: true unique count)
       const [totalResponse] = await this.executeWithBackoff(async () => {
         return this.client!.runRealtimeReport(
           {
             property: `properties/${target.propertyId}`,
             metrics: [{ name: 'activeUsers' }],
-            dimensionFilter,
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
       });
 
@@ -243,9 +253,8 @@ export class Ga4Adapter implements IGa4Adapter {
             property: `properties/${target.propertyId}`,
             dimensions: [{ name: 'country' }, { name: 'city' }, { name: 'unifiedScreenName' }],
             metrics: [{ name: 'activeUsers' }],
-            dimensionFilter,
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
       });
 
@@ -514,7 +523,7 @@ export class Ga4Adapter implements IGa4Adapter {
           dimensionFilter,
           orderBys: [{ dimension: { dimensionName: 'date' } }],
         },
-        { timeout: 3500 }
+        { timeout: GA4_TIMEOUT_MS }
       );
 
       (response.rows || []).forEach((row) => {
@@ -532,63 +541,42 @@ export class Ga4Adapter implements IGa4Adapter {
       await LiveErrorBoundary.logUpstreamError('GA4', 'runReport', error);
     }
 
-      // Item 2.11: Retrieve daily inquiry counts from application database in Asia/Dubai timezone
+      // Item 2.11: Daily inquiries from the application database, in Dubai days. Same rules as "New inquiries"
+      // (utils/inquiries.ts): different people per day, so a scan and its own form visit count once.
       try {
-        const startUtc = dubaiDateToStartOfDayUtc(resolvedStart);
-        const endUtc = dubaiDateToEndOfDayUtc(resolvedEnd);
-        const isLe = target.domain.includes('lioneleersteling');
-
-        const visitWhere: any = {
-          email: { not: null },
-          createdAt: { gte: startUtc, lte: endUtc },
-        };
-        if (isLe) {
-          visitWhere.OR = [
-            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-            { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          ];
-        } else {
-          visitWhere.OR = [
-            { landingPage: { startsWith: '/' } },
-            { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-            { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-          ];
-          visitWhere.NOT = [
-            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          ];
-        }
-
+        const createdAt = { gte: dubaiDateToStartOfDayUtc(resolvedStart), lte: dubaiDateToEndOfDayUtc(resolvedEnd) };
         const [visits, scans] = await Promise.all([
           prisma.attributionVisit.findMany({
-            where: visitWhere,
-            select: { createdAt: true },
+            where: inquiryVisitWhere(target.domain, createdAt),
+            select: { createdAt: true, email: true },
           }),
-          isLe
+          isLeDomain(target.domain)
             ? []
             : prisma.pressureScanSubmission.findMany({
-                where: {
-                  createdAt: { gte: startUtc, lte: endUtc },
-                  email: { notIn: ['pdf@company.ae', 'dossier@company.ae', 'sanitize@company.ae', 'tieddomains@company.ae', 'domainmean@company.ae'] },
-                },
-                select: { createdAt: true },
+                where: scanWhere(createdAt),
+                select: { createdAt: true, email: true },
               }),
         ]);
 
-        const recordLeadForDate = (dt: Date) => {
-          const dubaiDay = formatDubaiDateString(dt);
-          const current = mapByDate.get(dubaiDay) || { visitors: 0, pageviews: 0, leads: 0 };
-          current.leads += 1;
-          mapByDate.set(dubaiDay, current);
-        };
-
-        visits.forEach((v) => recordLeadForDate(v.createdAt));
-        scans.forEach((s) => recordLeadForDate(s.createdAt));
+        const peopleByDay = new Map<string, Set<string>>();
+        for (const row of [...visits, ...scans]) {
+          const email = row.email?.trim().toLowerCase();
+          if (!email) continue;
+          const day = formatDubaiDateString(row.createdAt);
+          if (!peopleByDay.has(day)) peopleByDay.set(day, new Set());
+          peopleByDay.get(day)!.add(email);
+        }
+        for (const [day, people] of peopleByDay) {
+          const current = mapByDate.get(day) || { visitors: 0, pageviews: 0, leads: 0 };
+          current.leads = people.size;
+          mapByDate.set(day, current);
+        }
       } catch (dbErr: any) {
         console.warn('[GA4Adapter] Error merging inquiries from DB into traffic trend:', dbErr?.message);
       }
 
-      // Item 2.12: Do not generate artificial zeros before the first tracking date (2026-09-25)
-      const EARLIEST_TRACKING_DATE = '2026-09-25';
+      // Item 2.12: No zeros before the site's GA4 tracking started (LP 25 Sep 2026, LE 11 Nov 2026).
+      const EARLIEST_TRACKING_DATE = isLeDomain(target.domain) ? '2026-11-11' : '2026-09-25';
       const effectiveStart = resolvedStart < EARLIEST_TRACKING_DATE ? EARLIEST_TRACKING_DATE : resolvedStart;
 
       const start = new Date(effectiveStart + 'T00:00:00Z');
@@ -678,7 +666,7 @@ export class Ga4Adapter implements IGa4Adapter {
           metrics: [{ name: 'activeUsers' }, { name: 'sessions' }],
           dimensionFilter,
         },
-        { timeout: 3500 }
+        { timeout: GA4_TIMEOUT_MS }
       );
 
       for (const row of response.rows || []) {
@@ -728,7 +716,7 @@ export class Ga4Adapter implements IGa4Adapter {
             orderBys: [{ metric: { metricName: 'sessions' }, desc: true }], // Item 8.2: Sort by sessions
             limit: 100, // Item 8.2: Retrieve up to 100 rows
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
 
         const campaigns: CampaignYieldRow[] = [];
@@ -885,7 +873,7 @@ export class Ga4Adapter implements IGa4Adapter {
               ],
               dimensionFilter,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
         this.executeWithBackoff(async () =>
@@ -904,7 +892,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
               limit,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
       ]);
@@ -921,7 +909,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
               limit,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
         this.executeWithBackoff(async () =>
@@ -935,7 +923,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
               limit,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
       ]);
@@ -952,7 +940,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
               limit,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
         this.executeWithBackoff(async () =>
@@ -966,7 +954,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
               limit,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
         this.executeWithBackoff(async () =>
@@ -980,7 +968,7 @@ export class Ga4Adapter implements IGa4Adapter {
               orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
               limit: 100,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           )
         ),
       ]);
@@ -1115,7 +1103,7 @@ export class Ga4Adapter implements IGa4Adapter {
               dimensionFilter: this.buildHostNameFilter(site),
               metrics: [{ name: 'activeUsers' }],
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           );
           const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
           isTracked = totalHostUsers > 0;
@@ -1166,7 +1154,7 @@ export class Ga4Adapter implements IGa4Adapter {
             dimensionFilter,
             metrics: [{ name: 'activeUsers' }],
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
 
         let users = 0;
@@ -1222,7 +1210,7 @@ export class Ga4Adapter implements IGa4Adapter {
               dimensionFilter: this.buildHostNameFilter(site),
               metrics: [{ name: 'activeUsers' }],
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           );
           const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
           isTracked = totalHostUsers > 0;
@@ -1273,7 +1261,7 @@ export class Ga4Adapter implements IGa4Adapter {
             dimensionFilter,
             metrics: [{ name: 'activeUsers' }],
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
 
         let users = 0;
@@ -1333,7 +1321,7 @@ export class Ga4Adapter implements IGa4Adapter {
               dimensionFilter: this.buildHostNameFilter(site),
               metrics: [{ name: 'activeUsers' }],
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           );
           const totalHostUsers = parseInt(hostRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
           isTracked = totalHostUsers > 0;
@@ -1384,7 +1372,7 @@ export class Ga4Adapter implements IGa4Adapter {
             dimensionFilter,
             metrics: [{ name: 'activeUsers' }, { name: 'conversions' }],
           },
-          { timeout: 3500 }
+          { timeout: GA4_TIMEOUT_MS }
         );
 
         const siteUsers = parseInt(igRes.rows?.[0]?.metricValues?.[0]?.value || '0', 10);
@@ -1402,7 +1390,7 @@ export class Ga4Adapter implements IGa4Adapter {
               metrics: [{ name: 'activeUsers' }],
               limit: 10,
             },
-            { timeout: 3500 }
+            { timeout: GA4_TIMEOUT_MS }
           );
           for (const row of breakdownRes.rows || []) {
             const path = row.dimensionValues?.[0]?.value || '/';

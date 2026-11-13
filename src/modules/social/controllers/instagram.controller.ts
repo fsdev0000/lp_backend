@@ -72,8 +72,10 @@ export class InstagramController {
    */
   public disconnect = async (req: Request, res: Response): Promise<void> => {
     try {
-      const actor = req.body?.actor || 'Lionel Eersteling (Owner)';
-      const result = await instagramService.disconnect(actor);
+      // Item 27: the signed-in user, never a name sent in the request body.
+      const user = (req as any).crmUser || (req as any).user;
+      const actor = user?.name || user?.email || 'API key';
+      const result = await instagramService.disconnect(actor, req.ip);
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[InstagramController] disconnect error:', error);

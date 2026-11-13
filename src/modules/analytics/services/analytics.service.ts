@@ -70,17 +70,14 @@ export class AnalyticsService {
 
     if (win.prevStartDate && win.prevEndDate) {
       try {
-        const [prevTraffic, pLeads, pPipeline, prevUniqueUsers] = await Promise.all([
-          this.ga4.getTrafficReport(win.prevStartDate, win.prevEndDate, domain),
+        const [pLeads, pPipeline, prevUniqueUsers] = await Promise.all([
           this.sovereign.getAttributedLeadsCount(win.prevStartDate, win.prevEndDate, domain),
           this.sovereign.getAttributedPipelineValue(win.prevStartDate, win.prevEndDate, domain),
           this.ga4.getTotalActiveUsers(win.prevStartDate, win.prevEndDate, domain),
         ]);
         // Item 2.4: Use unique users without date dimension for previous window
-        prevAudience =
-          typeof prevUniqueUsers === 'number' && prevUniqueUsers > 0
-            ? prevUniqueUsers
-            : prevTraffic.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+        // No fallback to the daily sum: it counts returning visitors again. null (GA4 failed) means no growth.
+        prevAudience = prevUniqueUsers;
         prevLeads = pLeads;
         prevPipelineValueUsd = pPipeline;
       } catch {
@@ -88,13 +85,12 @@ export class AnalyticsService {
       }
     }
 
-    // Item 2.4: Deduplicated unique audience
-    const totalAudience =
-      typeof uniqueUsersCount === 'number' && uniqueUsersCount > 0
-        ? uniqueUsersCount
-        : trafficHistory.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+    // Item 2.4: Deduplicated unique audience. Item 2.13 (25): when GA4 fails, say so with ga4Status instead of
+    // passing off zeros (or the daily sum, which counts returning visitors again) as real numbers.
+    const ga4Healthy = typeof uniqueUsersCount === 'number';
+    const totalAudience = ga4Healthy ? uniqueUsersCount : 0;
 
-    const audienceGrowth = win.range === 'all' ? null : calcGrowth(totalAudience, prevAudience);
+    const audienceGrowth = win.range === 'all' || !ga4Healthy ? null : calcGrowth(totalAudience, prevAudience);
     const leadsGrowth = win.range === 'all' ? null : calcGrowth(highIntentLeads, prevLeads);
 
     // Item 2.5: Remove artificial 100% cap on conversion rate
@@ -110,7 +106,8 @@ export class AnalyticsService {
         : null;
     const prevConvRate = rawPrevConvRate !== null && !isNaN(rawPrevConvRate) ? rawPrevConvRate : null;
 
-    const conversionGrowth = win.range === 'all' ? null : calcGrowth(avgConversionRate, prevConvRate);
+    const conversionGrowth =
+      win.range === 'all' || !ga4Healthy ? null : calcGrowth(avgConversionRate, prevConvRate);
 
     // Item 2.3: Pipeline value in USD
     const pipelineGrowth =
@@ -123,6 +120,8 @@ export class AnalyticsService {
       endDate: win.endDate,
       dateRange: range,
       domain,
+      /** 'error': GA4 didn't answer, so visitors, conversion and the trend's visitors are not real numbers. */
+      ga4Status: ga4Healthy ? 'healthy' : 'error',
       metrics: {
         totalAudience,
         audienceGrowth,

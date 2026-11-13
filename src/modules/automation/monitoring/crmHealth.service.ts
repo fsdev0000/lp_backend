@@ -56,8 +56,8 @@ export interface PublishingFlags {
 const PUBLISHING_FLAGS_KEY = 'publishing_flags';
 
 export const DEFAULT_PUBLISHING_FLAGS: PublishingFlags = {
-  youtube: true,          // Ready
-  instagram: true,        // Ready
+  youtube: false,         // Off: no live posts until the owner says so (13 Nov 2026)
+  instagram: false,       // Off: no live posts until the owner says so (13 Nov 2026)
   tiktok: false,          // Keep disabled (pending audit)
   linkedin: false,        // Keep disabled (pending community management approval)
   dryRunGlobal: true,     // Global dry run active in testing

@@ -9,6 +9,12 @@ import {
   geminiDraftService
 } from '../modules/automation/review/geminiDraft.service';
 import { generateCrmSessionToken } from '../utils/sessionToken';
+import { notificationSettingsService } from '../modules/automation/notifications/settings.service';
+
+// Review emails go to the configured approver and editors (EMAIL_APPROVER / EMAIL_EDITORS or the saved
+// notification settings). Those defaults are read when settings.service loads, before beforeAll runs, so
+// the tests compare against the live settings instead of fixed addresses.
+const configuredRecipients = () => notificationSettingsService.getSettings();
 
 jest.setTimeout(60000);
 
@@ -219,12 +225,14 @@ describe('Step 3: Review Loop — Gemini Draft Validation, CRM Review Cycle & No
       expect(draftRes.body.data.post.revision).toBe(1);
       expect(draftRes.body.data.usedFallback).toBe(false);
 
-      // Verify REVIEW_REQUEST notification queued for Lionel
+      // Verify REVIEW_REQUEST notification queued for the approver
       const pendingNotifs = await automationPrisma.notification.findMany({
         where: { postId: createdPostId, type: 'REVIEW_REQUEST' }
       });
       expect(pendingNotifs.length).toBe(1);
-      expect(pendingNotifs[0].recipients).toContain('lionel@leadersperformance.ae');
+      const { approverEmails } = await configuredRecipients();
+      expect(approverEmails.length).toBeGreaterThan(0);
+      expect(pendingNotifs[0].recipients).toEqual(expect.arrayContaining(approverEmails));
       expect(pendingNotifs[0].body).toContain('Europe/Amsterdam');
       expect(pendingNotifs[0].body).toContain('Asia/Dubai');
     });
@@ -253,9 +261,9 @@ describe('Step 3: Review Loop — Gemini Draft Validation, CRM Review Cycle & No
         where: { postId: createdPostId, type: 'CHANGES_REQUESTED' }
       });
       expect(notifs.length).toBe(1);
-      expect(notifs[0].recipients).toEqual(
-        expect.arrayContaining(['sarath@leadersperformance.ae', 'asad@leadersperformance.ae'])
-      );
+      const { editorEmails } = await configuredRecipients();
+      expect(editorEmails.length).toBeGreaterThan(0);
+      expect(notifs[0].recipients).toEqual(expect.arrayContaining(editorEmails));
       expect(notifs[0].body).toContain('board cycle recovery');
     });
 
@@ -296,7 +304,8 @@ describe('Step 3: Review Loop — Gemini Draft Validation, CRM Review Cycle & No
         where: { postId: createdPostId, type: 'REVISION_READY' }
       });
       expect(revReadyNotifs.length).toBe(1);
-      expect(revReadyNotifs[0].recipients).toContain('lionel@leadersperformance.ae');
+      const { approverEmails } = await configuredRecipients();
+      expect(revReadyNotifs[0].recipients).toEqual(expect.arrayContaining(approverEmails));
     });
 
     it('allows Lionel to approve revision 2 -> APPROVED, and automatically moves back to PENDING_REVIEW (rev 3) if edited after approval', async () => {

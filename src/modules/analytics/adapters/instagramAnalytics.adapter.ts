@@ -5,7 +5,7 @@ import {
   InstagramPostDetailRow,
 } from './interfaces';
 import { InstagramAdapter } from '../../social/adapters/instagram.adapter';
-import { resolveWindow } from '../utils/dateRange';
+import { resolveWindow, dubaiDateToStartOfDayUtc, dubaiDateToEndOfDayUtc } from '../utils/dateRange';
 
 const prisma = new PrismaClient();
 
@@ -107,8 +107,9 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
       let followerGrowthFormatted: string | null = null;
 
       try {
-        const rawStartUnix = Math.floor(new Date(`${win.startDate}T00:00:00Z`).getTime() / 1000);
-        const endUnix = Math.floor(new Date(`${win.endDate}T23:59:59Z`).getTime() / 1000);
+        // Item 17: Dubai days, like every other range in the CRM (were UTC days).
+        const rawStartUnix = Math.floor(dubaiDateToStartOfDayUtc(win.startDate).getTime() / 1000);
+        const endUnix = Math.floor(dubaiDateToEndOfDayUtc(win.endDate).getTime() / 1000);
         const maxWindowSeconds = 30 * 86400;
 
         // Item 6.1: Meta Graph API insights are strictly capped at 30 days.

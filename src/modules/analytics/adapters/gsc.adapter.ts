@@ -129,6 +129,8 @@ export class GscAdapter implements IGscAdapter {
     try {
       // 1. Query real totals without dimensions (includes hidden and anonymized queries)
       // 2. Query individual query rows with dimensions: ['query']
+      // Item 25: a failed query used to come back as empty rows, so the CRM showed 0 clicks as if they were real.
+      let failure: string | null = null;
       const [totalRes, queryRes] = await Promise.all([
         this.searchconsole.searchanalytics.query({
           siteUrl,
@@ -138,6 +140,7 @@ export class GscAdapter implements IGscAdapter {
           },
         }).catch((err: any) => {
           console.warn('[GscAdapter] Failed to query totals:', err.message || err);
+          failure = failure || err?.message || 'Search Console totals query failed';
           return { data: { rows: [] } };
         }),
         this.searchconsole.searchanalytics.query({
@@ -150,9 +153,24 @@ export class GscAdapter implements IGscAdapter {
           },
         }).catch((err: any) => {
           console.warn('[GscAdapter] Failed to query search queries:', err.message || err);
+          failure = failure || err?.message || 'Search Console queries query failed';
           return { data: { rows: [] } };
         }),
       ]);
+
+      if (failure) {
+        return {
+          status: 'error',
+          error: failure,
+          totals: null,
+          queries: [],
+          range: rangeLabel,
+          domain: siteUrl,
+          startDate,
+          endDate,
+          totalQueries: 0,
+        };
+      }
 
       const totalRow = totalRes.data?.rows?.[0];
       const totals: GscTotals = totalRow

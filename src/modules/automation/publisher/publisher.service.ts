@@ -303,13 +303,15 @@ export class PublisherService {
     const flags = await crmHealthService.getPublishingFlags();
     const platKey = (post.platform?.toLowerCase() || '') as keyof PublishingFlags;
     const isPlatformFlagEnabled = typeof flags[platKey] === 'boolean' ? flags[platKey] : true;
+    // A caller can ask for a dry run, never skip one: while the global switch, this platform's flag or the env says
+    // dry-run, nothing is posted, whatever `options.dryRun` says (no live posts for now, 13 Nov 2026).
     const isDryRun =
-      options.dryRun ??
-      (flags.dryRunGlobal ||
-        !isPlatformFlagEnabled ||
-        process.env.PUBLISHER_DRY_RUN === 'true' ||
-        process.env.PUBLISHER_DRY_RUN === '1' ||
-        process.env.ENABLE_LIVE_PUBLISHING === 'false');
+      options.dryRun === true ||
+      flags.dryRunGlobal ||
+      !isPlatformFlagEnabled ||
+      process.env.PUBLISHER_DRY_RUN === 'true' ||
+      process.env.PUBLISHER_DRY_RUN === '1' ||
+      process.env.ENABLE_LIVE_PUBLISHING === 'false';
 
     // Hard rule: Never publish a post that is not APPROVED
     if (post.status !== 'APPROVED') {
@@ -654,12 +656,13 @@ export class PublisherService {
   public async run(options: { now?: Date; dryRun?: boolean } = {}): Promise<PublisherRunSummary> {
     const now = options.now || new Date();
     const flags = await crmHealthService.getPublishingFlags();
+    // `options.dryRun` (e.g. a request body on /internal/publisher/run) can only turn dry-run on, not off.
     const isDryRun =
-      options.dryRun ??
-      (flags.dryRunGlobal ||
-        process.env.PUBLISHER_DRY_RUN === 'true' ||
-        process.env.PUBLISHER_DRY_RUN === '1' ||
-        process.env.ENABLE_LIVE_PUBLISHING === 'false');
+      options.dryRun === true ||
+      flags.dryRunGlobal ||
+      process.env.PUBLISHER_DRY_RUN === 'true' ||
+      process.env.PUBLISHER_DRY_RUN === '1' ||
+      process.env.ENABLE_LIVE_PUBLISHING === 'false';
     const graceMinutes = Number(process.env.PUBLISH_GRACE_MINUTES) || 120;
     const graceCutoff = new Date(now.getTime() - graceMinutes * 60 * 1000);
     const staleLockCutoff = new Date(now.getTime() - 15 * 60 * 1000);

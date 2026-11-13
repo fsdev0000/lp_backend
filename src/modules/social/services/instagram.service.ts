@@ -165,7 +165,7 @@ export class InstagramService {
   /**
    * Disconnects the active Instagram account
    */
-  public async disconnect(actor = 'Lionel Eersteling (Owner)') {
+  public async disconnect(actor = 'Unknown user', ipAddress?: string) {
     await this.adapter.disconnect();
     try {
       await prisma.socialAuditLog.create({
@@ -174,6 +174,7 @@ export class InstagramService {
           action: 'INSTAGRAM_DISCONNECTED',
           entity: 'InstagramAccount',
           details: 'Revoked Instagram connection credentials and stopped synchronization.',
+          ipAddress: ipAddress || null,
         },
       });
     } catch {}

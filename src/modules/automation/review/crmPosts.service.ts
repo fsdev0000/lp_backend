@@ -64,6 +64,30 @@ export function computeRevisionDiffSummary(
   return changes.length > 0 ? changes.join('; ') : 'Resubmitted without text changes';
 }
 
+/**
+ * Item 29: calendar actions in the CRM's Activity log (social_audit_logs), next to the post's own review history.
+ * Never blocks the action itself.
+ */
+async function logCalendarActivity(
+  actor: AuthenticatedCrmUser,
+  action: string,
+  post: { id: string; platform: string; title?: string | null },
+  details: string
+) {
+  try {
+    await automationPrisma.socialAuditLog.create({
+      data: {
+        actor: actor.name || actor.email,
+        action,
+        entity: `CalendarPost #${post.id}`,
+        details: `${post.platform} "${post.title || 'Untitled'}": ${details}`,
+      },
+    });
+  } catch (err: any) {
+    console.warn('[CrmPostsService] Activity log write failed:', err?.message);
+  }
+}
+
 export class CrmPostsService {
   constructor(private readonly storage: IStorageService = defaultStorageService) {}
 
@@ -144,10 +168,16 @@ export class CrmPostsService {
         where.platform = { in: platforms };
       }
     } else {
-      // By default hide manual channels (X, INSPO, MEDIUM, WEBSITE) from CRM feeds
-      where.platform = {
-        notIn: ['X', 'INSPO', 'MEDIUM', 'WEBSITE'],
-      };
+      // By default hide manual channels (X, INSPO, MEDIUM, WEBSITE) from CRM feeds, but keep posts blocked for
+      // an unknown channel (ingest stores them as WEBSITE) so the team sees the calendar typo.
+      where.AND = [
+        {
+          OR: [
+            { platform: { notIn: ['X', 'INSPO', 'MEDIUM', 'WEBSITE'] } },
+            { blockedReason: { startsWith: 'unknown channel' } },
+          ],
+        },
+      ];
     }
 
     if (query.from || query.to) {
@@ -669,6 +699,7 @@ export class CrmPostsService {
       editorActor: actor.email,
       changeSummary: comment ? `${changeSummary} (Note: ${comment})` : changeSummary,
     });
+    await logCalendarActivity(actor, 'CALENDAR_SUBMITTED', updatedPost, comment ? `Sent for review. Note: ${comment}` : 'Sent for review.');
 
     return this.getPostDetail(postId);
   }
@@ -688,6 +719,7 @@ export class CrmPostsService {
 
     // Auto-resolve pending SLA reminders upon executive action
     await reminderService.resolveRemindersForPost(postId, 'APPROVED');
+    await logCalendarActivity(actor, 'CALENDAR_APPROVED', updatedPost, comment ? `Approved. Note: ${comment}` : 'Approved.');
 
     await notificationService.queueApproved({
       id: updatedPost.id,
@@ -716,6 +748,7 @@ export class CrmPostsService {
 
     // Auto-resolve pending SLA reminders upon executive action
     await reminderService.resolveRemindersForPost(postId, 'CHANGES_REQUESTED');
+    await logCalendarActivity(actor, 'CALENDAR_CHANGES_REQUESTED', updatedPost, `Changes requested: "${comment.trim()}"`);
 
     await notificationService.queueChangesRequestedOrRejected({
       type: 'CHANGES_REQUESTED',
@@ -748,6 +781,7 @@ export class CrmPostsService {
 
     // Auto-resolve pending SLA reminders upon executive action
     await reminderService.resolveRemindersForPost(postId, 'REJECTED');
+    await logCalendarActivity(actor, 'CALENDAR_REJECTED', updatedPost, `Rejected: "${comment.trim()}"`);
 
     await notificationService.queueChangesRequestedOrRejected({
       type: 'REJECTED',
@@ -805,10 +839,11 @@ export class CrmPostsService {
     actor: AuthenticatedCrmUser,
     comment?: string
   ) {
-    await transition(postId, 'ADMIN_RETRY', {
+    const retried = await transition(postId, 'ADMIN_RETRY', {
       actorId: actor.email,
       comment,
     });
+    await logCalendarActivity(actor, 'CALENDAR_RETRY', retried, 'Failed post set to approved again for another publish attempt.');
 
     return this.getPostDetail(postId);
   }
@@ -822,11 +857,12 @@ export class CrmPostsService {
     url: string,
     comment?: string
   ) {
-    await transition(postId, 'MARK_MANUAL_DONE', {
+    const done = await transition(postId, 'MARK_MANUAL_DONE', {
       actorId: actor.email,
       platformUrl: url,
       comment,
     });
+    await logCalendarActivity(actor, 'CALENDAR_POSTED_BY_HAND', done, `Marked as posted by hand: ${url}`);
 
     return this.getPostDetail(postId);
   }

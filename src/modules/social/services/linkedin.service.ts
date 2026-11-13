@@ -560,17 +560,18 @@ export class LinkedInService {
   /**
    * Disconnects the active LinkedIn account(s) and clears analytics cache
    */
-  public async disconnect(target?: LinkedInOAuthTarget | 'all') {
+  public async disconnect(target?: LinkedInOAuthTarget | 'all', actor = 'Unknown user', ipAddress?: string) {
     await this.adapter.disconnect(target);
     LinkedInAnalyticsAdapter.clearCache();
 
     try {
       await socialPrisma.socialAuditLog.create({
         data: {
-          actor: 'Lionel Eersteling (Owner)',
+          actor,
           action: 'LINKEDIN_DISCONNECTED',
           entity: target === 'page' ? 'LinkedInPage' : 'LinkedInAccount',
           details: `Revoked and cleared LinkedIn OAuth connection (${target || 'all'}).`,
+          ipAddress: ipAddress || null,
         },
       });
     } catch {

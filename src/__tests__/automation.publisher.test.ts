@@ -4,6 +4,7 @@ import { automationPrisma } from '../modules/automation/state/transition';
 import { IStorageService } from '../modules/automation/storage/storage.service';
 import { encryptToken } from '../modules/automation/crypto/tokenCrypto';
 import { PublisherService } from '../modules/automation/publisher/publisher.service';
+import { crmHealthService } from '../modules/automation/monitoring/crmHealth.service';
 import { YouTubePublishAdapter } from '../modules/automation/publisher/adapters/youtube.adapter';
 import { LinkedInPublishAdapter } from '../modules/automation/publisher/adapters/linkedin.adapter';
 import { InstagramPublishAdapter } from '../modules/automation/publisher/adapters/instagram.adapter';
@@ -371,6 +372,27 @@ describe('Step 4: Publishing (Flow 2) — Platform Adapters, Retry/Backoff, Grac
 
   describe('2. Publisher Orchestration (Flow 2): Forced 500 Retry Backoff -> FAILED Email, Grace/MISSED & 401 Token Refresh', () => {
     const testRunId = `step4-pub-${Date.now()}`;
+    // `dryRun: false` can no longer switch off the dry run (13 Nov 2026), so this block turns live mode on itself.
+    // The adapters are mocked: nothing reaches a real channel.
+    const savedEnv = { dry: process.env.PUBLISHER_DRY_RUN, live: process.env.ENABLE_LIVE_PUBLISHING };
+    beforeAll(() => {
+      process.env.PUBLISHER_DRY_RUN = 'false';
+      process.env.ENABLE_LIVE_PUBLISHING = 'true';
+      jest.spyOn(crmHealthService, 'getPublishingFlags').mockResolvedValue({
+        youtube: true,
+        instagram: true,
+        tiktok: true,
+        linkedin: true,
+        dryRunGlobal: false,
+      });
+    });
+    afterAll(() => {
+      if (savedEnv.dry === undefined) delete process.env.PUBLISHER_DRY_RUN;
+      else process.env.PUBLISHER_DRY_RUN = savedEnv.dry;
+      if (savedEnv.live === undefined) delete process.env.ENABLE_LIVE_PUBLISHING;
+      else process.env.ENABLE_LIVE_PUBLISHING = savedEnv.live;
+      jest.restoreAllMocks();
+    });
     let createdAccountIds: string[] = [];
     let createdItemIds: string[] = [];
     let createdPostIds: string[] = [];

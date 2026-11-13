@@ -1,6 +1,13 @@
 import { PrismaClient } from '@prisma/client';
 import { ISovereignAdapter } from './interfaces';
 import { resolveWindow, dubaiDateToStartOfDayUtc, dubaiDateToEndOfDayUtc } from '../utils/dateRange';
+import {
+  NOT_SCAN_VISIT,
+  countDistinctEmails,
+  inquiryVisitWhere,
+  isLeDomain,
+  scanWhere,
+} from '../utils/inquiries';
 
 const prisma = new PrismaClient();
 
@@ -11,53 +18,28 @@ export class SovereignAdapter implements ISovereignAdapter {
     const start = dubaiDateToStartOfDayUtc(startDate);
     const end = dubaiDateToEndOfDayUtc(resolvedEnd);
 
-    const clean = domain ? domain.toLowerCase().trim() : undefined;
-    const isLe = clean?.includes('lioneleersteling');
+    const createdAt = { gte: start, lte: end };
 
-    const visitWhere: any = {
-      email: { not: null },
-      createdAt: { gte: start, lte: end },
-    };
-
-    // Item 2.6: Correct website form attribution without requiring domain in path
-    if (isLe) {
-      visitWhere.OR = [
-        { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-        { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-      ];
-    } else {
-      visitWhere.OR = [
-        { landingPage: { startsWith: '/' } },
-        { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-        { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-      ];
-      visitWhere.NOT = [
-        { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-        { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-      ];
-    }
-
-    const [visitEmails, scanSubmissions] = await Promise.all([
-      // Item 2.9: Count distinct lead conversions to avoid visit duplication
+    const [visitEmails, scanEmails] = await Promise.all([
+      // Item 2.6: website forms, matched to the site without requiring the domain in the path
       prisma.attributionVisit.findMany({
-        where: visitWhere,
+        where: inquiryVisitWhere(domain, createdAt),
         distinct: ['email'],
         select: { email: true },
       }),
       // Item 2.7: Pressure scans belong strictly to Leaders Performance, exclude test scans
-      isLe
+      isLeDomain(domain)
         ? []
         : prisma.pressureScanSubmission.findMany({
-            where: {
-              createdAt: { gte: start, lte: end },
-              email: { notIn: ['pdf@company.ae', 'dossier@company.ae', 'sanitize@company.ae', 'tieddomains@company.ae', 'domainmean@company.ae'] },
-            },
+            where: scanWhere(createdAt),
             distinct: ['email'],
             select: { email: true },
           }),
     ]);
 
-    return visitEmails.length + scanSubmissions.length;
+    // Item 2.9: one person counts once. A scan also saves an attribution visit with the email, so adding the two
+    // lists counted every scan twice.
+    return countDistinctEmails([...visitEmails, ...scanEmails]);
   }
 
   public async getAttributedPipelineValue(startDateOrRange: string, endDate?: string, domain?: string): Promise<number> {
@@ -93,99 +75,73 @@ export class SovereignAdapter implements ISovereignAdapter {
     endDate?: string,
     domain?: string
   ): Promise<any[]> {
-    const cleanDomain = domain ? domain.toLowerCase().trim() : undefined;
-    const isLe = cleanDomain?.includes('lioneleersteling');
+    const createdAt =
+      startDate && endDate
+        ? { gte: dubaiDateToStartOfDayUtc(startDate), lte: dubaiDateToEndOfDayUtc(endDate) }
+        : undefined;
+    const isLe = isLeDomain(domain);
 
-    const dateFilter: any = {};
-    if (startDate && endDate) {
-      dateFilter.gte = dubaiDateToStartOfDayUtc(startDate);
-      dateFilter.lte = dubaiDateToEndOfDayUtc(endDate);
-    }
-
-    if (isLe) {
-      // Return inquiries specifically submitted on Lionel Eersteling workspace
-      const visits = await prisma.attributionVisit.findMany({
-        where: {
-          email: { not: null },
-          ...(startDate && endDate ? { createdAt: dateFilter } : {}),
-          OR: [
-            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-            { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          ],
-        },
-        take: limit,
+    const [visits, scans] = await Promise.all([
+      // Website forms. A scan's own visit (lead_form founder_pressure_scan) is left out: the scan is listed itself.
+      // Older submissions copied the email onto earlier visits, so read extra rows and keep the latest per email.
+      prisma.attributionVisit.findMany({
+        where: { AND: [inquiryVisitWhere(domain, createdAt), NOT_SCAN_VISIT] },
+        take: limit * 10,
         orderBy: { createdAt: 'desc' },
-      });
+      }),
+      isLe
+        ? []
+        : prisma.pressureScanSubmission.findMany({
+            where: scanWhere(createdAt),
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              fullName: true,
+              companyName: true,
+              overallNormalised: true,
+              signalClassification: true,
+              createdAt: true,
+            },
+          }),
+    ]);
 
-      return visits.map((v) => ({
+    const seen = new Set<string>();
+    const forms = visits
+      .filter((v) => {
+        const email = v.email?.trim().toLowerCase();
+        if (!email || seen.has(email)) return false;
+        seen.add(email);
+        return true;
+      })
+      .map((v) => ({
         id: v.id,
-        name: v.leadName || (v.email ? v.email.split('@')[0] : 'Executive Inquiry'),
-        company: v.email ? v.email.split('@')[1] : 'Private Office',
+        name: v.leadName || (v.email ? v.email.split('@')[0] : 'Website inquiry'),
+        company: v.email ? v.email.split('@')[1] : null,
         revenueTier: null, // Item 2.2: Do not invent revenue tier
-        leadScore: null,   // Item 2.2: Return null for uncollected score
+        leadScore: null, // Item 2.2: forms have no score
         status: 'NEW',
+        source: 'form',
+        form: v.leadForm,
         timestamp: v.createdAt,
       }));
-    }
 
-    const where: any = {
-      ...(startDate && endDate ? { createdAt: dateFilter } : {}),
-      email: { notIn: ['pdf@company.ae', 'dossier@company.ae', 'sanitize@company.ae', 'tieddomains@company.ae', 'domainmean@company.ae'] },
-    };
-
-    const scans = await prisma.pressureScanSubmission.findMany({
-      where,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        fullName: true,
-        companyName: true,
-        overallNormalised: true,
-        signalClassification: true,
-        createdAt: true,
-      },
-    });
-
-    if (scans.length > 0) {
-      return scans.map((s) => ({
-        id: s.id,
-        name: s.fullName,
-        company: s.companyName,
-        revenueTier: null, // Item 2.2: Return null for uncollected revenueTier
-        leadScore: Math.round(s.overallNormalised), // Item 2.1: overallNormalised is already 0-100
-        status: s.signalClassification,
-        timestamp: s.createdAt,
-      }));
-    }
-
-    // Also check general website inquiries if no scans found (Item 2.6)
-    const websiteVisits = await prisma.attributionVisit.findMany({
-      where: {
-        email: { not: null },
-        ...(startDate && endDate ? { createdAt: dateFilter } : {}),
-        OR: [
-          { landingPage: { startsWith: '/' } },
-          { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-          { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-        ],
-        NOT: [
-          { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-        ],
-      },
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return websiteVisits.map((v) => ({
-      id: v.id,
-      name: v.leadName || (v.email ? v.email.split('@')[0] : 'Website Inquiry'),
-      company: v.email ? v.email.split('@')[1] : 'Executive Inquiry',
-      revenueTier: null,
-      leadScore: null,
-      status: 'NEW',
-      timestamp: v.createdAt,
+    const scanRows = scans.map((s) => ({
+      id: s.id,
+      name: s.fullName,
+      company: s.companyName,
+      revenueTier: null, // Item 2.2: Return null for uncollected revenueTier
+      leadScore: Math.round(s.overallNormalised), // Item 2.1: overallNormalised is already 0-100
+      status: s.signalClassification,
+      source: 'scan',
+      form: 'founder_pressure_scan',
+      timestamp: s.createdAt,
     }));
+
+    // Item 2.10: scans and website forms together, newest first (forms used to show only when there were no scans).
+    return [...scanRows, ...forms]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
   }
 
   public async getChannelAttribution(
@@ -234,99 +190,37 @@ export class SovereignAdapter implements ISovereignAdapter {
     const start = dubaiDateToStartOfDayUtc(startDate);
     const end = dubaiDateToEndOfDayUtc(endDate);
 
-    const cleanDomain = domain ? domain.toLowerCase().trim() : undefined;
-    const isLe = cleanDomain?.includes('lioneleersteling');
-
-    const visitWhere: any = {
-      createdAt: { gte: start, lte: end },
-      utmSource: { not: null },
-    };
-
-    if (isLe) {
-      visitWhere.OR = [
-        { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-        { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-      ];
-    } else {
-      visitWhere.OR = [
-        { landingPage: { startsWith: '/' } },
-        { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-        { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-      ];
-      visitWhere.NOT = [
-        { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-      ];
-    }
-
-    try {
-      // Fetch visits with utmSource in window and matching domain
+    // Leads per channel: different people (emails) who arrived with that utm_source, not every visit row.
+    const countByChannel = async (createdAt: { gte: Date; lte: Date }) => {
       const visits = await prisma.attributionVisit.findMany({
-        where: visitWhere,
-        select: {
-          utmSource: true,
-          email: true,
-        },
+        where: { AND: [inquiryVisitWhere(domain, createdAt), { utmSource: { not: null } }] },
+        select: { utmSource: true, email: true },
       });
-
+      const emailsByChannel = new Map<string, Set<string>>();
       for (const v of visits) {
         const src = (v.utmSource || '').toLowerCase();
+        const email = v.email?.trim().toLowerCase();
+        if (!email) continue;
         for (const ch of channels) {
-          if (src.includes(ch)) {
-            if (v.email) {
-              result[ch].leads += 1;
-              result[ch].pipelineValueEur += 0;
-              result[ch].pipelineValueUsd += 0;
-            }
-          }
+          if (!src.includes(ch)) continue;
+          if (!emailsByChannel.has(ch)) emailsByChannel.set(ch, new Set());
+          emailsByChannel.get(ch)!.add(email);
         }
       }
+      return emailsByChannel;
+    };
 
-      // Previous period if requested
+    try {
+      const current = await countByChannel({ gte: start, lte: end });
+      for (const [ch, emails] of current) result[ch].leads = emails.size;
+
+      // Previous period if requested. Pipeline value per channel stays 0: deals aren't linked to channels.
       if (prevStartDate && prevEndDate) {
-        const prevStart = dubaiDateToStartOfDayUtc(prevStartDate);
-        const prevEnd = dubaiDateToEndOfDayUtc(prevEndDate);
-
-        const prevVisitWhere: any = {
-          createdAt: { gte: prevStart, lte: prevEnd },
-          utmSource: { not: null },
-        };
-
-        if (isLe) {
-          prevVisitWhere.OR = [
-            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-            { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          ];
-        } else {
-          prevVisitWhere.OR = [
-            { landingPage: { startsWith: '/' } },
-            { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-            { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-          ];
-          prevVisitWhere.NOT = [
-            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          ];
-        }
-
-        const prevVisits = await prisma.attributionVisit.findMany({
-          where: prevVisitWhere,
-          select: {
-            utmSource: true,
-            email: true,
-          },
+        const previous = await countByChannel({
+          gte: dubaiDateToStartOfDayUtc(prevStartDate),
+          lte: dubaiDateToEndOfDayUtc(prevEndDate),
         });
-
-        for (const v of prevVisits) {
-          const src = (v.utmSource || '').toLowerCase();
-          for (const ch of channels) {
-            if (src.includes(ch)) {
-              if (v.email) {
-                result[ch].prevLeads += 1;
-                result[ch].prevPipelineValueEur += 0;
-                result[ch].prevPipelineValueUsd += 0;
-              }
-            }
-          }
-        }
+        for (const [ch, emails] of previous) result[ch].prevLeads = emails.size;
       }
     } catch (err) {
       console.warn('[SovereignAdapter] getChannelAttribution database query failed, using empty attribution:', err);

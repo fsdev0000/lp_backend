@@ -4,6 +4,12 @@ import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
 
+/** Who made the request, for the activity log: the signed-in CRM user, or the API key when nobody is signed in. */
+function actorOf(req: Request): string {
+  const user = (req as any).crmUser || (req as any).user;
+  return user?.name || user?.email || 'API key';
+}
+
 export class ContentController {
   private service = new ContentService();
 
@@ -137,7 +143,8 @@ export class ContentController {
           author,
           requireApproval: requireApproval !== false, // Defaults to true (human-in-the-loop review)
         },
-        req.ip
+        req.ip,
+        actorOf(req)
       );
 
       res.status(201).json({ success: true, data: post });
@@ -154,7 +161,7 @@ export class ContentController {
   public updatePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const post = await this.service.updatePost(id, req.body, req.ip);
+      const post = await this.service.updatePost(id, req.body, req.ip, actorOf(req));
       res.status(200).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] updatePost error:', error);
@@ -165,7 +172,7 @@ export class ContentController {
   public deletePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const result = await this.service.deletePost(id, req.ip);
+      const result = await this.service.deletePost(id, req.ip, actorOf(req));
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[ContentController] deletePost error:', error);
@@ -176,7 +183,7 @@ export class ContentController {
   public requestApproval = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const post = await this.service.requestApproval(id, req.ip);
+      const post = await this.service.requestApproval(id, req.ip, actorOf(req));
       res.status(200).json({ success: true, message: 'Submitted for Mr. Lionel sign-off', data: post });
     } catch (error: any) {
       console.error('[ContentController] requestApproval error:', error);
@@ -192,9 +199,10 @@ export class ContentController {
         res.status(403).json({ success: false, error: 'Editors cannot approve posts. Admin or Approver role required.' });
         return;
       }
-      const approverEmail = user?.email || (req.body?.approvedBy ? String(req.body.approvedBy) : 'approver@leadersperformance.ae');
+      // Item 27: the approver is whoever is signed in, never a name sent in the request body.
+      const approverEmail = user?.email || 'API key';
       const signature = req.body?.signature || `SIG_${Date.now()}`;
-      const post = await this.service.approvePost(id, { signature, approvedBy: approverEmail }, req.ip, user?.name || user?.email);
+      const post = await this.service.approvePost(id, { signature, approvedBy: approverEmail }, req.ip, actorOf(req));
       res.status(200).json({
         success: true,
         message: 'Post approved and queued for dispatch',
