@@ -89,7 +89,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       const sessionToken = generateCrmSessionToken({
         id: 'crm-admin',
         email: cleanEmail,
-        name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Lionel Eersteling',
+        name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Developer',
         role: 'admin',
       });
 
@@ -98,7 +98,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
         user: {
           id: 'crm-admin',
           email: cleanEmail,
-          name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Lionel Eersteling',
+          name: cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Developer',
           role: 'admin',
         },
         token: sessionToken,

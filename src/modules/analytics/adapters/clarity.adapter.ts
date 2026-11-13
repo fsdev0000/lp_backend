@@ -93,8 +93,8 @@ export class ClarityAdapter implements IClarityAdapter {
     }
 
     if (!config.token) {
-      console.warn(`[ClarityAdapter] No token configured for ${config.key}. Serving normalized fallback.`);
-      return this.getFallbackNormalizedMetrics(config);
+      console.warn(`[ClarityAdapter] No token configured for ${config.key}. Serving empty fallback.`);
+      return this.getFallbackNormalizedMetrics(config, cached ? new Date(cached.lastSuccess).toISOString() : null);
     }
 
     const start = Date.now();
@@ -171,15 +171,22 @@ export class ClarityAdapter implements IClarityAdapter {
       const isLp = config.key === 'leaders_performance';
 
       // Query real attribution visits from PostgreSQL database
+      // Issue 3.3: Exclude staging and localhost visits from contaminating session listings
       const attributedVisits = await prisma.attributionVisit.findMany({
         where: isLp
           ? {
-              NOT: {
-                landingPage: { contains: 'lioneleersteling' },
-              },
+              NOT: [
+                { landingPage: { contains: 'lioneleersteling' } },
+                { landingPage: { contains: 'staging' } },
+                { landingPage: { contains: 'localhost' } },
+              ],
             }
           : {
               landingPage: { contains: 'lioneleersteling' },
+              NOT: [
+                { landingPage: { contains: 'staging' } },
+                { landingPage: { contains: 'localhost' } },
+              ],
             },
         take: limit,
         orderBy: [{ email: 'desc' }, { createdAt: 'desc' }],
@@ -217,14 +224,11 @@ export class ClarityAdapter implements IClarityAdapter {
         });
       });
 
-      if (sessions.length > 0) {
-        return sessions;
-      }
-
-      return this.getCuratedSessionsForWebsite(config).slice(0, limit);
+      // Issue 3.4: Return actual sessions only. Do not return fake curated sessions.
+      return sessions;
     } catch (err: any) {
       console.warn(`[ClarityAdapter] Error querying sessions for ${config.key}:`, err.message);
-      return this.getCuratedSessionsForWebsite(config).slice(0, limit);
+      return [];
     }
   }
 
@@ -392,7 +396,9 @@ export class ClarityAdapter implements IClarityAdapter {
 
     const totalDwellSecs = engagementInfo.totalTime || 0;
     const activeDwellSecs = engagementInfo.activeTime || 0;
-    const dwellSeconds = totalSessions > 0 ? Math.round(activeDwellSecs / totalSessions) : 0;
+    // Issue 8.1: activeDwellSecs from Microsoft Clarity API is already the average active time
+    // in seconds per session. Do NOT divide by totalSessions twice.
+    const dwellSeconds = Math.round(activeDwellSecs || 0);
     const dwellFormatted = `${Math.floor(dwellSeconds / 60)}m ${dwellSeconds % 60}s`;
 
     const rageClickRatio = (rageClickInfo.sessionsWithMetricPercentage || 0) / 100;
@@ -412,28 +418,43 @@ export class ClarityAdapter implements IClarityAdapter {
         .slice(0, 5);
     };
 
+    const isLp = config.key === 'leaders_performance';
+
+    // Issue 3.3: Exclude staging, dev, localhost, and non-production URLs from popularPages
+    const isProductionUrl = (rawUrl: string): boolean => {
+      if (!rawUrl) return false;
+      const lower = rawUrl.toLowerCase();
+      if (
+        lower.includes('staging.') ||
+        lower.includes('localhost') ||
+        lower.includes('127.0.0.1') ||
+        lower.includes('dev.') ||
+        lower.includes('preview.') ||
+        lower.includes('test.')
+      ) {
+        return false;
+      }
+      try {
+        if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+          const parsed = new URL(rawUrl);
+          const expectedDomain = isLp ? 'leadersperformance.ae' : 'lioneleersteling.com';
+          return parsed.hostname === expectedDomain || parsed.hostname === `www.${expectedDomain}`;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     const popularPages = (getMetric('PopularPages')?.information || [])
       .map((item: any) => ({ url: item.url || '', visits: item.visitsCount || 0 }))
+      .filter((item: { url: string; visits: number }) => isProductionUrl(item.url))
       .slice(0, 5);
 
-    const isLp = config.key === 'leaders_performance';
     const anomalyDetected = rageClickRatio > this.defaultRageClickThreshold && totalSessions >= 5;
 
-    const rawCities = extractDimension('City');
-    const fallbackCities = isLp
-      ? [
-          { name: 'Dubai', sessions: Math.max(1, Math.round(totalSessions * 0.45)) },
-          { name: 'Abu Dhabi', sessions: Math.max(1, Math.round(totalSessions * 0.20)) },
-          { name: 'London', sessions: Math.max(1, Math.round(totalSessions * 0.15)) },
-          { name: 'Riyadh', sessions: Math.max(1, Math.round(totalSessions * 0.10)) },
-        ]
-      : [
-          { name: 'Amsterdam', sessions: Math.max(1, Math.round(totalSessions * 0.42)) },
-          { name: 'Rotterdam', sessions: Math.max(1, Math.round(totalSessions * 0.22)) },
-          { name: 'Utrecht', sessions: Math.max(1, Math.round(totalSessions * 0.16)) },
-          { name: 'London', sessions: Math.max(1, Math.round(totalSessions * 0.10)) },
-        ];
-    const cities = rawCities.length > 0 ? rawCities : fallbackCities;
+    // Issue 3.4: Return actual provider data only. Do not fabricate cities.
+    const cities = extractDimension('City');
 
     return {
       websiteKey: config.key,
@@ -567,119 +588,54 @@ export class ClarityAdapter implements IClarityAdapter {
     ClarityAdapter.quotaTracker[key] = tracker;
   }
 
-  private getFallbackNormalizedMetrics(config: ClarityWebsiteConfig): ClarityNormalizedMetrics {
-    const isLp = config.key === 'leaders_performance';
+  // Issue 3.4: Return actual provider data only. Return explicit error state with isFallback: true, isStale: true.
+  private getFallbackNormalizedMetrics(
+    config: ClarityWebsiteConfig,
+    lastSyncAt: string | null = null
+  ): ClarityNormalizedMetrics {
     return {
       websiteKey: config.key,
       websiteName: config.name,
       websiteUrl: config.url,
       projectId: config.projectId,
-      totalSessions: isLp ? 148 : 42,
-      distinctUsers: isLp ? 132 : 36,
-      pagesPerSession: 2.14,
-      executiveDwellSeconds: 258,
-      executiveDwellFormatted: '4m 18s',
-      dwellBenchmarkMet: true,
-      rageClickRatio: 0.008,
-      rageClickRatioFormatted: '0.80%',
-      rageClickCount: 1,
-      deadClickRatio: 0.04,
-      deadClickCount: 3,
-      quickBackRatio: 0.02,
-      excessiveScrollRatio: 0.05,
-      averageScrollDepth: 82,
+      totalSessions: 0,
+      distinctUsers: 0,
+      pagesPerSession: 0,
+      executiveDwellSeconds: 0,
+      executiveDwellFormatted: '0m 0s',
+      dwellBenchmarkMet: false,
+      rageClickRatio: 0,
+      rageClickRatioFormatted: '0.00%',
+      rageClickCount: 0,
+      deadClickRatio: 0,
+      deadClickCount: 0,
+      quickBackRatio: 0,
+      excessiveScrollRatio: 0,
+      averageScrollDepth: null,
       scriptErrorCount: 0,
-      popularPages: [
-        { url: `${config.url}/`, visits: isLp ? 120 : 38 },
-        { url: `${config.url}/strategic-briefings`, visits: isLp ? 54 : 14 },
-      ],
-      browsers: [
-        { name: 'Chrome', sessions: isLp ? 92 : 24 },
-        { name: 'Safari', sessions: isLp ? 41 : 12 },
-        { name: 'Edge', sessions: isLp ? 15 : 6 },
-      ],
-      devices: [
-        { name: 'Desktop', sessions: isLp ? 104 : 30 },
-        { name: 'Mobile', sessions: isLp ? 44 : 12 },
-      ],
-      operatingSystems: [
-        { name: 'macOS', sessions: isLp ? 72 : 20 },
-        { name: 'Windows', sessions: isLp ? 48 : 14 },
-        { name: 'iOS', sessions: isLp ? 28 : 8 },
-      ],
-      countries: [
-        { name: isLp ? 'United Arab Emirates' : 'Netherlands', sessions: isLp ? 88 : 28 },
-        { name: 'United Kingdom', sessions: isLp ? 24 : 8 },
-        { name: 'United States', sessions: isLp ? 18 : 6 },
-      ],
-      cities: isLp
-        ? [
-            { name: 'Dubai', sessions: 65 },
-            { name: 'Abu Dhabi', sessions: 23 },
-            { name: 'London', sessions: 18 },
-            { name: 'Riyadh', sessions: 12 },
-          ]
-        : [
-            { name: 'Amsterdam', sessions: 22 },
-            { name: 'Rotterdam', sessions: 10 },
-            { name: 'Utrecht', sessions: 6 },
-            { name: 'London', sessions: 4 },
-          ],
+      popularPages: [],
+      browsers: [],
+      devices: [],
+      operatingSystems: [],
+      countries: [],
+      cities: [],
       anomalyDetected: false,
-      ingestionLatencyMs: 4,
+      ingestionLatencyMs: 0,
       cachedAt: new Date().toISOString(),
-      isStale: false,
+      isStale: true,
+      isFallback: true,
+      status: 'error',
+      lastSyncAt,
       quotaStatus: {
         limitPerDay: 25,
-        remaining: 24,
+        remaining: Math.max(0, 25 - (ClarityAdapter.quotaTracker[config.key]?.requestsToday || 0)),
         status: 'OK',
       },
     };
   }
 
-  private getCuratedSessionsForWebsite(config: ClarityWebsiteConfig): ClaritySessionRow[] {
-    const isLp = config.key === 'leaders_performance';
-    return [
-      {
-        sessionId: isLp ? '4a9b2c1e-88f1' : 'le-7c8d9e0f',
-        playbackUrl: this.getSessionPlaybackUrl(isLp ? '4a9b2c1e-88f1' : 'le-7c8d9e0f', config.key),
-        dwellSeconds: 285,
-        dwellTimeFormatted: '4m 45s',
-        rageClicks: 0,
-        rageClickRate: 0.0,
-        deadClicks: 0,
-        quickBack: false,
-        device: 'Desktop (macOS / Chrome)',
-        country: isLp ? 'United Arab Emirates' : 'Netherlands',
-        city: isLp ? 'Dubai' : 'Amsterdam',
-        landingPage: `${config.url}/strategic-briefings`,
-        lead: {
-          name: isLp ? 'Dr. Tariq Al-Husseini' : 'Maarten de Vries',
-          email: isLp ? 'tariq@alhusseini-holdings.ae' : 'maarten@vries-capital.nl',
-          form: isLp ? 'Founder Pressure Scan' : 'Executive Advisory Booking',
-        },
-        timestamp: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-      },
-      {
-        sessionId: isLp ? 'b7c3e4d9-12a4' : 'le-3a4b5c6d',
-        playbackUrl: this.getSessionPlaybackUrl(isLp ? 'b7c3e4d9-12a4' : 'le-3a4b5c6d', config.key),
-        dwellSeconds: 340,
-        dwellTimeFormatted: '5m 40s',
-        rageClicks: 0,
-        rageClickRate: 0.0,
-        deadClicks: 1,
-        quickBack: false,
-        device: 'Desktop (Windows / Edge)',
-        country: isLp ? 'United Kingdom' : 'Belgium',
-        city: isLp ? 'London' : 'Brussels',
-        landingPage: `${config.url}/unmasked-intensive`,
-        lead: {
-          name: isLp ? 'Julian Henderson' : 'Jean-Paul Dubois',
-          email: isLp ? 'j.henderson@apexventures.co.uk' : 'jp.dubois@brussels-scale.be',
-          form: 'Strategic Consultation',
-        },
-        timestamp: new Date(Date.now() - 80 * 60 * 1000).toISOString(),
-      },
-    ];
+  // Issue 3.4: Deprecated fake curated sessions. Return empty array if no live sessions.
+  private getCuratedSessionsForWebsite(_config: ClarityWebsiteConfig): ClaritySessionRow[] {
+    return [];
   }
 }

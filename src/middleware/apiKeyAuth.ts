@@ -61,6 +61,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       const sessionUser = verifyCrmSessionToken(token);
       if (sessionUser) {
         (req as any).user = sessionUser;
+        (req as any).crmUser = sessionUser;
         return next();
       }
     }
@@ -84,6 +85,13 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
 
           if (isStaff) {
             (req as any).user = user;
+            (req as any).crmUser = {
+              id: user.id,
+              email: user.email || '',
+              name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Authenticated User',
+              role: role === 'admin' ? 'admin' : (role === 'approver' ? 'approver' : 'editor'),
+              workspaces: ['leaders_performance', 'lionel_eersteling'],
+            };
             return next();
           } else {
             return res.status(403).json({

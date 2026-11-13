@@ -74,6 +74,7 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
       // 2. Fetch recent media in range
       const posts = await this.getPosts(forceRefresh);
       const postsInRange = posts.filter((p) => {
+        if (!p.publishedAt) return false;
         const pubDate = p.publishedAt.slice(0, 10);
         return pubDate >= win.startDate && pubDate <= win.endDate;
       });
@@ -98,7 +99,7 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
         }
       }
 
-      // 4. Query Insights metrics (strict null if permission not granted on token)
+      // 4. Query Insights metrics (strict null if permission not granted or range > 30 days)
       let reach: number | null = null;
       let impressions: number | null = null;
       let profileViews: number | null = null;
@@ -108,25 +109,25 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
       try {
         const rawStartUnix = Math.floor(new Date(`${win.startDate}T00:00:00Z`).getTime() / 1000);
         const endUnix = Math.floor(new Date(`${win.endDate}T23:59:59Z`).getTime() / 1000);
-        // Meta Graph API v21.0 requires metric_type=total_value and max 30-day window between since and until
         const maxWindowSeconds = 30 * 86400;
-        const startUnix = (endUnix - rawStartUnix > maxWindowSeconds)
-          ? endUnix - maxWindowSeconds
-          : rawStartUnix;
 
-        const insightsUrl = `https://graph.facebook.com/v21.0/${accountId}/insights?metric=views,profile_views,reach&metric_type=total_value&period=day&since=${startUnix}&until=${endUnix}&access_token=${token}`;
-        const insightsRes = await fetch(insightsUrl);
+        // Item 6.1: Meta Graph API insights are strictly capped at 30 days.
+        // If range > 30 days, do NOT substitute capped 30-day data as the full range total.
+        if (endUnix - rawStartUnix <= maxWindowSeconds) {
+          const insightsUrl = `https://graph.facebook.com/v21.0/${accountId}/insights?metric=views,profile_views,reach&metric_type=total_value&period=day&since=${rawStartUnix}&until=${endUnix}&access_token=${token}`;
+          const insightsRes = await fetch(insightsUrl);
 
-        if (insightsRes.ok) {
-          const insData = (await insightsRes.json()) as any;
-          const rows = insData.data || [];
-          for (const row of rows) {
-            const val = typeof row.total_value?.value === 'number'
-              ? row.total_value.value
-              : (row.values || []).reduce((acc: number, v: any) => acc + (v.value || 0), 0);
-            if (row.name === 'reach') reach = val;
-            if (row.name === 'views' || row.name === 'impressions') impressions = val;
-            if (row.name === 'profile_views') profileViews = val;
+          if (insightsRes.ok) {
+            const insData = (await insightsRes.json()) as any;
+            const rows = insData.data || [];
+            for (const row of rows) {
+              const val = typeof row.total_value?.value === 'number'
+                ? row.total_value.value
+                : (row.values || []).reduce((acc: number, v: any) => acc + (v.value || 0), 0);
+              if (row.name === 'reach') reach = val;
+              if (row.name === 'views' || row.name === 'impressions') impressions = val;
+              if (row.name === 'profile_views') profileViews = val;
+            }
           }
         }
       } catch (e: any) {
@@ -177,6 +178,9 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
           ...cached.data,
           isCached: true,
           isFallback: true,
+          isStale: true,
+          cachedAt: new Date(cached.cachedAt).toISOString(),
+          error: err?.message,
         };
       }
 
@@ -202,36 +206,67 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
     }
 
     try {
-      const mediaUrl = `https://graph.facebook.com/v21.0/${accountId}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count&limit=30&access_token=${token}`;
-      const res = await fetch(mediaUrl);
+      const allRawPosts: any[] = [];
+      let nextUrl: string | null = `https://graph.facebook.com/v21.0/${accountId}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count&limit=25&access_token=${token}`;
+      let pageCount = 0;
 
-      if (!res.ok) {
-        throw new Error(`Media fetch returned HTTP ${res.status}`);
+      // Item 6.2: Cursor-based pagination up to 100 posts (4 pages)
+      while (nextUrl && pageCount < 4) {
+        const res = await fetch(nextUrl);
+        if (!res.ok) break;
+        const json = (await res.json()) as any;
+        const data = json.data || [];
+        allRawPosts.push(...data);
+        pageCount += 1;
+        nextUrl = json.paging?.next || null;
       }
 
-      const json = (await res.json()) as any;
-      const rawPosts = json.data || [];
+      // Item 6.3: Fetch per-post reach via /{media-id}/insights?metric=reach
+      const posts: InstagramPostDetailRow[] = await Promise.all(
+        allRawPosts.map(async (m: any) => {
+          let mediaReach: number | null = null;
+          try {
+            const insRes = await fetch(
+              `https://graph.facebook.com/v21.0/${m.id}/insights?metric=reach&access_token=${token}`
+            );
+            if (insRes.ok) {
+              const insJson = (await insRes.json()) as any;
+              const val = insJson?.data?.[0]?.values?.[0]?.value;
+              if (typeof val === 'number') {
+                mediaReach = val;
+              }
+            }
+          } catch {
+            // Insights permission not available
+          }
 
-      const posts: InstagramPostDetailRow[] = rawPosts.map((m: any) => ({
-        id: m.id,
-        caption: m.caption || null,
-        mediaType: m.media_type || 'IMAGE',
-        mediaUrl: m.media_url || null,
-        thumbnailUrl: m.thumbnail_url || m.media_url || null,
-        permalink: m.permalink || `https://www.instagram.com/p/${m.id}/`,
-        publishedAt: m.timestamp || new Date().toISOString(),
-        likes: typeof m.like_count === 'number' ? m.like_count : null,
-        comments: typeof m.comments_count === 'number' ? m.comments_count : null,
-        reach: null, // Populated via insights when permission granted
-        impressions: null,
-        saved: null,
-        shares: null,
-        engagementRate: null,
-        engagementRateFormatted: null,
-      }));
+          return {
+            id: m.id,
+            caption: m.caption || null,
+            mediaType: m.media_type || 'IMAGE',
+            mediaUrl: m.media_url || null,
+            thumbnailUrl: m.thumbnail_url || m.media_url || null,
+            permalink: m.permalink || `https://www.instagram.com/p/${m.id}/`,
+            // Item 6.7: Missing timestamps return null, never substitute current time
+            publishedAt: m.timestamp || null,
+            likes: typeof m.like_count === 'number' ? m.like_count : null,
+            comments: typeof m.comments_count === 'number' ? m.comments_count : null,
+            reach: mediaReach,
+            impressions: null,
+            saved: null,
+            shares: null,
+            engagementRate: null,
+            engagementRateFormatted: null,
+          };
+        })
+      );
 
       // Sort newest first
-      posts.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      posts.sort((a, b) => {
+        const timeB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+        const timeA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+        return timeB - timeA;
+      });
 
       InstagramAnalyticsAdapter.postsCache = {
         data: posts,
@@ -322,7 +357,7 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
             thumbnailUrl: p.thumbnailUrl,
             likeCount: p.likes || 0,
             commentsCount: p.comments || 0,
-            publishedAt: new Date(p.publishedAt),
+            publishedAt: p.publishedAt ? new Date(p.publishedAt) : new Date(),
             lastSyncedAt: new Date(),
           },
           update: {

@@ -20,7 +20,7 @@ export function getLinkedInPageScopes(): string[] {
       .filter(Boolean);
     if (parsed.length > 0) return parsed;
   }
-  return ['r_organization_social', 'w_organization_social'];
+  return ['r_organization_social', 'rw_organization_admin'];
 }
 
 export const LINKEDIN_PAGE_SCOPES = getLinkedInPageScopes();

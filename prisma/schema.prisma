@@ -510,6 +510,7 @@ model CampaignUtmYield {
 
 model SocialPost {
   id                 String    @id @default(uuid())
+  workspace          String    @default("leaders_performance")
   title              String
   hook               String?   @db.Text
   body               String?   @db.Text
@@ -533,6 +534,7 @@ model SocialPost {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  @@index([workspace])
   @@index([status])
   @@index([platform])
   @@index([scheduledFor])
@@ -914,6 +916,7 @@ model ChannelAlias {
 
 model ContentItem {
   id           String   @id @default(uuid())
+  workspace    String   @default("leaders_performance")
   sheetId      String   @map("sheet_id")
   sheetTab     String   @map("sheet_tab")
   rowNumber    Int      @map("row_number")
@@ -932,6 +935,7 @@ model ContentItem {
   updatedAt    DateTime @updatedAt @map("updated_at")
   posts        Post[]
 
+  @@index([workspace])
   @@index([scheduledAt])
   @@index([lastSeenAt])
   @@map("crm_content_items")
@@ -939,6 +943,7 @@ model ContentItem {
 
 model Post {
   id             String      @id @default(uuid())
+  workspace      String      @default("leaders_performance")
   contentItemId  String      @map("content_item_id")
   accountId      String?     @map("account_id")
   platform       Platform
@@ -975,6 +980,7 @@ model Post {
   attempts       PublishAttempt[]
   metricSnapshots PostMetricSnapshot[]
 
+  @@index([workspace])
   @@index([status, scheduledAt])
   @@index([platform, status])
   @@index([contentItemId])

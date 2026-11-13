@@ -15,6 +15,30 @@ export function getDubaiTodayString(): string {
 }
 
 /**
+ * Converts a YYYY-MM-DD date in Asia/Dubai (UTC+4) to a JavaScript Date representing
+ * 00:00:00.000 in Dubai (which corresponds to 20:00:00.000Z the previous day in UTC).
+ */
+export function dubaiDateToStartOfDayUtc(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00.000+04:00`);
+}
+
+/**
+ * Converts a YYYY-MM-DD date in Asia/Dubai (UTC+4) to a JavaScript Date representing
+ * 23:59:59.999 in Dubai (which corresponds to 19:59:59.999Z the same day in UTC).
+ */
+export function dubaiDateToEndOfDayUtc(dateStr: string): Date {
+  return new Date(`${dateStr}T23:59:59.999+04:00`);
+}
+
+/**
+ * Formats a given Date or ISO string into a YYYY-MM-DD string in Asia/Dubai (UTC+4).
+ */
+export function formatDubaiDateString(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(d);
+}
+
+/**
  * Resolves date window in Asia/Dubai timezone.
  * lagDays = 1 for GA4 (yesterday is latest complete day)
  * lagDays = 2 for Google Search Console (2 days ago is latest complete day)

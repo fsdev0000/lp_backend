@@ -7,6 +7,7 @@ import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config
 export const contentPrisma = new PrismaClient();
 
 export interface CreatePostDto {
+  workspace?: string;
   title: string;
   hook?: string;
   body?: string;
@@ -20,6 +21,7 @@ export interface CreatePostDto {
 }
 
 export interface PostFilterDto {
+  workspace?: string;
   platform?: string;
   status?: string;
   search?: string;
@@ -95,6 +97,9 @@ export class ContentService {
     await this.purgeLegacySeedData();
 
     const where: any = {};
+    if (filter.workspace) {
+      where.workspace = filter.workspace;
+    }
     if (filter.platform && filter.platform !== 'ALL') {
       where.platform = filter.platform.toUpperCase();
     }
@@ -189,6 +194,7 @@ export class ContentService {
 
     const post = await contentPrisma.socialPost.create({
       data: {
+        workspace: dto.workspace || 'leaders_performance',
         title: dto.title,
         hook: dto.hook || null,
         body: dto.body || null,
@@ -333,7 +339,8 @@ export class ContentService {
   public async approvePost(
     id: string,
     approvalData: { signature?: string; approvedBy?: string },
-    ipAddress?: string
+    ipAddress?: string,
+    actorName?: string
   ): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
@@ -413,7 +420,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: approvedBy,
+      actor: actorName || approvedBy,
       action: 'CRYPTOGRAPHIC_APPROVAL_GRANTED',
       entity: `ContentPost #${post.id}`,
       details: `Generated digital token ${signature}. Status transitioned to ${newStatus} (publishingEnabled=${publishingEnabled}).`,
@@ -426,7 +433,7 @@ export class ContentService {
   /**
    * Rejects a post draft with feedback reason
    */
-  public async rejectPost(id: string, reason: string, ipAddress?: string): Promise<SocialPost> {
+  public async rejectPost(id: string, reason: string, ipAddress?: string, actor?: string): Promise<SocialPost> {
     const post = await this.getPostById(id);
 
     const updated = await contentPrisma.socialPost.update({
@@ -442,7 +449,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: 'Lionel Eersteling (Owner)',
+      actor: actor || 'Approver',
       action: 'POST_REJECTED',
       entity: `ContentPost #${post.id}`,
       details: `Revisions requested: "${reason}".`,
@@ -459,7 +466,7 @@ export class ContentService {
    * - Never signs off by itself when a post has no approval (Item 6b).
    * - Never marks YouTube/TikTok/unimplemented platforms as PUBLISHED without posting them (Item 6d).
    */
-  public async publishPostNow(id: string, ipAddress?: string): Promise<SocialPost> {
+  public async publishPostNow(id: string, ipAddress?: string, actor?: string): Promise<SocialPost> {
     if (!isLinkedInPublishingEnabled()) {
       throw createHttpError(
         'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
@@ -507,7 +514,7 @@ export class ContentService {
     });
 
     await this.logAudit({
-      actor: post.approvedBy,
+      actor: actor || post.approvedBy || 'System Publisher',
       action: 'LINKEDIN_BROADCAST_DISPATCHED',
       entity: `ContentPost #${post.id}`,
       details: `Live post broadcast to LinkedIn feed. URN: ${dispatch.postUrn || 'none'}`,
@@ -543,10 +550,14 @@ export class ContentService {
   /**
    * Retrieves pending posts for the Approval Desk
    */
-  public async getApprovalDeskPosts() {
+  public async getApprovalDeskPosts(workspace?: string) {
     await this.purgeLegacySeedData();
+    const where: any = { status: 'PENDING_REVIEW' };
+    if (workspace) {
+      where.workspace = workspace;
+    }
     return contentPrisma.socialPost.findMany({
-      where: { status: 'PENDING_REVIEW' },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -554,14 +565,15 @@ export class ContentService {
   /**
    * Returns approval queue analytics
    */
-  public async getApprovalStats() {
+  public async getApprovalStats(workspace?: string) {
     await this.purgeLegacySeedData();
+    const baseWhere: any = workspace ? { workspace } : {};
     const [pending, scheduled, published, rejected, total] = await Promise.all([
-      contentPrisma.socialPost.count({ where: { status: 'PENDING_REVIEW' } }),
-      contentPrisma.socialPost.count({ where: { status: 'SCHEDULED' } }),
-      contentPrisma.socialPost.count({ where: { status: 'PUBLISHED' } }),
-      contentPrisma.socialPost.count({ where: { status: 'REJECTED' } }),
-      contentPrisma.socialPost.count(),
+      contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'PENDING_REVIEW' } }),
+      contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'SCHEDULED' } }),
+      contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'PUBLISHED' } }),
+      contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'REJECTED' } }),
+      contentPrisma.socialPost.count({ where: baseWhere }),
     ]);
 
     return {
@@ -574,14 +586,34 @@ export class ContentService {
   }
 
   /**
-   * Retrieves governance audit logs
+   * Retrieves governance audit logs with pagination support
    */
-  public async getAuditLogs(limit = 50) {
+  public async getAuditLogs(limit = 50, page = 1, cursor?: string) {
     await this.purgeLegacySeedData();
-    return contentPrisma.socialAuditLog.findMany({
+    const take = Math.min(100, Math.max(1, limit));
+    const skip = cursor ? 1 : Math.max(0, (page - 1) * take);
+    const query: any = {
       orderBy: { timestamp: 'desc' },
-      take: Math.min(100, Math.max(1, limit)),
-    });
+      take,
+    };
+    if (cursor) {
+      query.cursor = { id: cursor };
+      query.skip = 1;
+    } else if (page > 1) {
+      query.skip = (page - 1) * take;
+    }
+    const items = await contentPrisma.socialAuditLog.findMany(query);
+    let total = items.length;
+    try {
+      total = await contentPrisma.socialAuditLog.count();
+    } catch {}
+    return {
+      items,
+      total,
+      page,
+      limit: take,
+      hasMore: (query.skip || 0) + items.length < total,
+    };
   }
 
   /**

@@ -20,11 +20,13 @@ export class RealtimePollingJob {
         for (const domain of activeDomains) {
           try {
             const data = await this.ga4Adapter.getRealtimeActiveUsers(domain);
-            streamManager.broadcastActiveVisitors(
-              data.activeUsers,
-              { byCountry: data.byCountry },
-              domain
-            );
+            if (data.activeUsers !== null) {
+              streamManager.broadcastActiveVisitors(
+                data.activeUsers,
+                { byCountry: data.byCountry },
+                domain
+              );
+            }
           } catch (domainErr) {
             console.error(`[RealtimePollingJob] Polling error for ${domain}:`, domainErr);
           }

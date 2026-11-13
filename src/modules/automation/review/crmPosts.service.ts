@@ -25,6 +25,7 @@ import { PLATFORM_LIMITS } from './geminiDraft.service';
 import { AuthenticatedCrmUser } from '../../../middleware/crmRoleAuth';
 
 export interface ListPostsQuery {
+  workspace?: string;
   status?: string;
   platform?: string;
   from?: string;
@@ -115,6 +116,10 @@ export class CrmPostsService {
     const skip = (page - 1) * limit;
 
     const where: Record<string, any> = {};
+
+    if (query.workspace) {
+      where.workspace = query.workspace;
+    }
 
     if (query.status) {
       const statuses = query.status

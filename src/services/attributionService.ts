@@ -304,14 +304,19 @@ export async function syncLeadAttribution(
     const location = req ? extractClientLocation(req) : {};
     const userAgent = req ? (req.headers['user-agent'] as string) : null;
 
-    // First attempt to update existing session matching anonymousId or email
+    // First attempt to update existing session matching anonymousId (Item 2.9: only update single converting visit)
     let updatedCount = 0;
     if (anonymousId) {
       const res = await prisma.$executeRawUnsafe(
         `
         UPDATE attribution_visits
         SET email = $1, lead_name = $2, lead_form = $3, how_did_you_hear = $4, ghl_contact_id = $5, updated_at = NOW()
-        WHERE anonymous_id = $6 AND email IS NULL
+        WHERE id = (
+          SELECT id FROM attribution_visits
+          WHERE anonymous_id = $6
+          ORDER BY created_at DESC
+          LIMIT 1
+        )
       `,
         normalizedEmail,
         payload.leadName || null,

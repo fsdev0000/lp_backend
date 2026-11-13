@@ -50,53 +50,71 @@ export class AnalyticsService {
     const win = resolveWindow(range, 1);
 
     // Current window extraction from adapters
-    const [trafficHistory, topCampaigns, highIntentLeads, pipelineValueEur, recentLeads, realtime] =
+    const [trafficHistory, topCampaigns, highIntentLeads, pipelineValueUsd, recentLeads, realtime, uniqueUsersCount] =
       await Promise.all([
         this.ga4.getTrafficReport(win.startDate, win.endDate, domain),
         this.ga4.getCampaignYield(win.range, domain),
         this.sovereign.getAttributedLeadsCount(win.startDate, win.endDate, domain),
         this.sovereign.getAttributedPipelineValue(win.startDate, win.endDate, domain),
-        this.sovereign.getRecentFounderInbound(4, win.startDate, win.endDate, domain),
+        // Item 2.10: Return latest N inquiries including today regardless of reporting range
+        this.sovereign.getRecentFounderInbound(4, undefined, undefined, domain),
         this.ga4.getRealtimeActiveUsers(domain),
+        // Item 2.4: Query GA4 totals without date dimension for actual unique users
+        this.ga4.getTotalActiveUsers(win.startDate, win.endDate, domain),
       ]);
 
     // Previous window extraction for growth comparison (if applicable)
     let prevAudience: number | null = null;
     let prevLeads: number | null = null;
-    let prevPipelineValueEur: number | null = null;
+    let prevPipelineValueUsd: number | null = null;
 
     if (win.prevStartDate && win.prevEndDate) {
       try {
-        const [prevTraffic, pLeads, pPipeline] = await Promise.all([
+        const [prevTraffic, pLeads, pPipeline, prevUniqueUsers] = await Promise.all([
           this.ga4.getTrafficReport(win.prevStartDate, win.prevEndDate, domain),
           this.sovereign.getAttributedLeadsCount(win.prevStartDate, win.prevEndDate, domain),
           this.sovereign.getAttributedPipelineValue(win.prevStartDate, win.prevEndDate, domain),
+          this.ga4.getTotalActiveUsers(win.prevStartDate, win.prevEndDate, domain),
         ]);
-        prevAudience = prevTraffic.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+        // Item 2.4: Use unique users without date dimension for previous window
+        prevAudience =
+          typeof prevUniqueUsers === 'number' && prevUniqueUsers > 0
+            ? prevUniqueUsers
+            : prevTraffic.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
         prevLeads = pLeads;
-        prevPipelineValueEur = pPipeline;
+        prevPipelineValueUsd = pPipeline;
       } catch {
         // Fallback gracefully
       }
     }
 
-    const totalAudience = trafficHistory.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+    // Item 2.4: Deduplicated unique audience
+    const totalAudience =
+      typeof uniqueUsersCount === 'number' && uniqueUsersCount > 0
+        ? uniqueUsersCount
+        : trafficHistory.reduce((acc, curr) => acc + (curr.visitors || 0), 0);
+
     const audienceGrowth = win.range === 'all' ? null : calcGrowth(totalAudience, prevAudience);
     const leadsGrowth = win.range === 'all' ? null : calcGrowth(highIntentLeads, prevLeads);
 
-    // Capped at 100% max to prevent irrational conversion rates when inquiries exceed recorded web sessions
-    const avgConversionRate =
+    // Item 2.5: Remove artificial 100% cap on conversion rate
+    const rawConvRate =
       totalAudience > 0
-        ? parseFloat(Math.min(100, (highIntentLeads / totalAudience) * 100).toFixed(2))
+        ? (highIntentLeads / totalAudience) * 100
         : 0.0;
-    const prevConvRate =
+    const avgConversionRate = isNaN(rawConvRate) ? 0.0 : parseFloat(rawConvRate.toFixed(2));
+
+    const rawPrevConvRate =
       prevAudience && prevAudience > 0 && prevLeads !== null
-        ? Math.min(100, (prevLeads / prevAudience) * 100)
+        ? (prevLeads / prevAudience) * 100
         : null;
+    const prevConvRate = rawPrevConvRate !== null && !isNaN(rawPrevConvRate) ? rawPrevConvRate : null;
+
     const conversionGrowth = win.range === 'all' ? null : calcGrowth(avgConversionRate, prevConvRate);
 
+    // Item 2.3: Pipeline value in USD
     const pipelineGrowth =
-      win.range === 'all' ? null : calcGrowth(pipelineValueEur, prevPipelineValueEur);
+      win.range === 'all' ? null : calcGrowth(pipelineValueUsd, prevPipelineValueUsd);
 
     const ingestionLatencyMs = Date.now() - start;
 
@@ -112,9 +130,10 @@ export class AnalyticsService {
         leadsGrowth,
         avgConversionRate,
         conversionGrowth,
-        pipelineValueEur,
+        pipelineValueUsd,
+        pipelineValueEur: pipelineValueUsd, // Backward compatibility alias
         pipelineGrowth,
-        realtimeActiveVisitors: realtime.activeUsers,
+        realtimeActiveVisitors: realtime.activeUsers ?? 0,
         ingestionLatencyMs: Math.max(ingestionLatencyMs, 18),
       },
       trafficHistory,
@@ -162,6 +181,7 @@ export class AnalyticsService {
 
       const allYtVideos = [...longVideos, ...shorts];
       ytPostsInRange = allYtVideos.filter((v) => {
+        if (!v.publishedAt) return false;
         const pDate = v.publishedAt.slice(0, 10);
         return pDate >= win.startDate && pDate <= win.endDate;
       }).length;
@@ -245,6 +265,7 @@ export class AnalyticsService {
         engagementRate: ytEngagement,
         websiteVisitors: ytWebsiteVisitors,
         leads: ytLeads,
+        pipelineValueUsd: ytPipeline,
         pipelineValueEur: ytPipeline,
         trend: ytTrend,
         startDate: win.startDate,
@@ -260,6 +281,7 @@ export class AnalyticsService {
         engagementRate: liEngagement,
         websiteVisitors: liWebsiteVisitors,
         leads: liLeads,
+        pipelineValueUsd: liPipeline,
         pipelineValueEur: liPipeline,
         trend: liTrend,
         startDate: win.startDate,
@@ -275,6 +297,7 @@ export class AnalyticsService {
         engagementRate: igEngagement,
         websiteVisitors: igWebsiteVisitors,
         leads: igLeads,
+        pipelineValueUsd: igPipeline,
         pipelineValueEur: igPipeline,
         trend: igTrend,
         startDate: win.startDate,
@@ -290,6 +313,7 @@ export class AnalyticsService {
         engagementRate: null,
         websiteVisitors: ttWebsiteVisitors,
         leads: ttLeads,
+        pipelineValueUsd: ttPipeline,
         pipelineValueEur: ttPipeline,
         trend: ttTrend,
         startDate: win.startDate,

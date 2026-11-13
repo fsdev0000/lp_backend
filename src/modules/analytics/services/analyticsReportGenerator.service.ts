@@ -18,6 +18,7 @@ export interface AnalyticsReportData {
     inquiriesGrowth: string | number | null;
     conversionRate: number;
     conversionRateGrowth: string | number | null;
+    pipelineValueUsd: number;
     pipelineValueEur: number;
     pipelineGrowth: string | number | null;
     masterclassSignups: number;
@@ -183,7 +184,8 @@ export class AnalyticsReportGeneratorService {
         inquiriesGrowth: overview?.metrics?.leadsGrowth || null,
         conversionRate: overview?.metrics?.avgConversionRate || 0,
         conversionRateGrowth: overview?.metrics?.conversionGrowth || null,
-        pipelineValueEur: overview?.metrics?.pipelineValueEur || 0,
+        pipelineValueUsd: overview?.metrics?.pipelineValueUsd || overview?.metrics?.pipelineValueEur || 0,
+        pipelineValueEur: overview?.metrics?.pipelineValueEur || overview?.metrics?.pipelineValueUsd || 0,
         pipelineGrowth: overview?.metrics?.pipelineGrowth || null,
         masterclassSignups,
       },

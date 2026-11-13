@@ -129,7 +129,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
                     v.snippet?.thumbnails?.medium?.url ||
                     v.snippet?.thumbnails?.default?.url ||
                     '',
-                  publishedAt: v.snippet?.publishedAt || new Date().toISOString(),
+                  // Item 6.7: Return null if publishedAt is missing, never substitute current time
+                  publishedAt: v.snippet?.publishedAt || null,
                   viewCount: vViews,
                   likeCount: vLikes,
                   commentCount: vComments,
@@ -181,11 +182,15 @@ export class YouTubeAdapter implements IYouTubeAdapter {
       return result;
     } catch (err: any) {
       await LiveErrorBoundary.logUpstreamError('YOUTUBE' as any, 'getChannelAnalytics', err);
+      // Item 6.6: Add stale and error metadata to cached fallback response
       if (YouTubeAdapter.cache) {
         return {
           ...YouTubeAdapter.cache.data,
           isCached: true,
           isFallback: true,
+          isStale: true,
+          cachedAt: new Date(YouTubeAdapter.cache.cachedAt).toISOString(),
+          error: err?.message,
         };
       }
       throw err;
@@ -249,8 +254,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
           for (const v of vData.items || []) {
             const durationSecs = parseIsoDuration(v.contentDetails?.duration || '');
             const vCount = parseInt(v.statistics?.viewCount || '0', 10);
-            // Real watch time from YouTube Analytics API: estimatedMinutesWatched for video, 0 if missing from report, null if report unavailable
-            const watchMins = watchTimeMap !== null ? (watchTimeMap.get(v.id) ?? 0) : null;
+            // Item 6.5: Return null when watch time is unavailable (not zero)
+            const watchMins = watchTimeMap !== null ? (watchTimeMap.get(v.id) ?? null) : null;
 
             videos.push({
               videoId: v.id,
@@ -260,7 +265,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
                 v.snippet?.thumbnails?.high?.url ||
                 v.snippet?.thumbnails?.default?.url ||
                 '',
-              publishedAt: v.snippet?.publishedAt || new Date().toISOString(),
+              // Item 6.7: Return null if publishedAt is missing
+              publishedAt: v.snippet?.publishedAt || null,
               durationSeconds: durationSecs,
               viewCount: vCount,
               likeCount: parseInt(v.statistics?.likeCount || '0', 10),
@@ -273,7 +279,7 @@ export class YouTubeAdapter implements IYouTubeAdapter {
       }
 
       // Sort newest first
-      videos.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      videos.sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
 
       YouTubeAdapter.videosCache[cacheKey] = {
         data: videos,
@@ -339,8 +345,8 @@ export class YouTubeAdapter implements IYouTubeAdapter {
             // Keep default lastUpdated
           }
 
-          // Real playlist views from YouTube Analytics API; missing gets 0, null if report unavailable
-          const viewCount = playlistViewsMap !== null ? (playlistViewsMap.get(pl.id) ?? 0) : null;
+          // Item 6.5: Real playlist views from YouTube Analytics API; null if report unavailable or missing
+          const viewCount = playlistViewsMap !== null ? (playlistViewsMap.get(pl.id) ?? null) : null;
 
           return {
             playlistId: pl.id,

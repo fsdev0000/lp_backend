@@ -1,8 +1,22 @@
 import { Router } from 'express';
 import { AnalyticsController } from './controllers/analytics.controller';
+import { requireCrmAuth, requireWorkspaceAuth } from '../../middleware/crmRoleAuth';
 
 export const clarityRoutes = Router();
 const controller = new AnalyticsController();
+
+/**
+ * @route POST /api/v1/clarity/webhook
+ * @desc Ingest external session payload or client telemetry event
+ * @access Public Webhook
+ */
+clarityRoutes.post('/webhook', controller.ingestClarityWebhook);
+
+/**
+ * Issue 4.1: Protect Clarity recording, session, and analytics endpoints
+ */
+clarityRoutes.use(requireCrmAuth);
+clarityRoutes.use(requireWorkspaceAuth);
 
 /**
  * @route GET /api/v1/clarity/analytics
@@ -33,9 +47,3 @@ clarityRoutes.get('/sessions', controller.getClaritySessions);
  * @desc Retrieve website-specific integration, refresh status, and quota
  */
 clarityRoutes.get('/status', controller.getClarityStatus);
-
-/**
- * @route POST /api/v1/clarity/webhook
- * @desc Ingest external session payload or client telemetry event
- */
-clarityRoutes.post('/webhook', controller.ingestClarityWebhook);

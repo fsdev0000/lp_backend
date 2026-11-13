@@ -31,7 +31,9 @@ export interface GscTotals {
 }
 
 export interface GscKeywordsResponse {
-  totals: GscTotals;
+  status?: string;
+  error?: string;
+  totals: GscTotals | null;
   queries: GscQueryRow[];
   range: string;
   domain: string;
@@ -60,6 +62,7 @@ export interface ChannelPerformanceRow {
   websiteVisitors: number | null;
   leads: number | null;
   pipelineValueEur: number | null;
+  pipelineValueUsd: number | null;
   trend: string | null;
   startDate: string;
   endDate: string;
@@ -74,6 +77,7 @@ export interface OverviewMetrics {
   avgConversionRate: number;
   conversionGrowth: number | null;
   pipelineValueEur: number;
+  pipelineValueUsd: number;
   pipelineGrowth: number | null;
   realtimeActiveVisitors: number;
   ingestionLatencyMs: number;
@@ -117,13 +121,16 @@ export interface CountryHierarchyRow {
 }
 
 export interface ReportsSnapshotData {
+  status?: 'healthy' | 'not_configured' | 'unavailable' | 'unsupported_domain' | 'error' | string;
+  error?: string;
+  domain?: string;
   summary: {
     activeUsers: number;
     newUsers: number;
     averageEngagementTimeSeconds: number;
     averageEngagementTimeFormatted: string;
     eventCount: number;
-  };
+  } | null;
   topPages: PageScreenRow[];
   usersBySourceMedium: DimensionMetricRow[];
   sessionsBySourceMedium: DimensionMetricRow[];
@@ -134,12 +141,11 @@ export interface ReportsSnapshotData {
     startDate: string;
     endDate: string;
   };
-  status?: 'healthy' | 'not_configured' | 'unavailable' | 'unsupported_domain' | 'error';
-  domain?: string;
 }
 
 export interface IGa4Adapter {
-  getRealtimeActiveUsers(domain?: string): Promise<{ activeUsers: number; byCountry: Record<string, number>; domain?: string; isConfigured?: boolean }>;
+  getRealtimeActiveUsers(domain?: string): Promise<{ activeUsers: number | null; byCountry: Record<string, number>; domain?: string; isConfigured?: boolean; status?: string; error?: string }>;
+  getTotalActiveUsers(startDate: string, endDate: string, domain?: string): Promise<number | null>;
   getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
@@ -220,6 +226,9 @@ export interface ClarityNormalizedMetrics {
   ingestionLatencyMs: number;
   cachedAt: string;
   isStale: boolean;
+  isFallback?: boolean;
+  status?: string;
+  lastSyncAt?: string | null;
   quotaStatus: {
     limitPerDay: number;
     remaining: number;
@@ -267,8 +276,10 @@ export interface ISovereignAdapter {
       {
         leads: number;
         pipelineValueEur: number;
+        pipelineValueUsd: number;
         prevLeads: number;
         prevPipelineValueEur: number;
+        prevPipelineValueUsd: number;
       }
     >
   >;
@@ -279,7 +290,7 @@ export interface YouTubeVideoRow {
   title: string;
   description: string;
   thumbnail: string;
-  publishedAt: string;
+  publishedAt: string | null;
   viewCount: number;
   likeCount: number;
   commentCount: number;
@@ -290,7 +301,7 @@ export interface YouTubeVideoDetailRow {
   videoId: string;
   title: string;
   thumbnail: string;
-  publishedAt: string;
+  publishedAt: string | null;
   durationSeconds: number;
   viewCount: number;
   likeCount: number;
@@ -337,6 +348,8 @@ export interface YouTubeAnalyticsData {
   cachedAt: string;
   isCached: boolean;
   isFallback: boolean;
+  isStale?: boolean;
+  error?: string;
 }
 
 export interface IYouTubeAdapter {
@@ -401,6 +414,8 @@ export interface LinkedInAnalyticsData {
   cachedAt: string;
   isCached: boolean;
   isFallback: boolean;
+  isStale?: boolean;
+  error?: string;
 }
 
 export interface ILinkedInAnalyticsAdapter {
@@ -433,7 +448,7 @@ export interface InstagramPostDetailRow {
   mediaUrl: string | null;
   thumbnailUrl: string | null;
   permalink: string | null;
-  publishedAt: string;
+  publishedAt: string | null;
   likes: number | null;
   comments: number | null;
   reach: number | null;
@@ -469,6 +484,8 @@ export interface InstagramAnalyticsData {
   cachedAt: string;
   isCached: boolean;
   isFallback: boolean;
+  isStale?: boolean;
+  error?: string;
 }
 
 export interface IInstagramAnalyticsAdapter {

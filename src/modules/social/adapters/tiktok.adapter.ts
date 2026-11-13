@@ -43,7 +43,7 @@ export interface TikTokVideoItem {
   id: string;
   title: string;
   description: string;
-  publishedAt: string;
+  publishedAt: string | null;
   durationSeconds: number | null;
   coverImageUrl: string | null;
   shareUrl: string | null;
@@ -67,7 +67,7 @@ export class TikTokAdapter {
       redirectUri:
         process.env.TIKTOK_REDIRECT_URI?.trim() ||
         'https://staging.leadersperformance.ae/api/v1/social/tiktok/callback',
-      username: process.env.TIKTOK_USERNAME?.trim() || 'lioneleersteling',
+      username: process.env.TIKTOK_USERNAME?.trim() || '',
     };
   }
 
@@ -204,6 +204,7 @@ export class TikTokAdapter {
       'following_count',
       'likes_count',
       'video_count',
+      'username',
     ].join(',');
 
     const res = await fetch(`https://open.tiktokapis.com/v2/user/info/?fields=${fields}`, {
@@ -219,14 +220,15 @@ export class TikTokAdapter {
 
     const json = (await res.json()) as any;
     const u = json?.data?.user || {};
+    const username = u.username || u.display_name || creds.username || null;
 
     return {
-      openId: u.open_id || creds.username,
-      displayName: u.display_name || 'Lionel Eersteling',
-      username: creds.username,
+      openId: u.open_id || '',
+      displayName: u.display_name || username || 'TikTok User',
+      username: username || '',
       avatarUrl: u.avatar_url || null,
       bioDescription: u.bio_description || null,
-      profileDeepLink: u.profile_deep_link || `https://www.tiktok.com/@${creds.username}`,
+      profileDeepLink: u.profile_deep_link || (username ? `https://www.tiktok.com/@${username}` : null),
       isVerified: Boolean(u.is_verified),
       followerCount: typeof u.follower_count === 'number' ? u.follower_count : null,
       followingCount: typeof u.following_count === 'number' ? u.following_count : null,
@@ -278,7 +280,7 @@ export class TikTokAdapter {
       description: v.video_description || v.title || '',
       publishedAt: v.create_time
         ? new Date(Number(v.create_time) * 1000).toISOString()
-        : new Date().toISOString(),
+        : null,
       durationSeconds: typeof v.duration === 'number' ? v.duration : null,
       coverImageUrl: v.cover_image_url || null,
       shareUrl: v.share_url || null,

@@ -54,18 +54,6 @@ export class InstagramAnalyticsSyncJob {
       console.log(
         `[InstagramAnalyticsSyncJob] Sync complete (${elapsedMs}ms): @${analytics30d.username} followers: ${analytics30d.followers ?? 'null'}, cached ${posts.length} posts.`
       );
-
-      // Audit log
-      try {
-        await prisma.socialAuditLog.create({
-          data: {
-            actor: 'System Daemon (Instagram Sync Job)',
-            action: 'INSTAGRAM_ANALYTICS_SYNC_COMPLETED',
-            entity: `@${analytics30d.username}`,
-            details: `Synchronized ${posts.length} media posts and account vitals (Followers: ${analytics30d.followers ?? 'null'}) in ${elapsedMs}ms.`,
-          },
-        });
-      } catch {}
     } catch (err: any) {
       console.warn('[InstagramAnalyticsSyncJob] Sync notice:', err?.message);
     } finally {

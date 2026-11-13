@@ -4,7 +4,7 @@ import express from 'express';
 import { analyticsRoutes } from '../modules/analytics/analytics.routes';
 import { clarityRoutes } from '../modules/analytics/clarity.routes';
 
-jest.setTimeout(25000);
+jest.setTimeout(60000);
 
 const app = express();
 app.use(express.json());

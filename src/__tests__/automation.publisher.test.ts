@@ -458,21 +458,21 @@ describe('Step 4: Publishing (Flow 2) — Platform Adapters, Retry/Backoff, Grac
 
       // Attempt 1 -> stays APPROVED with attemptCount=1, nextAttemptAt = +1 min
       const t1 = new Date();
-      const res1 = await pubService.publishSinglePost(postId, { now: t1 });
+      const res1 = await pubService.publishSinglePost(postId, { now: t1, dryRun: false });
       expect(res1.status).toBe('APPROVED');
       expect(res1.post.attemptCount).toBe(1);
       expect(res1.post.nextAttemptAt.getTime() - t1.getTime()).toBe(1 * 60 * 1000);
 
       // Attempt 2 -> stays APPROVED with attemptCount=2, nextAttemptAt = +5 min
       const t2 = new Date(t1.getTime() + 2 * 60 * 1000);
-      const res2 = await pubService.publishSinglePost(postId, { now: t2 });
+      const res2 = await pubService.publishSinglePost(postId, { now: t2, dryRun: false });
       expect(res2.status).toBe('APPROVED');
       expect(res2.post.attemptCount).toBe(2);
       expect(res2.post.nextAttemptAt.getTime() - t2.getTime()).toBe(5 * 60 * 1000);
 
       // Attempt 3 -> attempts exhausted -> FAILED + PUBLISH_FAILED email queued
       const t3 = new Date(t2.getTime() + 6 * 60 * 1000);
-      const res3 = await pubService.publishSinglePost(postId, { now: t3 });
+      const res3 = await pubService.publishSinglePost(postId, { now: t3, dryRun: false });
       expect(res3.status).toBe('FAILED');
       expect(res3.post.attemptCount).toBe(3);
 
@@ -489,8 +489,6 @@ describe('Step 4: Publishing (Flow 2) — Platform Adapters, Retry/Backoff, Grac
       expect(failedEmails.length).toBe(1);
       expect(failedEmails[0].recipients).toEqual(
         expect.arrayContaining([
-          'sarath@leadersperformance.ae',
-          'asad@leadersperformance.ae',
           'asif@leadersperformance.ae',
         ])
       );

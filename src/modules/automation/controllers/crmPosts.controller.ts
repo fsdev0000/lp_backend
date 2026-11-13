@@ -32,7 +32,9 @@ function handleControllerError(res: Response, err: any, fallbackMessage: string)
 export class CrmPostsController {
   public listPosts = async (req: Request, res: Response): Promise<void> => {
     try {
+      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
       const result = await crmPostsService.listPosts({
+        workspace,
         status: req.query.status ? String(req.query.status) : undefined,
         platform: req.query.platform ? String(req.query.platform) : undefined,
         from: req.query.from ? String(req.query.from) : undefined,

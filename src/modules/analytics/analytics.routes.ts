@@ -1,9 +1,22 @@
 import { Router } from 'express';
 import { AnalyticsController } from './controllers/analytics.controller';
-import { requireCrmAuth } from '../../middleware/crmRoleAuth';
+import { requireCrmAuth, requireWorkspaceAuth } from '../../middleware/crmRoleAuth';
 
 export const analyticsRoutes = Router();
 const controller = new AnalyticsController();
+
+/**
+ * @route POST /api/v1/analytics/clarity/webhook
+ * @desc Ingest Clarity session events, calculate UX friction, link leads, and trigger anomaly alerts
+ * @access Public Webhook
+ */
+analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
+
+/**
+ * Issue 4.1: Apply CRM authentication and workspace authorization across all analytics routes
+ */
+analyticsRoutes.use(requireCrmAuth);
+analyticsRoutes.use(requireWorkspaceAuth);
 
 /**
  * @route GET /api/v1/analytics/overview
@@ -65,12 +78,6 @@ analyticsRoutes.post('/clarity/refresh', controller.refreshClarityAnalytics);
 analyticsRoutes.get('/clarity/status', controller.getClarityStatus);
 
 /**
- * @route POST /api/v1/analytics/clarity/webhook
- * @desc Ingest Clarity session events, calculate UX friction, link leads, and trigger anomaly alerts
- */
-analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
-
-/**
  * @route GET /api/v1/analytics/social/youtube
  * @desc Retrieve live YouTube Data API channel metrics, subscribers, engagement rate, and recent videos
  */
@@ -121,14 +128,14 @@ analyticsRoutes.get('/instagram/posts', controller.getInstagramPosts);
  * @route GET /api/v1/analytics/reports/export
  * @desc On-demand export of executive analytics & CRM report (format: pdf, csv, json)
  */
-analyticsRoutes.get('/reports/export', requireCrmAuth, controller.exportReport);
+analyticsRoutes.get('/reports/export', controller.exportReport);
 
 /**
  * @route POST /api/v1/analytics/reports/dispatch
  * @desc Triggers weekly or monthly executive analytics email dispatch with PDF and CSV attachments
  */
-analyticsRoutes.post('/reports/dispatch', requireCrmAuth, controller.dispatchReport);
-analyticsRoutes.post('/reports/trigger', requireCrmAuth, controller.dispatchReport);
+analyticsRoutes.post('/reports/dispatch', controller.dispatchReport);
+analyticsRoutes.post('/reports/trigger', controller.dispatchReport);
 
 
 

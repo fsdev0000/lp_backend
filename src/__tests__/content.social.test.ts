@@ -113,8 +113,19 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
     jest.spyOn(socialPrisma.socialAccountConnection, 'findUnique').mockImplementation((async ({ where }: any) => {
       return mockConnections.get(where.platform) || null;
     }) as any);
+    jest.spyOn(socialPrisma.socialAccountConnection, 'findFirst').mockImplementation((async ({ where }: any) => {
+      return mockConnections.get(where?.platform) || mockConnections.get('LINKEDIN') || null;
+    }) as any);
     jest.spyOn(analyticsPrisma.socialAccountConnection, 'findUnique').mockImplementation((async ({ where }: any) => {
       return mockConnections.get(where.platform) || null;
+    }) as any);
+    jest.spyOn(analyticsPrisma.socialAccountConnection, 'findFirst').mockImplementation((async ({ where }: any) => {
+      if (where?.platform?.in) {
+        for (const p of where.platform.in) {
+          if (mockConnections.has(p)) return mockConnections.get(p);
+        }
+      }
+      return mockConnections.get('LINKEDIN_PAGE') || mockConnections.get('LINKEDIN') || null;
     }) as any);
     jest.spyOn(socialPrisma.socialAccountConnection, 'upsert').mockImplementation((async ({ where, create, update }: any) => {
       const existing = mockConnections.get(where.platform);

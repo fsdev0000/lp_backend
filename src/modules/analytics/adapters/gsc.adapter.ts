@@ -114,7 +114,9 @@ export class GscAdapter implements IGscAdapter {
     if (!this.searchconsole) {
       console.warn('[GscAdapter] Search Console client not initialized');
       return {
-        totals: emptyTotals,
+        status: 'error',
+        error: 'Search Console client not initialized',
+        totals: null,
         queries: [],
         range: rangeLabel,
         domain: siteUrl,
@@ -183,9 +185,10 @@ export class GscAdapter implements IGscAdapter {
       };
     } catch (error: any) {
       await LiveErrorBoundary.logUpstreamError('GSC', 'searchanalytics.query', error);
-      // Clean zeroed state - NEVER return fabricated/fake fallback queries!
       return {
-        totals: emptyTotals,
+        status: 'error',
+        error: error?.message || 'Failed to query Google Search Console',
+        totals: null,
         queries: [],
         range: rangeLabel,
         domain: siteUrl,

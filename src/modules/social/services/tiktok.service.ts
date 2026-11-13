@@ -204,7 +204,7 @@ export class TikTokService {
 
   public async getStatus() {
     const publishingEnabled = isTikTokPublishingEnabled();
-    const username = process.env.TIKTOK_USERNAME?.trim() || 'lioneleersteling';
+    const envUsername = process.env.TIKTOK_USERNAME?.trim() || null;
 
     try {
       const conn = await this.adapter.getActiveConnection();
@@ -213,8 +213,8 @@ export class TikTokService {
           connected: false,
           publishingEnabled,
           status: 'DISCONNECTED',
-          username,
-          profileUrl: `https://www.tiktok.com/@${username}`,
+          username: envUsername,
+          profileUrl: envUsername ? `https://www.tiktok.com/@${envUsername}` : null,
           accountName: null,
           accountUrn: null,
           followersCount: null,
@@ -222,13 +222,15 @@ export class TikTokService {
         };
       }
 
+      const meta = (conn.metadata as any) || {};
+      const username = meta.username || conn.accountName || envUsername;
       const isExpired = Boolean(conn.tokenExpiresAt && new Date(conn.tokenExpiresAt).getTime() < Date.now());
       return {
         connected: !isExpired,
         publishingEnabled,
         status: isExpired ? 'EXPIRED' : conn.status,
         username,
-        profileUrl: `https://www.tiktok.com/@${username}`,
+        profileUrl: username ? `https://www.tiktok.com/@${username}` : null,
         accountName: conn.accountName,
         accountUrn: conn.accountUrn,
         profilePictureUrl: conn.profilePictureUrl,
@@ -242,8 +244,8 @@ export class TikTokService {
         connected: false,
         publishingEnabled,
         status: 'DISCONNECTED',
-        username,
-        profileUrl: `https://www.tiktok.com/@${username}`,
+        username: envUsername,
+        profileUrl: envUsername ? `https://www.tiktok.com/@${envUsername}` : null,
         accountName: null,
         accountUrn: null,
         followersCount: null,
@@ -253,15 +255,15 @@ export class TikTokService {
   }
 
   public async getAnalytics() {
-    const username = process.env.TIKTOK_USERNAME?.trim() || 'lioneleersteling';
+    const envUsername = process.env.TIKTOK_USERNAME?.trim() || null;
     const conn = await this.adapter.getActiveConnection();
 
     if (!conn || !conn.accessToken) {
       return {
         connected: false,
-        username,
-        profileUrl: `https://www.tiktok.com/@${username}`,
-        displayName: 'Lionel Eersteling',
+        username: envUsername,
+        profileUrl: envUsername ? `https://www.tiktok.com/@${envUsername}` : null,
+        displayName: null,
         followers: null,
         following: null,
         likes: null,
@@ -286,8 +288,8 @@ export class TikTokService {
           const refreshed = await this.adapter.refreshAccessToken(conn.refreshToken);
           const expiresAt = new Date(Date.now() + (refreshed.expires_in || 86400) * 1000);
           await this.adapter.saveConnection({
-            accountName: conn.accountName || `@${username}`,
-            accountUrn: conn.accountUrn || `tiktok:${username}`,
+            accountName: conn.accountName || (envUsername ? `@${envUsername}` : 'tiktok_user'),
+            accountUrn: conn.accountUrn || (envUsername ? `tiktok:${envUsername}` : 'tiktok:unknown'),
             accessToken: refreshed.access_token,
             refreshToken: refreshed.refresh_token || conn.refreshToken,
             expiresInSeconds: refreshed.expires_in,

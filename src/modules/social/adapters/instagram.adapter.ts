@@ -177,6 +177,41 @@ export class InstagramAdapter {
   }
 
   /**
+   * Item 7.5: Inspects Meta access token via debug_token endpoint for actual expiration and scopes
+   */
+  public async inspectToken(token: string): Promise<{
+    isValid: boolean;
+    expiresAt: Date | null;
+    scopes: string[];
+    appId?: string;
+  }> {
+    try {
+      const appAccessToken = `${this.appId}|${this.appSecret}`;
+      const url = `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(appAccessToken)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        const d = json?.data;
+        if (d) {
+          return {
+            isValid: Boolean(d.is_valid),
+            expiresAt: d.expires_at ? new Date(d.expires_at * 1000) : null,
+            scopes: Array.isArray(d.scopes) ? d.scopes : [],
+            appId: d.app_id,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[InstagramAdapter] inspectToken notice:', err?.message);
+    }
+    return {
+      isValid: false,
+      expiresAt: null,
+      scopes: [],
+    };
+  }
+
+  /**
    * Retrieves active Instagram connection from PostgreSQL or preconfigured System Token
    */
   public async getActiveConnection() {
@@ -184,8 +219,14 @@ export class InstagramAdapter {
       const conn = await prisma.socialAccountConnection.findUnique({
         where: { platform: 'INSTAGRAM' },
       });
-      if (conn && conn.accessToken) {
-        return conn;
+      if (conn) {
+        // Item 7.4: Respect explicit DISCONNECTED status in database
+        if (conn.status === 'DISCONNECTED') {
+          return null;
+        }
+        if (conn.accessToken) {
+          return conn;
+        }
       }
     } catch (e: any) {
       console.warn('[InstagramAdapter] DB getActiveConnection notice:', e?.message);
@@ -193,10 +234,13 @@ export class InstagramAdapter {
 
     // Check in-memory store
     if (InstagramAdapter.memoryConnection) {
+      if (InstagramAdapter.memoryConnection.status === 'DISCONNECTED') {
+        return null;
+      }
       return InstagramAdapter.memoryConnection;
     }
 
-    // Fall back to preconfigured Environment System User token
+    // Fall back to preconfigured Environment System User token ONLY if not explicitly disconnected
     if (this.envAccessToken) {
       const systemConnection = {
         platform: 'INSTAGRAM',
@@ -219,7 +263,7 @@ export class InstagramAdapter {
           'ads_management',
         ],
         status: 'INITIALIZED',
-        lastSyncAt: null,
+        lastSyncAt: null, // Item 7.5: Do not fabricate current time as lastSyncAt
         followersCount: null,
         metadata: {
           username: process.env.INSTAGRAM_USERNAME || 'lioneleersteling',
@@ -248,9 +292,19 @@ export class InstagramAdapter {
     scopes?: string[];
     followersCount?: number | null;
   }) {
-    const expiresAt = data.expiresInSeconds
+    let expiresAt = data.expiresInSeconds
       ? new Date(Date.now() + data.expiresInSeconds * 1000)
       : null;
+    let scopes = data.scopes;
+
+    // Item 7.5: Inspect live token scopes and expiration if not supplied
+    if (!scopes || !expiresAt) {
+      const inspected = await this.inspectToken(data.accessToken);
+      if (inspected.isValid) {
+        if (!scopes && inspected.scopes.length > 0) scopes = inspected.scopes;
+        if (!expiresAt && inspected.expiresAt) expiresAt = inspected.expiresAt;
+      }
+    }
 
     const payload = {
       platform: 'INSTAGRAM',
@@ -259,7 +313,7 @@ export class InstagramAdapter {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken || null,
       tokenExpiresAt: expiresAt,
-      scopes: data.scopes || ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights'],
+      scopes: scopes || ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights'],
       status: 'HEALTHY',
       lastSyncAt: new Date(),
       followersCount: data.followersCount !== undefined ? data.followersCount : null,
@@ -286,13 +340,24 @@ export class InstagramAdapter {
   }
 
   /**
-   * Disconnects the Instagram integration
+   * Item 7.4: Disconnects the Instagram integration and marks status as DISCONNECTED
    */
   public async disconnect(): Promise<void> {
     InstagramAdapter.memoryConnection = null;
     try {
-      await prisma.socialAccountConnection.deleteMany({
+      await prisma.socialAccountConnection.upsert({
         where: { platform: 'INSTAGRAM' },
+        create: {
+          platform: 'INSTAGRAM',
+          accountName: 'Instagram',
+          accountUrn: `instagram:${this.accountId}`,
+          accessToken: '',
+          status: 'DISCONNECTED',
+        },
+        update: {
+          status: 'DISCONNECTED',
+          accessToken: '',
+        },
       });
     } catch (e: any) {
       console.warn('[InstagramAdapter] DB disconnect notice:', e?.message);

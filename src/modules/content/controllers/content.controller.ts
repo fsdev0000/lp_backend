@@ -88,8 +88,9 @@ export class ContentController {
 
   public listPosts = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { platform, status, search, page, limit } = req.query;
+      const { platform, status, search, page, limit, workspace } = req.query;
       const data = await this.service.listPosts({
+        workspace: workspace ? String(workspace) : undefined,
         platform: platform as string,
         status: status as string,
         search: search as string,
@@ -116,7 +117,7 @@ export class ContentController {
 
   public createPost = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval } = req.body;
+      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval, workspace } = req.body;
       if (!title || !title.trim()) {
         res.status(400).json({ success: false, error: 'Post title is required' });
         return;
@@ -124,6 +125,7 @@ export class ContentController {
 
       const post = await this.service.createPost(
         {
+          workspace: workspace || (req.query.workspace as string) || 'leaders_performance',
           title: title.trim(),
           hook,
           body,
@@ -185,8 +187,14 @@ export class ContentController {
   public approvePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const { signature, approvedBy } = req.body || {};
-      const post = await this.service.approvePost(id, { signature, approvedBy }, req.ip);
+      const user = (req as any).crmUser || (req as any).user;
+      if (user && user.role === 'editor') {
+        res.status(403).json({ success: false, error: 'Editors cannot approve posts. Admin or Approver role required.' });
+        return;
+      }
+      const approverEmail = user?.email || (req.body?.approvedBy ? String(req.body.approvedBy) : 'approver@leadersperformance.ae');
+      const signature = req.body?.signature || `SIG_${Date.now()}`;
+      const post = await this.service.approvePost(id, { signature, approvedBy: approverEmail }, req.ip, user?.name || user?.email);
       res.status(200).json({
         success: true,
         message: 'Post approved and queued for dispatch',
@@ -201,12 +209,18 @@ export class ContentController {
   public rejectPost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
+      const user = (req as any).crmUser || (req as any).user;
+      if (user && user.role === 'editor') {
+        res.status(403).json({ success: false, error: 'Editors cannot reject posts. Admin or Approver role required.' });
+        return;
+      }
       const { reason } = req.body;
       if (!reason || !reason.trim()) {
         res.status(400).json({ success: false, error: 'Rejection reason / revision notes are required' });
         return;
       }
-      const post = await this.service.rejectPost(id, reason.trim(), req.ip);
+      const actor = user?.name || user?.email || 'Approver';
+      const post = await this.service.rejectPost(id, reason.trim(), req.ip, actor);
       res.status(200).json({ success: true, message: 'Revisions requested', data: post });
     } catch (error: any) {
       console.error('[ContentController] rejectPost error:', error);
@@ -216,6 +230,11 @@ export class ContentController {
 
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
+      const user = (req as any).crmUser || (req as any).user;
+      if (user && user.role === 'editor') {
+        res.status(403).json({ success: false, error: 'Editors cannot publish posts. Admin or Approver role required.' });
+        return;
+      }
       if (!isLinkedInPublishingEnabled()) {
         res.status(403).json({
           success: false,
@@ -225,7 +244,8 @@ export class ContentController {
       }
 
       const id = String(req.params.id);
-      const post = await this.service.publishPostNow(id, req.ip);
+      const actor = user?.name || user?.email;
+      const post = await this.service.publishPostNow(id, req.ip, actor);
       res.status(200).json({ success: true, message: 'Live dispatch completed successfully', data: post });
     } catch (error: any) {
       console.error('[ContentController] publishNow error:', error);
@@ -234,9 +254,10 @@ export class ContentController {
     }
   };
 
-  public getApprovalDesk = async (_req: Request, res: Response): Promise<void> => {
+  public getApprovalDesk = async (req: Request, res: Response): Promise<void> => {
     try {
-      const posts = await this.service.getApprovalDeskPosts();
+      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
+      const posts = await this.service.getApprovalDeskPosts(workspace);
       res.status(200).json({ success: true, data: posts, count: posts.length });
     } catch (error: any) {
       console.error('[ContentController] getApprovalDesk error:', error);
@@ -244,9 +265,10 @@ export class ContentController {
     }
   };
 
-  public getApprovalStats = async (_req: Request, res: Response): Promise<void> => {
+  public getApprovalStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const stats = await this.service.getApprovalStats();
+      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
+      const stats = await this.service.getApprovalStats(workspace);
       res.status(200).json({ success: true, data: stats });
     } catch (error: any) {
       console.error('[ContentController] getApprovalStats error:', error);
@@ -257,8 +279,19 @@ export class ContentController {
   public getAuditLogs = async (req: Request, res: Response): Promise<void> => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-      const logs = await this.service.getAuditLogs(limit);
-      res.status(200).json({ success: true, data: logs });
+      const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
+      const result = await this.service.getAuditLogs(limit, page, cursor);
+      res.status(200).json({
+        success: true,
+        data: result.items,
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          hasMore: result.hasMore,
+        },
+      });
     } catch (error: any) {
       console.error('[ContentController] getAuditLogs error:', error);
       res.status(500).json({ success: false, error: error?.message || 'Failed to retrieve audit logs' });
