@@ -63,17 +63,11 @@ export class InboxService {
         if (role === 'Approver') {
           for (const email of lists.approver) set.add(email.toLowerCase());
           for (const email of lists.admin) set.add(email.toLowerCase());
-          // Include developer / admin test handles for dev & staging testability
-          set.add('developer');
-          set.add('crm-admin');
-          set.add('admin@leadersperformance.ae');
         } else if (role === 'Marketing') {
           for (const email of lists.editors) set.add(email.toLowerCase());
-          set.add('developer');
         } else if (role === 'Advisor') {
           for (const email of lists.approver) set.add(email.toLowerCase());
           for (const email of lists.info) set.add(email.toLowerCase());
-          set.add('developer');
           set.add('danielle@eersteling.nl');
         }
       }
@@ -176,13 +170,6 @@ export class InboxService {
     const keys = new Set<string>();
     if (user.email) keys.add(user.email.toLowerCase().trim());
     if (user.id) keys.add(user.id.toLowerCase().trim());
-
-    // In dev/test or for admin/approver roles, include developer & crm-admin tokens
-    if (user.role === 'admin' || user.role === 'approver') {
-      keys.add('developer');
-      keys.add('crm-admin');
-      keys.add('admin@leadersperformance.ae');
-    }
 
     return Array.from(keys);
   }

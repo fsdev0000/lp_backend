@@ -177,9 +177,6 @@ export class NotificationService {
       const meta = this.getInboxMetadataForType(input.type, input.postId);
       const recipientSet = new Set<string>();
       for (const r of input.recipients) recipientSet.add(r.toLowerCase());
-      recipientSet.add('developer');
-      recipientSet.add('crm-admin');
-      recipientSet.add('admin@leadersperformance.ae');
 
       for (const recipient of recipientSet) {
         await automationPrisma.crmInboxNotification.upsert({
