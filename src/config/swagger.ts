@@ -86,6 +86,10 @@ const swaggerOptions = {
         name: 'TikTok Social CRM',
         description: 'TikTok Login Kit, Display API v2 profile/video telemetry (@lioneleersteling), Content Posting API v2 (draft upload & direct post with kill switch), and webhooks.',
       },
+      {
+        name: 'Notifications & CRM Inbox',
+        description: 'In-app notification feed, read/unread state, mark all read, and realtime SSE event notifications for the Social CRM bell.',
+      },
     ],
     paths: {
       '/auth/login': {
