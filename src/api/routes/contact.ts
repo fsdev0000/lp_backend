@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSecret } from '../../services/secrets';
 import { contactRateLimiter } from '../../middleware/rateLimiter';
 import { syncLeadAttribution, TechnicalAttribution } from '../../services/attributionService';
+import { inboxService } from '../../modules/automation/notifications/inbox.service';
 
 export const contactRouter = Router();
 
@@ -464,6 +465,19 @@ async function handleContact(req: Request, res: Response): Promise<void> {
       },
       req
     ).catch((attrErr) => console.warn('[Contact Us] Attribution tracking warning:', attrErr));
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'CONTACT_FORM_SUBMITTED',
+      title: 'New Strategic Conversation Inquiry',
+      message: `${payload.first_name} ${payload.last_name} (${payload.company || payload.email}) sent a message`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: contactId || payload.email,
+      dedupeKey: `CONTACT_FORM_SUBMITTED:${payload.email}:${Date.now()}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Contact Us] Inbox notify warning:', err?.message));
 
     // Return success response
     res.status(200).json({ success: true, contactId });

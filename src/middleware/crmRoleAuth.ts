@@ -126,12 +126,13 @@ export function crmUserFromSupabase(user: VerifiedSupabaseUser): AuthenticatedCr
  * Attaches `req.crmUser` with their role (`approver`, `editor`, or `admin`) and workspaces.
  */
 export async function requireCrmAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const isReportsExport = (req.originalUrl || req.path || '').includes('/reports/export');
+  const url = req.originalUrl || req.path || '';
+  const isStrictAuthRoute = url.includes('/reports/export') || url.includes('/notifications');
   if (
     process.env.NODE_ENV === 'test' &&
     !req.headers.authorization &&
     !req.headers['x-api-key'] &&
-    !isReportsExport
+    !isStrictAuthRoute
   ) {
     req.crmUser = {
       id: 'test-admin',

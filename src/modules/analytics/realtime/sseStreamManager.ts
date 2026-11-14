@@ -107,6 +107,14 @@ export class SseStreamManager {
     );
   }
 
+  /**
+   * Broadcasts `notifications_changed` event without any personal/lead payload
+   * so the logged-in CRM client knows to refetch /api/v1/notifications.
+   */
+  public broadcastNotificationsChanged(): void {
+    this.broadcastEvent('notifications_changed', {});
+  }
+
   public broadcastEvent(eventType: string, payload: Record<string, any>, targetDomain?: string): void {
     const message = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
 

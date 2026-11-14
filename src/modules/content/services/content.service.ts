@@ -3,6 +3,7 @@ import { LinkedInAdapter } from '../../social/adapters/linkedin.adapter';
 import { InstagramPublishingService } from './instagramPublishing.service';
 import { generateAuthoritativeSignature } from '../../../utils/approvalSignature';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
+import { inboxService } from '../../automation/notifications/inbox.service';
 
 export const contentPrisma = new PrismaClient();
 
@@ -331,6 +332,19 @@ export class ContentService {
       ipAddress,
     });
 
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'APPROVAL',
+      type: 'REVIEW_REQUEST',
+      title: 'Post Waiting for Review',
+      message: `${post.platform} · "${post.title}" submitted for review by ${post.author || 'Editor'}`,
+      link: '/approvals',
+      workspace: (post as any).workspace || 'leaders_performance',
+      entityId: post.id,
+      dedupeKey: `REVIEW_REQUEST:${post.id}:${Date.now()}`,
+      roles: ['Approver'],
+    }).catch((err) => console.warn('[ContentService] Inbox notify warning:', err?.message));
+
     return updated;
   }
 
@@ -432,6 +446,20 @@ export class ContentService {
       ipAddress,
     });
 
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'APPROVAL',
+      type: 'POST_APPROVED',
+      title: 'Post Approved',
+      message: `${post.platform} · "${post.title}" was approved by ${actorName || approvedBy}`,
+      link: '/content',
+      workspace: (post as any).workspace || 'leaders_performance',
+      entityId: post.id,
+      dedupeKey: `POST_APPROVED:${post.id}:${Date.now()}`,
+      roles: ['Marketing'],
+      recipients: post.author ? [post.author] : undefined,
+    }).catch((err) => console.warn('[ContentService] Inbox notify warning:', err?.message));
+
     return updated;
   }
 
@@ -460,6 +488,20 @@ export class ContentService {
       details: `Revisions requested: "${reason}".`,
       ipAddress,
     });
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'APPROVAL',
+      type: 'CHANGES_REQUESTED',
+      title: 'Changes Requested on Post',
+      message: `${post.platform} · "${post.title}": ${reason}`,
+      link: '/content',
+      workspace: (post as any).workspace || 'leaders_performance',
+      entityId: post.id,
+      dedupeKey: `CHANGES_REQUESTED:${post.id}:${Date.now()}`,
+      roles: ['Marketing'],
+      recipients: post.author ? [post.author] : undefined,
+    }).catch((err) => console.warn('[ContentService] Inbox notify warning:', err?.message));
 
     return updated;
   }

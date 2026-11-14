@@ -2,6 +2,7 @@ import { automationPrisma } from '../state/transition';
 import { sendSmtpEmail } from './smtpDispatcher';
 import { notificationSettingsService } from './settings.service';
 import { reminderService } from './reminder.service';
+import { SseStreamManager } from '../../analytics/realtime/sseStreamManager';
 
 export interface DualTimezoneFormatted {
   amsterdam: string;
@@ -171,7 +172,92 @@ export class NotificationService {
       `[Notification] postId=${input.postId || 'none'} queued type=${input.type} dedupeKey=${input.dedupeKey}`
     );
 
+    // In-app inbox synchronization: writes to crm_inbox_notifications and fires SSE ping
+    try {
+      const meta = this.getInboxMetadataForType(input.type, input.postId);
+      const recipientSet = new Set<string>();
+      for (const r of input.recipients) recipientSet.add(r.toLowerCase());
+      recipientSet.add('developer');
+      recipientSet.add('crm-admin');
+      recipientSet.add('admin@leadersperformance.ae');
+
+      for (const recipient of recipientSet) {
+        await automationPrisma.crmInboxNotification.upsert({
+          where: {
+            recipient_dedupeKey: {
+              recipient,
+              dedupeKey: input.dedupeKey,
+            },
+          },
+          create: {
+            recipient,
+            category: meta.category,
+            type: input.type,
+            title: meta.title,
+            message: input.subject.replace(/^\[.*?\]\s*/, ''),
+            link: meta.link,
+            entityId: input.postId ?? null,
+            dedupeKey: input.dedupeKey,
+            readAt: null,
+          },
+          update: {},
+        });
+      }
+
+      SseStreamManager.getInstance().broadcastNotificationsChanged();
+    } catch (inboxErr: any) {
+      console.warn('[NotificationService] Inbox sync warning:', inboxErr?.message);
+    }
+
     return { notification: created, created: true };
+  }
+
+  private getInboxMetadataForType(type: string, postId?: string | null): {
+    category: 'LEAD' | 'APPROVAL' | 'SYSTEM';
+    roles: Array<'Approver' | 'Marketing' | 'Advisor'>;
+    title: string;
+    link: string | null;
+  } {
+    const postLink = postId ? `/calendar?post=${postId}` : '/calendar';
+    switch (type) {
+      case 'REVIEW_REQUEST':
+      case 'REVISION_READY':
+        return { category: 'APPROVAL', roles: ['Approver'], title: 'Post Waiting for Review', link: postLink };
+      case 'CHANGES_REQUESTED':
+        return { category: 'APPROVAL', roles: ['Marketing'], title: 'Changes Requested on Post', link: '/content' };
+      case 'REJECTED':
+        return { category: 'APPROVAL', roles: ['Marketing'], title: 'Post Rejected', link: '/content' };
+      case 'APPROVED':
+        return { category: 'APPROVAL', roles: ['Marketing'], title: 'Post Approved', link: postLink };
+      case 'PUBLISHED':
+        return { category: 'APPROVAL', roles: ['Approver', 'Marketing'], title: 'Post Published', link: postLink };
+      case 'PUBLISH_FAILED':
+      case 'AUTO_DISPATCH_FAILED':
+      case 'INSTAGRAM_PUBLISH_FAILED':
+        return { category: 'APPROVAL', roles: ['Approver', 'Marketing'], title: 'Publishing Failed', link: postLink };
+      case 'MISSED':
+        return { category: 'APPROVAL', roles: ['Approver', 'Marketing'], title: 'Scheduled Slot Missed', link: postLink };
+      case 'MANUAL_TASK_DUE':
+        return { category: 'APPROVAL', roles: ['Marketing'], title: 'Manual Post Due', link: postLink };
+      case 'STALE_APPROVAL_EXPIRED_AT_GOLIVE':
+        return { category: 'APPROVAL', roles: ['Approver'], title: 'Approval Expired Before Go-Live', link: '/approvals' };
+      case 'APPROVAL_SLA':
+        return { category: 'APPROVAL', roles: ['Approver'], title: 'Pending Approval Reminder', link: '/approvals' };
+      case 'ACCOUNT_DISCONNECTED':
+        return { category: 'SYSTEM', roles: ['Approver'], title: 'Social Account Disconnected', link: '/integrations' };
+      case 'TOKEN_EXPIRING':
+        return { category: 'SYSTEM', roles: ['Approver'], title: 'Access Token Expiring Soon', link: '/integrations' };
+      case 'JOB_FAILED':
+        return { category: 'SYSTEM', roles: ['Approver'], title: 'Automation Job Failed', link: '/integrations' };
+      case 'INVENTORY_LOW':
+        return { category: 'SYSTEM', roles: ['Marketing'], title: 'Content Calendar Running Low', link: '/calendar' };
+      case 'SCHEDULED_EMAIL_FAILED':
+        return { category: 'SYSTEM', roles: ['Approver'], title: 'Scheduled Email Delivery Failed', link: null };
+      case 'CLARITY_RAGE_CLICK_ANOMALY':
+        return { category: 'SYSTEM', roles: ['Approver'], title: 'High UX Friction Anomaly', link: '/analytics/website' };
+      default:
+        return { category: 'SYSTEM', roles: ['Approver'], title: type, link: null };
+    }
   }
 
   /**

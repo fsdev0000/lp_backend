@@ -25,6 +25,7 @@ import {
   processScheduledEmails,
   formatDubaiDateTime,
 } from '../../services/reminderService';
+import { inboxService } from '../../modules/automation/notifications/inbox.service';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -665,6 +666,19 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
       },
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
+
+    // CRM in-app notification feed (Item 1 & 2 in Implementation Plan)
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'PRESSURE_SCAN_SUBMITTED',
+      title: 'New Founder Pressure Scan',
+      message: `${participantName} (${companyName || 'Founder'}) completed scan · Score ${Math.round(overallNormalised)}/100`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: submission.id,
+      dedupeKey: `PRESSURE_SCAN_SUBMITTED:${submission.id}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[PressureScan] Inbox notify warning:', err?.message));
 
     // ─── Sub-Task 4 & 6: GHL Smart Deduplication & Secure Staff Alert ─────────
     try {
@@ -1566,6 +1580,19 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     }).catch((e) => console.error('[Pressure Scan] Error sending calendar booking emails:', e));
 
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_SCHEDULED',
+      title: 'Strategy Call Booked',
+      message: `${finalName || email} booked consultation for ${date} at ${time}`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_SCHEDULED:${email}:${date}:${time}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Booking] Inbox notify warning:', err?.message));
+
     // Emit event to connected clients for real-time update
     const io = req.app.get('io');
     if (io) {
@@ -1648,6 +1675,19 @@ apiRoutes.post('/booking/reschedule', async (req, res) => {
       zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     }).catch((e) => console.error('[Booking Reschedule] Error sending confirmation:', e));
 
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_RESCHEDULED',
+      title: 'Strategy Call Rescheduled',
+      message: `${email} rescheduled consultation to ${date} at ${time}`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_RESCHEDULED:${email}:${date}:${time}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Booking Reschedule] Inbox notify warning:', err?.message));
+
     return res.status(200).json({
       success: true,
       message: 'Appointment successfully rescheduled',
@@ -1696,6 +1736,19 @@ apiRoutes.post('/booking/cancel', async (req, res) => {
       email: email?.toLowerCase().trim(),
       reason: reason || 'Appointment cancelled by user request.',
     });
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_CANCELLED',
+      title: 'Strategy Call Cancelled',
+      message: `${email || reference} cancelled consultation session`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_CANCELLED:${email || reference}:${Date.now()}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Booking Cancel] Inbox notify warning:', err?.message));
 
     return res.status(200).json({
       success: true,

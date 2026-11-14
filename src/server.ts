@@ -215,6 +215,10 @@ import { cmsRouter } from './modules/cms';
 app.use('/api/cms', cmsRouter);
 app.use('/api/v1/cms', cmsRouter);
 
+import { notificationsRouter } from './api/routes/notifications.routes';
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/v1/notifications', notificationsRouter);
+
 const healthCheckHandler = (_req: express.Request, res: express.Response) => {
   res.status(200).json({
     status: 'ok',

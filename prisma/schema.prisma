@@ -1153,3 +1153,22 @@ model NotificationReminder {
   @@index([resolvedAt, nextReminderAt])
   @@map("crm_notification_reminders")
 }
+
+model CrmInboxNotification {
+  id        String    @id @default(uuid())
+  recipient String    // The CRM user's id or email from the session (developer login included)
+  category  String    // LEAD, APPROVAL or SYSTEM (the CRM's tabs)
+  type      String    // Event code, e.g. REVIEW_REQUEST, PRESSURE_SCAN_SUBMITTED
+  title     String
+  message   String    @db.Text
+  link      String?
+  workspace String?
+  entityId  String?   @map("entity_id")
+  dedupeKey String    @map("dedupe_key")
+  createdAt DateTime  @default(now()) @map("created_at")
+  readAt    DateTime? @map("read_at")
+
+  @@unique([recipient, dedupeKey])
+  @@index([recipient, readAt, createdAt])
+  @@map("crm_inbox_notifications")
+}

@@ -19,6 +19,7 @@ import {
   updateUnmaskedQuestionnaire,
   UnmaskedPrivatePayload,
 } from '../../services/unmaskedPrivateService';
+import { inboxService } from '../../modules/automation/notifications/inbox.service';
 import {
   generateUnmaskedVideoSignedUrl,
 } from '../../services/supabaseStorageService';
@@ -776,6 +777,19 @@ async function handleApplicationSubmission(req: Request, res: Response) {
           console.error('[Unmasked Private] Background notification error:', err?.message || err);
         });
       }
+
+      // CRM in-app notification feed
+      inboxService.notify({
+        category: 'LEAD',
+        type: 'UNMASKED_APPLICATION_SUBMITTED',
+        title: 'New UNMASKED Private Application',
+        message: `${payload.step1.fullName} (${payload.step1.companyName || payload.step1.email}) applied · Readiness: ${routing.outcome}`,
+        link: '/analytics',
+        workspace: 'leaders_performance',
+        entityId: applicationId || referenceNumber,
+        dedupeKey: `UNMASKED_APPLICATION_SUBMITTED:${referenceNumber}`,
+        roles: ['Approver', 'Advisor'],
+      }).catch((err) => console.warn('[Unmasked Private] Inbox notify warning:', err?.message));
     } catch (crmError: any) {
       // Non-fatal for client: log failure with context without breaking the user experience
       console.warn('[Unmasked Private] CRM sync non-fatal warning:', crmError?.message || crmError);

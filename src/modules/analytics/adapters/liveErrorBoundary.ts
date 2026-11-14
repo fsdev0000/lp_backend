@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { inboxService } from '../../automation/notifications/inbox.service';
 
 const prisma = new PrismaClient();
 
@@ -34,6 +35,9 @@ export class LiveErrorBoundary {
           }),
         },
       });
+
+      // Item 6 (System): notify Approver at most once an hour per upstream provider
+      LiveErrorBoundary.notifyUpstreamFailure(provider, endpoint, message);
     } catch (logErr) {
       console.error(`[LiveErrorBoundary] Failed to persist systemLog for ${provider}:`, logErr);
     }
@@ -46,6 +50,26 @@ export class LiveErrorBoundary {
       timestamp: new Date().toISOString(),
       rawDetails: process.env.NODE_ENV === 'development' ? rawDetails : undefined,
     };
+  }
+
+  private static lastNotifiedByProvider = new Map<string, number>();
+
+  private static notifyUpstreamFailure(provider: string, endpoint: string, message: string): void {
+    const now = Date.now();
+    const last = this.lastNotifiedByProvider.get(provider) || 0;
+    if (now - last < 3600_000) return; // rate limit to at most once an hour per source
+
+    this.lastNotifiedByProvider.set(provider, now);
+
+    inboxService.notify({
+      category: 'SYSTEM',
+      type: 'UPSTREAM_ANALYTICS_ERROR',
+      title: 'Analytics Integration Unresponsive',
+      message: `${provider} failed at ${endpoint}: ${message.slice(0, 100)}`,
+      link: '/analytics/website',
+      dedupeKey: `UPSTREAM_ANALYTICS_ERROR:${provider}:${Math.floor(now / 3600000)}`,
+      roles: ['Approver'],
+    }).catch(() => {});
   }
 
   public static isCredentialMissing(providerName: string, missingItem: string): UpstreamDiagnosticError {
