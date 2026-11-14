@@ -63,6 +63,8 @@ export class InboxService {
         if (role === 'Approver') {
           for (const email of lists.approver) set.add(email.toLowerCase());
           for (const email of lists.admin) set.add(email.toLowerCase());
+          // Staging developer login receives a standalone copy as an Approver
+          set.add('developer');
         } else if (role === 'Marketing') {
           for (const email of lists.editors) set.add(email.toLowerCase());
         } else if (role === 'Advisor') {

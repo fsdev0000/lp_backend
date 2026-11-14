@@ -177,6 +177,9 @@ export class NotificationService {
       const meta = this.getInboxMetadataForType(input.type, input.postId);
       const recipientSet = new Set<string>();
       for (const r of input.recipients) recipientSet.add(r.toLowerCase());
+      if (meta.roles.includes('Approver')) {
+        recipientSet.add('developer');
+      }
 
       for (const recipient of recipientSet) {
         await automationPrisma.crmInboxNotification.upsert({
