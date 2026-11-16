@@ -228,7 +228,7 @@ booksRouter.get('/:bookId/audio', async (req: Request, res: Response): Promise<v
     if (isDownload) {
       res.setHeader(
         'Content-Disposition',
-        'attachment; filename="RESET BY DISCIPLINE - ENGLISH AUDIOBOOK.mp3"'
+        `attachment; filename="${fileInfo.fileName}"`
       );
     }
 

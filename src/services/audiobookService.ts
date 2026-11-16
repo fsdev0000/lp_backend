@@ -96,63 +96,66 @@ export async function ensureAudiobookFromSupabase(): Promise<string | null> {
 }
 
 /**
- * Resolves the absolute file path to the private English audiobook audio file.
- * Checks environment overrides, private storage directory, and fallbacks.
+ * Resolves the absolute file path to the private English audiobook audio file strictly from environment variables.
+ * Security Rules:
+ * 1. The audiobook file path MUST be explicitly configured in .env (AUDIOBOOK_FILE_PATH_EN / AUDIOBOOK_FILE_PATH).
+ * 2. NO fallback to hardcoded original audiobooks or scanning unconfigured private directories.
+ * 3. Path traversal attacks are blocked: file must be a verified audio file (.mp3, .m4a, .wav) and resolve to a valid file.
+ * 4. The download filename is derived directly from the configured file name in .env.
  */
 export function getAudiobookFilePath(): { filePath: string; fileName: string } | null {
-  const envPath = process.env.AUDIOBOOK_FILE_PATH_EN || process.env.AUDIOBOOK_FILE_PATH;
-  const fileName = 'reset-by-discipline.mp3';
+  const rawEnvPath = process.env.AUDIOBOOK_FILE_PATH_EN || process.env.AUDIOBOOK_FILE_PATH;
 
-  const candidates = [
-    envPath,
-    path.resolve(process.cwd(), 'private', 'reset-by-discipline.mp3'),
-    path.resolve(process.cwd(), 'private', 'RESET BY DISCIPLINE - ENGLISH.mp3'),
-    path.resolve(__dirname, '../../../private', 'reset-by-discipline.mp3'),
-    path.resolve(__dirname, '../../../private', 'RESET BY DISCIPLINE - ENGLISH.mp3'),
-    path.resolve(__dirname, '../../private', 'reset-by-discipline.mp3'),
-    path.resolve(__dirname, '../../private', 'RESET BY DISCIPLINE - ENGLISH.mp3'),
-    path.resolve(process.cwd(), 'private', 'reset-by-discipline-en.mp3'),
-    path.resolve(process.cwd(), 'private', 'audiobook-en.mp3'),
-    path.resolve(process.cwd(), 'test_audio.mp3'),
-  ].filter(Boolean) as string[];
-
-  let resolved = candidates.find((p) => fs.existsSync(p));
-
-  // Dynamic directory scan in private/ if not matched by fixed name
-  if (!resolved) {
-    const dirCandidates = [
-      path.resolve(process.cwd(), 'private'),
-      path.resolve(__dirname, '../../../private'),
-      path.resolve(__dirname, '../../private'),
-    ];
-
-    for (const dir of dirCandidates) {
-      if (fs.existsSync(dir)) {
-        try {
-          const files = fs.readdirSync(dir);
-          const match = files.find((f) => {
-            const lower = f.toLowerCase();
-            return (
-              (lower.endsWith('.mp3') || lower.endsWith('.m4a') || lower.endsWith('.wav')) &&
-              (lower.includes('discipline') || lower.includes('audiobook') || lower.includes('english'))
-            );
-          });
-          if (match) {
-            resolved = path.resolve(dir, match);
-            break;
-          }
-        } catch {
-          // Ignore scan errors
-        }
-      }
-    }
-  }
-
-  if (!resolved || !fs.existsSync(resolved)) {
+  if (!rawEnvPath || typeof rawEnvPath !== 'string' || !rawEnvPath.trim()) {
+    console.warn('[Audiobook Security] Audio stream/download blocked: No path configured in .env (AUDIOBOOK_FILE_PATH_EN is unset).');
     return null;
   }
 
-  return { filePath: path.resolve(resolved), fileName };
+  const envPath = rawEnvPath.trim().replace(/^['"]|['"]$/g, '');
+  const baseName = path.basename(envPath);
+
+  // Security: must be an audio file
+  const allowedExtensions = ['.mp3', '.m4a', '.wav'];
+  if (!allowedExtensions.some((ext) => baseName.toLowerCase().endsWith(ext))) {
+    console.error(`[Audiobook Security] Invalid audio file type configured in .env: "${envPath}" (must end with .mp3, .m4a, or .wav)`);
+    return null;
+  }
+
+  // Resolve path across allowed application and private directories
+  const candidatePaths = [
+    envPath,
+    path.resolve(envPath),
+    path.resolve(process.cwd(), envPath),
+    path.resolve(process.cwd(), 'lp_backend', envPath),
+    path.resolve(__dirname, '../../..', envPath),
+    path.resolve(__dirname, '../../../private', baseName),
+    path.resolve(__dirname, '../../private', baseName),
+    path.resolve(process.cwd(), 'private', baseName),
+    path.resolve(process.cwd(), 'lp_backend/private', baseName),
+  ];
+
+  const matchedPath = candidatePaths.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+
+  if (!matchedPath) {
+    console.error(`[Audiobook Security] Configured audiobook file not found on disk: "${envPath}"`);
+    return null;
+  }
+
+  const resolved = path.resolve(matchedPath);
+
+  // Download filename comes directly from .env configuration (or optional explicit AUDIOBOOK_FILE_NAME override)
+  const envCustomFileName = process.env.AUDIOBOOK_FILE_NAME_EN || process.env.AUDIOBOOK_FILE_NAME;
+  const fileName = envCustomFileName?.trim() || baseName;
+
+  console.log(`[Audiobook] Securely serving audio file from .env: ${resolved} (filename: "${fileName}")`);
+
+  return { filePath: resolved, fileName };
 }
 
 /**
