@@ -67,105 +67,74 @@ function getSessionVersion(session: Stripe.Checkout.Session): 'nl' | 'en' {
   return 'en';
 }
 
+/**
+ * Resolves the book file path strictly from environment variables (.env).
+ * Security Rules:
+ * 1. The book file path MUST be explicitly configured in .env (BOOK_FILE_PATH_EN / BOOK_FILE_PATH_NL / BOOK_FILE_PATH).
+ * 2. NO fallback to hardcoded original books or scanning unconfigured private directories.
+ * 3. Path traversal attacks are blocked: file must be a verified .pdf and resolve to a valid file.
+ * 4. The download filename is derived directly from the configured file name in .env.
+ */
 export function getBookFilePath(version: 'nl' | 'en'): { filePath: string; fileName: string } | null {
   const isDutch = version === 'nl';
-  const downloadFileName = isDutch
-    ? 'RESET BY DISCIPLINE - DUTCH.pdf'
-    : 'RESET BY DISCIPLINE - ENGLISH.pdf';
 
-  // 1. Read environment variable override
+  // 1. Strictly read from .env
   const rawEnvPath = isDutch
     ? process.env.BOOK_FILE_PATH_NL
     : (process.env.BOOK_FILE_PATH_EN || process.env.BOOK_FILE_PATH);
 
-  const envPath = rawEnvPath ? rawEnvPath.trim().replace(/^['"]|['"]$/g, '') : undefined;
-
-  // 2. If envPath is specified in .env, resolve across possible cwd & backend directories
-  if (envPath) {
-    const baseName = path.basename(envPath);
-    const envCandidates = [
-      envPath,
-      path.resolve(envPath),
-      path.resolve(process.cwd(), envPath),
-      path.resolve(process.cwd(), 'lp_backend', envPath),
-      path.resolve(__dirname, '../../..', envPath),
-      path.resolve(__dirname, '../../../private', baseName),
-      path.resolve(__dirname, '../../private', baseName),
-      path.resolve(process.cwd(), 'private', baseName),
-      path.resolve(process.cwd(), 'lp_backend/private', baseName),
-    ];
-
-    const matchedEnvPath = envCandidates.find((p) => fs.existsSync(p));
-    if (matchedEnvPath) {
-      const resolved = path.resolve(matchedEnvPath);
-      console.log(`[Stripe Checkout] Serving ${version.toUpperCase()} book from .env configuration: ${resolved}`);
-      return {
-        filePath: resolved,
-        fileName: downloadFileName,
-      };
-    } else {
-      console.warn(`[Stripe Checkout] Warning: Configured .env path "${envPath}" for ${version.toUpperCase()} was not found on disk.`);
-    }
-  }
-
-  // 3. Fallbacks when .env is not set or not found on disk
-  const exactPrivateFileName = isDutch
-    ? 'RESET BY DISCIPLINE - DUTCH.pdf'
-    : 'RESET BY DICIPLINE- ENGLISH.pdf';
-
-  const fallbackCandidates = [
-    path.resolve(process.cwd(), 'private', exactPrivateFileName),
-    path.resolve(process.cwd(), 'lp_backend/private', exactPrivateFileName),
-    path.resolve(__dirname, '../../../private', exactPrivateFileName),
-    path.resolve(__dirname, '../../private', exactPrivateFileName),
-    path.resolve(process.cwd(), 'private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-    path.resolve(process.cwd(), 'lp_backend/private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-    path.resolve(__dirname, '../../../private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-  ];
-
-  let resolvedPath = fallbackCandidates.find((p) => fs.existsSync(p));
-
-  // 4. Fallback: search directory dynamically if not found
-  if (!resolvedPath) {
-    const dirCandidates = [
-      path.resolve(process.cwd(), 'private'),
-      path.resolve(process.cwd(), 'lp_backend/private'),
-      path.resolve(__dirname, '../../../private'),
-      path.resolve(__dirname, '../../private'),
-    ];
-    for (const dir of dirCandidates) {
-      if (fs.existsSync(dir)) {
-        try {
-          const files = fs.readdirSync(dir);
-          const match = files.find((f) => {
-            const lower = f.toLowerCase();
-            if (!lower.endsWith('.pdf')) return false;
-            if (isDutch) {
-              return lower.includes('dutch') || lower.includes('nl');
-            }
-            return (
-              lower.includes('english') ||
-              lower.includes('en') ||
-              lower.includes('dicipline') ||
-              lower.includes('discipline')
-            );
-          });
-          if (match) {
-            resolvedPath = path.resolve(dir, match);
-            break;
-          }
-        } catch {
-          // ignore scan error
-        }
-      }
-    }
-  }
-
-  if (!resolvedPath) {
+  if (!rawEnvPath || typeof rawEnvPath !== 'string' || !rawEnvPath.trim()) {
+    console.warn(`[Stripe Security] Book download blocked: No path configured in .env for ${version.toUpperCase()} (BOOK_FILE_PATH_${version.toUpperCase()} is unset).`);
     return null;
   }
 
-  return { filePath: path.resolve(resolvedPath), fileName: downloadFileName };
+  const envPath = rawEnvPath.trim().replace(/^['"]|['"]$/g, '');
+  const baseName = path.basename(envPath);
+
+  // Security: must be a PDF file
+  if (!baseName.toLowerCase().endsWith('.pdf')) {
+    console.error(`[Stripe Security] Invalid file type configured in .env: "${envPath}" (must end with .pdf)`);
+    return null;
+  }
+
+  // 2. Resolve path across allowed application and private directories
+  const candidatePaths = [
+    envPath,
+    path.resolve(envPath),
+    path.resolve(process.cwd(), envPath),
+    path.resolve(process.cwd(), 'lp_backend', envPath),
+    path.resolve(__dirname, '../../..', envPath),
+    path.resolve(__dirname, '../../../private', baseName),
+    path.resolve(__dirname, '../../private', baseName),
+    path.resolve(process.cwd(), 'private', baseName),
+    path.resolve(process.cwd(), 'lp_backend/private', baseName),
+  ];
+
+  const matchedPath = candidatePaths.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+
+  if (!matchedPath) {
+    console.error(`[Stripe Security] Configured book file for ${version.toUpperCase()} not found on disk: "${envPath}"`);
+    return null;
+  }
+
+  const resolved = path.resolve(matchedPath);
+
+  // Download filename comes directly from .env configuration (or optional explicit BOOK_FILE_NAME override)
+  const envCustomFileName = isDutch ? process.env.BOOK_FILE_NAME_NL : process.env.BOOK_FILE_NAME_EN;
+  const fileName = envCustomFileName?.trim() || baseName;
+
+  console.log(`[Stripe Checkout] Securely serving ${version.toUpperCase()} book from .env: ${resolved} (download filename: "${fileName}")`);
+
+  return {
+    filePath: resolved,
+    fileName,
+  };
 }
 
 /**
