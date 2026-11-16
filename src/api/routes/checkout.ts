@@ -67,35 +67,71 @@ function getSessionVersion(session: Stripe.Checkout.Session): 'nl' | 'en' {
   return 'en';
 }
 
-function getBookFilePath(version: 'nl' | 'en'): { filePath: string; fileName: string } | null {
+export function getBookFilePath(version: 'nl' | 'en'): { filePath: string; fileName: string } | null {
   const isDutch = version === 'nl';
   const downloadFileName = isDutch
     ? 'RESET BY DISCIPLINE - DUTCH.pdf'
     : 'RESET BY DISCIPLINE - ENGLISH.pdf';
 
-  const envPath = isDutch
+  // 1. Read environment variable override
+  const rawEnvPath = isDutch
     ? process.env.BOOK_FILE_PATH_NL
     : (process.env.BOOK_FILE_PATH_EN || process.env.BOOK_FILE_PATH);
 
+  const envPath = rawEnvPath ? rawEnvPath.trim().replace(/^['"]|['"]$/g, '') : undefined;
+
+  // 2. If envPath is specified in .env, resolve across possible cwd & backend directories
+  if (envPath) {
+    const baseName = path.basename(envPath);
+    const envCandidates = [
+      envPath,
+      path.resolve(envPath),
+      path.resolve(process.cwd(), envPath),
+      path.resolve(process.cwd(), 'lp_backend', envPath),
+      path.resolve(__dirname, '../../..', envPath),
+      path.resolve(__dirname, '../../../private', baseName),
+      path.resolve(__dirname, '../../private', baseName),
+      path.resolve(process.cwd(), 'private', baseName),
+      path.resolve(process.cwd(), 'lp_backend/private', baseName),
+    ];
+
+    const matchedEnvPath = envCandidates.find((p) => fs.existsSync(p));
+    if (matchedEnvPath) {
+      const resolved = path.resolve(matchedEnvPath);
+      console.log(`[Stripe Checkout] Serving ${version.toUpperCase()} book from .env configuration: ${resolved}`);
+      return {
+        filePath: resolved,
+        fileName: downloadFileName,
+      };
+    } else {
+      console.warn(`[Stripe Checkout] Warning: Configured .env path "${envPath}" for ${version.toUpperCase()} was not found on disk.`);
+    }
+  }
+
+  // 3. Fallbacks when .env is not set or not found on disk
   const exactPrivateFileName = isDutch
     ? 'RESET BY DISCIPLINE - DUTCH.pdf'
     : 'RESET BY DICIPLINE- ENGLISH.pdf';
 
-  const candidatePaths = [
-    envPath,
+  const fallbackCandidates = [
     path.resolve(process.cwd(), 'private', exactPrivateFileName),
+    path.resolve(process.cwd(), 'lp_backend/private', exactPrivateFileName),
     path.resolve(__dirname, '../../../private', exactPrivateFileName),
+    path.resolve(__dirname, '../../private', exactPrivateFileName),
     path.resolve(process.cwd(), 'private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
+    path.resolve(process.cwd(), 'lp_backend/private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
     path.resolve(__dirname, '../../../private', isDutch ? 'reset-by-discipline-nl.pdf' : 'reset-by-discipline.pdf'),
-  ].filter(Boolean) as string[];
+  ];
 
-  let resolvedPath = candidatePaths.find((p) => fs.existsSync(p));
+  let resolvedPath = fallbackCandidates.find((p) => fs.existsSync(p));
 
-  // Fallback: search directory dynamically if not found
+  // 4. Fallback: search directory dynamically if not found
   if (!resolvedPath) {
     const dirCandidates = [
       path.resolve(process.cwd(), 'private'),
+      path.resolve(process.cwd(), 'lp_backend/private'),
       path.resolve(__dirname, '../../../private'),
+      path.resolve(__dirname, '../../private'),
     ];
     for (const dir of dirCandidates) {
       if (fs.existsSync(dir)) {
@@ -107,7 +143,12 @@ function getBookFilePath(version: 'nl' | 'en'): { filePath: string; fileName: st
             if (isDutch) {
               return lower.includes('dutch') || lower.includes('nl');
             }
-            return lower.includes('english') || lower.includes('en') || lower.includes('dicipline') || lower.includes('discipline');
+            return (
+              lower.includes('english') ||
+              lower.includes('en') ||
+              lower.includes('dicipline') ||
+              lower.includes('discipline')
+            );
           });
           if (match) {
             resolvedPath = path.resolve(dir, match);
