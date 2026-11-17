@@ -489,10 +489,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       token && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true)
     );
 
-    let followers =
-      (process.env.LINKEDIN_MEMBER_FOLLOWERS ? parseInt(process.env.LINKEDIN_MEMBER_FOLLOWERS, 10) : null) ??
-      conn?.followersCount ??
-      0;
+    let followers: number | null = conn?.followersCount ?? null;
     let postEngagement = 0;
     let postCount = 0;
 
