@@ -27,6 +27,8 @@ export function getLinkedInMemberScopes(): string[] {
       'r_1st_connections_size',
       'r_basicprofile',
       'w_member_social',
+      'r_organization_social',
+      'rw_organization_admin',
     ];
   }
   return ['openid', 'profile', 'email', 'w_member_social'];

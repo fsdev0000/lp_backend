@@ -288,6 +288,34 @@ export class LinkedInService {
       },
     });
 
+    // If the granted token includes company page management scopes, sync LINKEDIN_PAGE connection simultaneously
+    const grantedScopes = tokenRes.scope ? tokenRes.scope.split(/[\s,]+/).filter(Boolean) : [];
+    if (grantedScopes.some((s) => s.includes('organization'))) {
+      try {
+        const orgProfile = await this.adapter.fetchOrganizationProfile(tokenRes.access_token);
+        await this.adapter.saveConnection({
+          platform: LINKEDIN_PAGE_PLATFORM,
+          accountName: orgProfile.name,
+          accountUrn: orgProfile.urn,
+          profilePictureUrl: orgProfile.logoUrl || undefined,
+          accessToken: tokenRes.access_token,
+          refreshToken: tokenRes.refresh_token,
+          expiresInSeconds: tokenRes.expires_in,
+          refreshTokenExpiresIn: tokenRes.refresh_token_expires_in,
+          scopes: grantedScopes.filter((s) => s !== 'w_member_social'),
+          metadata: {
+            organizationId: orgProfile.id,
+            vanityName: orgProfile.vanityName,
+            clientId: process.env.LINKEDIN_PAGE_CLIENT_ID?.trim() || '78ocx3kz1moo0s',
+            connectedAt: new Date().toISOString(),
+          },
+        });
+        LinkedInAnalyticsAdapter.clearCache();
+      } catch (orgSyncErr: any) {
+        console.warn('[LinkedInService] Auto-sync company page notice:', orgSyncErr?.message);
+      }
+    }
+
     try {
       await socialPrisma.socialAuditLog.create({
         data: {

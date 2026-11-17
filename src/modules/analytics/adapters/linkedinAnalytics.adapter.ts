@@ -113,25 +113,16 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
    */
   private async getActiveConnection(accountType: 'BUSINESS' | 'PERSONAL' = 'BUSINESS') {
     try {
-      // 1. Try finding connection by platform + accountType
-      const conn = await (analyticsPrisma as any).socialAccountConnection.findFirst({
-        where: {
-          platform: { in: ['LINKEDIN', 'LINKEDIN_PAGE'] },
-          accountType,
-        },
-      });
-      if (conn) return conn;
-
-      // 2. Fallback based on URN or platform name
       if (accountType === 'PERSONAL') {
         return await (analyticsPrisma as any).socialAccountConnection.findFirst({
           where: {
             OR: [
-              { platform: 'LINKEDIN' },
               { accountUrn: { startsWith: 'urn:li:person:' } },
               { accountName: { contains: 'Lionel', mode: 'insensitive' } },
+              { platform: 'LINKEDIN' },
             ],
           },
+          orderBy: { updatedAt: 'desc' },
         });
       } else {
         return await (analyticsPrisma as any).socialAccountConnection.findFirst({
@@ -142,6 +133,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
               { accountName: { contains: 'Leaders', mode: 'insensitive' } },
             ],
           },
+          orderBy: { updatedAt: 'desc' },
         });
       }
     } catch (e: any) {
@@ -490,19 +482,26 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
     );
 
     let followers: number | null = conn?.followersCount ?? null;
-    let postEngagement = 0;
+    let impressions: number | null = null;
+    let membersReached: number | null = null;
+    let reactions: number | null = null;
+    let comments: number | null = null;
+    let reshares: number | null = null;
+    let dailyImpressions: Array<{ date: string; count: number }> = [];
     let postCount = 0;
 
     if (isTokenValid && token) {
+      const apiVersion = getLinkedInApiVersion();
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'LinkedIn-Version': apiVersion,
+        'X-Restli-Protocol-Version': '2.0.0',
+      };
+
+      // 1. Follower count
       try {
         const countUrl = 'https://api.linkedin.com/rest/memberFollowersCount?q=me';
-        const countRes = await fetch(countUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'LinkedIn-Version': getLinkedInApiVersion(),
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        });
+        const countRes = await fetch(countUrl, { headers });
         if (countRes.ok) {
           const countData = (await countRes.json()) as any;
           const directCount = countData?.elements?.[0]?.memberFollowersCount;
@@ -532,6 +531,55 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           // ignore
         }
       }
+
+      // 2. Creator lifetime post analytics (r_member_postAnalytics)
+      const metricTypes = [
+        { type: 'IMPRESSION', assign: (c: number) => { impressions = c; } },
+        { type: 'MEMBERS_REACHED', assign: (c: number) => { membersReached = c; } },
+        { type: 'REACTION', assign: (c: number) => { reactions = c; } },
+        { type: 'COMMENT', assign: (c: number) => { comments = c; } },
+        { type: 'RESHARE', assign: (c: number) => { reshares = c; } },
+      ];
+
+      await Promise.all(
+        metricTypes.map(async ({ type, assign }) => {
+          try {
+            const url = `https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=me&queryType=${type}&aggregation=TOTAL`;
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+              const d = (await res.json()) as any;
+              const count = d?.elements?.[0]?.count;
+              if (typeof count === 'number') assign(count);
+            }
+          } catch {
+            // non-blocking
+          }
+        })
+      );
+
+      // 3. Daily impressions history
+      try {
+        const dailyUrl =
+          'https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=me&queryType=IMPRESSION&aggregation=DAILY';
+        const dRes = await fetch(dailyUrl, { headers });
+        if (dRes.ok) {
+          const dData = (await dRes.json()) as any;
+          if (Array.isArray(dData?.elements)) {
+            dailyImpressions = dData.elements
+              .map((el: any) => {
+                const s = el.dateRange?.start;
+                const dStr = s
+                  ? `${s.year}-${String(s.month).padStart(2, '0')}-${String(s.day).padStart(2, '0')}`
+                  : '';
+                return { date: dStr, count: el.count || 0 };
+              })
+              .filter((p: any) => p.date)
+              .slice(-30);
+          }
+        }
+      } catch {
+        // non-blocking
+      }
     }
 
     try {
@@ -542,19 +590,31 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         },
       });
       postCount = posts.length;
-      postEngagement = Math.round(postCount * 28.5);
     } catch {
       // fallback
     }
+
+    const totalInteractions = (reactions ?? 0) + (comments ?? 0) + (reshares ?? 0);
+    const engagementRate =
+      typeof impressions === 'number' && impressions > 0
+        ? parseFloat(((totalInteractions / impressions) * 100).toFixed(2))
+        : null;
 
     return {
       accountType: 'PERSONAL',
       profileUrn: conn?.accountUrn || 'urn:li:person:lionel-eersteling',
       name: conn?.accountName || 'Lionel Eersteling',
-      connected: Boolean(conn),
+      connected: Boolean(conn && isTokenValid),
       followers,
+      impressions,
+      membersReached,
+      reactions,
+      comments,
+      reshares,
+      totalInteractions: totalInteractions > 0 ? totalInteractions : null,
+      engagementRate,
+      dailyImpressions,
       postCount,
-      postEngagement,
       range: win.range,
       startDate: win.startDate,
       endDate: win.endDate,
@@ -813,12 +873,25 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
     };
 
     try {
-      const postsUrl = `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(
-        conn.accountUrn
-      )}&q=author&count=20&sortBy=LAST_MODIFIED`;
-
       const postsRows: LinkedInPostDetailRow[] = [];
-      const res = await fetch(postsUrl, { headers });
+
+      // 1. Try /rest/posts with viewContext=AUTHOR
+      let res = await fetch(
+        `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(
+          conn.accountUrn
+        )}&q=author&viewContext=AUTHOR&count=20&sortBy=LAST_MODIFIED`,
+        { headers }
+      );
+
+      // If viewContext=AUTHOR failed, try plain author finder
+      if (!res.ok) {
+        res = await fetch(
+          `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(
+            conn.accountUrn
+          )}&q=author&count=20&sortBy=LAST_MODIFIED`,
+          { headers }
+        );
+      }
 
       if (res.ok) {
         const data = (await res.json()) as any;
@@ -848,39 +921,186 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
             url: cleanUrl,
           });
         }
-      }
+      } else {
+        const errText = await res.text().catch(() => '');
+        console.warn('[LinkedInAnalyticsAdapter] /rest/posts personal query notice:', res.status, errText);
 
-      // Populate personal creator metrics if available (r_member_postAnalytics)
-      if (postsRows.length > 0) {
+        // 2. Fallback to /v2/ugcPosts
         try {
-          const caUrl = 'https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=me';
-          const caRes = await fetch(caUrl, { headers });
-          if (caRes.ok) {
-            const caData = (await caRes.json()) as any;
-            const statsMap = new Map<string, any>();
-            for (const elem of caData.elements || []) {
-              const u = elem.entity || elem.post || elem.urn;
-              if (u) statsMap.set(u, elem);
-            }
-            for (const row of postsRows) {
-              const s = statsMap.get(row.urn);
-              if (s) {
-                row.impressions = s.impressions ?? s.views ?? row.impressions;
-                row.reactions = s.reactions ?? s.likes ?? row.reactions;
-                row.comments = s.comments ?? row.comments;
-                row.reposts = s.shares ?? s.reposts ?? row.reposts;
-                row.clicks = s.clicks ?? row.clicks;
-                if (typeof row.impressions === 'number' && row.impressions > 0) {
-                  const interactions = (row.reactions || 0) + (row.comments || 0) + (row.reposts || 0) + (row.clicks || 0);
-                  row.engagementRate = parseFloat(((interactions / row.impressions) * 100).toFixed(2));
-                  row.engagementRateFormatted = `${row.engagementRate}%`;
-                }
-              }
+          const ugcRes = await fetch(
+            `https://api.linkedin.com/v2/ugcPosts?q=authors&authors=List(${encodeURIComponent(conn.accountUrn)})&count=20`,
+            { headers: { Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' } }
+          );
+          if (ugcRes.ok) {
+            const ugcData = (await ugcRes.json()) as any;
+            for (const item of ugcData.elements || []) {
+              const postUrn = String(item.id || '').trim();
+              if (!postUrn.startsWith('urn:li:')) continue;
+              const shareContent = item.specificContent?.['com.linkedin.ugc.ShareContent'];
+              const text = shareContent?.shareCommentary?.text || '';
+              const createdAt = item.created?.time ? new Date(item.created.time).toISOString() : new Date().toISOString();
+              postsRows.push({
+                id: postUrn,
+                urn: postUrn,
+                title: text.length > 60 ? `${text.substring(0, 57)}...` : text,
+                text,
+                publishedAt: createdAt,
+                mediaUrl: shareContent?.media?.[0]?.originalUrl || null,
+                mediaType: shareContent?.shareMediaCategory || 'text',
+                impressions: null,
+                clicks: null,
+                reactions: null,
+                comments: null,
+                reposts: null,
+                engagementRate: null,
+                engagementRateFormatted: null,
+                url: `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`,
+              });
             }
           }
-        } catch {
-          // Non-blocking
+        } catch (ugcErr: any) {
+          console.warn('[LinkedInAnalyticsAdapter] /v2/ugcPosts notice:', ugcErr?.message);
         }
+
+        // 3. Fallback to /v2/shares
+        if (postsRows.length === 0) {
+          try {
+            const sharesRes = await fetch(
+              `https://api.linkedin.com/v2/shares?q=owners&owners=List(${encodeURIComponent(conn.accountUrn)})&count=20`,
+              { headers: { Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' } }
+            );
+            if (sharesRes.ok) {
+              const sData = (await sharesRes.json()) as any;
+              for (const item of sData.elements || []) {
+                const postUrn = String(item.id || '').trim();
+                const text = item.text?.text || '';
+                const createdAt = item.created?.time ? new Date(item.created.time).toISOString() : new Date().toISOString();
+                postsRows.push({
+                  id: postUrn,
+                  urn: `urn:li:share:${postUrn}`,
+                  title: text.length > 60 ? `${text.substring(0, 57)}...` : text,
+                  text,
+                  publishedAt: createdAt,
+                  mediaUrl: null,
+                  mediaType: 'text',
+                  impressions: null,
+                  clicks: null,
+                  reactions: null,
+                  comments: null,
+                  reposts: null,
+                  engagementRate: null,
+                  engagementRateFormatted: null,
+                  url: `https://www.linkedin.com/feed/update/urn:li:share:${encodeURIComponent(postUrn)}`,
+                });
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // 4. Merge published socialPost records from DB
+      try {
+        const localPosts = await (analyticsPrisma as any).socialPost.findMany({
+          where: {
+            platform: 'LINKEDIN',
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        });
+        const existingUrns = new Set(postsRows.map((p) => p.urn));
+        for (const lp of localPosts) {
+          const u = lp.platformPostId || lp.id;
+          if (!existingUrns.has(u)) {
+            const body = lp.body || lp.hook || lp.title || '';
+            const m = lp.metrics && typeof lp.metrics === 'object' ? lp.metrics : {};
+            postsRows.push({
+              id: u,
+              urn: u,
+              title: lp.title || (body.length > 60 ? `${body.substring(0, 57)}...` : body) || 'LinkedIn Post',
+              text: body,
+              publishedAt: lp.publishedAt
+                ? new Date(lp.publishedAt).toISOString()
+                : new Date(lp.createdAt).toISOString(),
+              mediaUrl: lp.mediaUrl || null,
+              mediaType: lp.mediaType || 'text',
+              impressions: typeof m.impressions === 'number' ? m.impressions : null,
+              clicks: typeof m.clicks === 'number' ? m.clicks : null,
+              reactions: typeof m.reactions === 'number' ? m.reactions : null,
+              comments: typeof m.comments === 'number' ? m.comments : null,
+              reposts: typeof m.reposts === 'number' ? m.reposts : null,
+              engagementRate: null,
+              engagementRateFormatted: null,
+              url:
+                lp.platformPostUrl ||
+                (lp.platformPostId && lp.platformPostId.startsWith('urn:li:')
+                  ? `https://www.linkedin.com/feed/update/${encodeURIComponent(lp.platformPostId)}`
+                  : undefined),
+            });
+            existingUrns.add(u);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // 5. Populate personal creator metrics if available (memberCreatorPostAnalytics & socialMetadata)
+      if (postsRows.length > 0) {
+        await Promise.all(
+          postsRows.slice(0, 10).map(async (row) => {
+            if (!row.urn || !row.urn.startsWith('urn:li:')) return;
+            try {
+              // A. Social metadata (reactions, comments)
+              try {
+                const metaRes = await fetch(
+                  `https://api.linkedin.com/rest/socialMetadata/${encodeURIComponent(row.urn)}`,
+                  { headers }
+                );
+                if (metaRes.ok) {
+                  const metaData = (await metaRes.json()) as any;
+                  let rxCount = 0;
+                  if (metaData?.reactionSummaries && typeof metaData.reactionSummaries === 'object') {
+                    for (const val of Object.values(metaData.reactionSummaries) as any[]) {
+                      rxCount += typeof val?.count === 'number' ? val.count : 0;
+                    }
+                  }
+                  row.reactions = rxCount;
+                  row.comments =
+                    typeof metaData?.commentSummary?.count === 'number' ? metaData.commentSummary.count : 0;
+                }
+              } catch {}
+
+              // B. Creator post analytics (impressions, reshares)
+              const types = ['IMPRESSION', 'RESHARE'];
+              for (const t of types) {
+                try {
+                  const caUrl = `https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=entity&entity=${encodeURIComponent(
+                    row.urn
+                  )}&queryType=${t}&aggregation=TOTAL`;
+                  const caRes = await fetch(caUrl, { headers });
+                  if (caRes.ok) {
+                    const caData = (await caRes.json()) as any;
+                    const count = caData?.elements?.[0]?.count;
+                    if (typeof count === 'number') {
+                      if (t === 'IMPRESSION') row.impressions = count;
+                      if (t === 'RESHARE') row.reposts = count;
+                    }
+                  }
+                } catch {}
+              }
+
+              if (typeof row.impressions === 'number' && row.impressions > 0) {
+                const interactions =
+                  (row.reactions || 0) + (row.comments || 0) + (row.reposts || 0) + (row.clicks || 0);
+                row.engagementRate = parseFloat(((interactions / row.impressions) * 100).toFixed(2));
+                row.engagementRateFormatted = `${row.engagementRate}%`;
+              }
+            } catch {
+              // Non-blocking
+            }
+          })
+        );
       }
 
       postsRows.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
