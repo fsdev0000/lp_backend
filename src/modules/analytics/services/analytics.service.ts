@@ -528,13 +528,6 @@ export class AnalyticsService {
   ) {
     const normType = (accountType || 'all').toLowerCase();
 
-    if (normType === 'personal') {
-      const personalData = await this.linkedinAnalytics.getPersonalAnalytics(range, forceRefresh);
-      return personalData;
-    }
-
-    const companyData = await this.linkedinAnalytics.getCompanyAnalytics(range, forceRefresh);
-
     const now = Date.now();
     const cachedVisitors = AnalyticsService.linkedinWebsiteVisitorsCache[range];
     let websiteVisitors: LinkedInWebsiteVisitors;
@@ -548,6 +541,16 @@ export class AnalyticsService {
         cachedAt: now,
       };
     }
+
+    if (normType === 'personal') {
+      const personalData = await this.linkedinAnalytics.getPersonalAnalytics(range, forceRefresh);
+      return {
+        ...personalData,
+        websiteVisitors,
+      };
+    }
+
+    const companyData = await this.linkedinAnalytics.getCompanyAnalytics(range, forceRefresh);
 
     if (normType === 'business') {
       return {

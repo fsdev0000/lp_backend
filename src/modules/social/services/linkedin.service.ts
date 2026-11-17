@@ -389,7 +389,11 @@ export class LinkedInService {
           lastSyncAt: conn.lastSyncAt,
           expiresAt: conn.tokenExpiresAt,
           tokenExpiresIn: `${daysUntilExpiry ?? 60} days`,
-          followersCount: conn.followersCount ?? null,
+          followersCount:
+            conn.followersCount ??
+            (conn.platform === LINKEDIN_MEMBER_PLATFORM && process.env.LINKEDIN_MEMBER_FOLLOWERS
+              ? parseInt(process.env.LINKEDIN_MEMBER_FOLLOWERS, 10)
+              : null),
           metadata: conn.metadata ?? null,
         };
       };
