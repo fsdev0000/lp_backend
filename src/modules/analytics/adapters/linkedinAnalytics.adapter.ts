@@ -790,6 +790,108 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
   }
 
   /**
+   * Retrieves Lionel's personal posts with live creator performance metrics (impressions, reactions, comments, clicks)
+   * via Community Management API (posts?author= & memberCreatorPostAnalytics).
+   */
+  public async getPersonalPosts(forceRefresh = false): Promise<LinkedInPostDetailRow[]> {
+    const now = Date.now();
+    const conn = await this.getActiveConnection('PERSONAL');
+    const token = conn?.accessToken;
+    const isTokenValid = Boolean(
+      token && (conn?.tokenExpiresAt ? new Date(conn.tokenExpiresAt).getTime() > now : true)
+    );
+
+    if (!isTokenValid || !conn?.accountUrn) {
+      return [];
+    }
+
+    const apiVersion = getLinkedInApiVersion();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'LinkedIn-Version': apiVersion,
+      'X-Restli-Protocol-Version': '2.0.0',
+    };
+
+    try {
+      const postsUrl = `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(
+        conn.accountUrn
+      )}&q=author&count=20&sortBy=LAST_MODIFIED`;
+
+      const postsRows: LinkedInPostDetailRow[] = [];
+      const res = await fetch(postsUrl, { headers });
+
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        for (const item of data.elements || []) {
+          const postUrn = String(item.id || '').trim();
+          if (!postUrn.startsWith('urn:li:')) continue;
+
+          const commentary = item.commentary || item.title || '';
+          const publishedAt = item.publishedAt ? new Date(item.publishedAt).toISOString() : new Date().toISOString();
+          const cleanUrl = `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}`;
+
+          postsRows.push({
+            id: postUrn,
+            urn: postUrn,
+            title: item.title || (commentary.length > 60 ? `${commentary.substring(0, 57)}...` : commentary),
+            text: commentary,
+            publishedAt,
+            mediaUrl: item.content?.article?.thumbnail || item.content?.media?.id || null,
+            mediaType: item.content?.media ? 'image' : item.content?.article ? 'article' : 'text',
+            impressions: null,
+            clicks: null,
+            reactions: null,
+            comments: null,
+            reposts: null,
+            engagementRate: null,
+            engagementRateFormatted: null,
+            url: cleanUrl,
+          });
+        }
+      }
+
+      // Populate personal creator metrics if available (r_member_postAnalytics)
+      if (postsRows.length > 0) {
+        try {
+          const caUrl = 'https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=me';
+          const caRes = await fetch(caUrl, { headers });
+          if (caRes.ok) {
+            const caData = (await caRes.json()) as any;
+            const statsMap = new Map<string, any>();
+            for (const elem of caData.elements || []) {
+              const u = elem.entity || elem.post || elem.urn;
+              if (u) statsMap.set(u, elem);
+            }
+            for (const row of postsRows) {
+              const s = statsMap.get(row.urn);
+              if (s) {
+                row.impressions = s.impressions ?? s.views ?? row.impressions;
+                row.reactions = s.reactions ?? s.likes ?? row.reactions;
+                row.comments = s.comments ?? row.comments;
+                row.reposts = s.shares ?? s.reposts ?? row.reposts;
+                row.clicks = s.clicks ?? row.clicks;
+                if (typeof row.impressions === 'number' && row.impressions > 0) {
+                  const interactions = (row.reactions || 0) + (row.comments || 0) + (row.reposts || 0) + (row.clicks || 0);
+                  row.engagementRate = parseFloat(((interactions / row.impressions) * 100).toFixed(2));
+                  row.engagementRateFormatted = `${row.engagementRate}%`;
+                }
+              }
+            }
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      postsRows.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      return postsRows;
+    } catch (err: any) {
+      console.warn('[LinkedInAnalyticsAdapter] getPersonalPosts notice:', err?.message);
+      return [];
+    }
+  }
+
+  /**
    * Probes integration health and response latency
    */
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }> {

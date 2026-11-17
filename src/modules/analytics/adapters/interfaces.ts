@@ -421,6 +421,7 @@ export interface LinkedInAnalyticsData {
 export interface ILinkedInAnalyticsAdapter {
   getCompanyAnalytics(range?: string, forceRefresh?: boolean): Promise<LinkedInAnalyticsData>;
   getPosts(forceRefresh?: boolean): Promise<LinkedInPostDetailRow[]>;
+  getPersonalPosts?(forceRefresh?: boolean): Promise<LinkedInPostDetailRow[]>;
   ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number; message: string }>;
 }
 

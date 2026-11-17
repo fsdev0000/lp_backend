@@ -575,6 +575,10 @@ export class AnalyticsService {
     return this.linkedinAnalytics.getPosts(forceRefresh);
   }
 
+  public async getLinkedInPersonalPosts(forceRefresh = false) {
+    return this.linkedinAnalytics.getPersonalPosts?.(forceRefresh) ?? [];
+  }
+
   public async getInstagramAnalytics(range = '7d', forceRefresh = false): Promise<InstagramAnalyticsData> {
     const accountData = await this.instagramAnalytics.getAccountAnalytics(range, forceRefresh);
 

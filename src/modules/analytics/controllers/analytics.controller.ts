@@ -288,7 +288,11 @@ export class AnalyticsController {
   public getLinkedInPosts = async (req: Request, res: Response): Promise<void> => {
     try {
       const refresh = req.query.refresh === 'true';
-      const posts = await this.service.getLinkedInPosts(refresh);
+      const target = ((req.query.target as string) || (req.query.accountType as string) || 'company').toLowerCase();
+      const posts =
+        target === 'member' || target === 'personal'
+          ? await this.service.getLinkedInPersonalPosts(refresh)
+          : await this.service.getLinkedInPosts(refresh);
       res.status(200).json({ success: true, posts, data: { posts } });
     } catch (error: any) {
       console.error('[AnalyticsController] getLinkedInPosts failed:', error);
