@@ -1164,11 +1164,15 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
 
               // B. Creator post analytics (impressions, reshares)
               const types = ['IMPRESSION', 'RESHARE'];
+              const entityTuple = row.urn.startsWith('urn:li:share:')
+                ? `(share:${encodeURIComponent(row.urn)})`
+                : row.urn.startsWith('urn:li:ugcPost:')
+                ? `(ugcPost:${encodeURIComponent(row.urn)})`
+                : encodeURIComponent(row.urn);
+
               for (const t of types) {
                 try {
-                  const caUrl = `https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=entity&entity=${encodeURIComponent(
-                    row.urn
-                  )}&queryType=${t}&aggregation=TOTAL`;
+                  const caUrl = `https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=entity&entity=${entityTuple}&queryType=${t}&aggregation=TOTAL`;
                   const caRes = await fetch(caUrl, { headers });
                   if (caRes.ok) {
                     const caData = (await caRes.json()) as any;
