@@ -147,9 +147,10 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
 
   const apiKeyHeader = (req.headers['x-api-key'] || req.headers['x-api-token'] || req.query.api_key || req.query.apiKey) as string | undefined;
   const authHeader = String(req.headers.authorization || '').trim();
+  const rawQueryToken = (req.query.token || req.query.auth_token || req.query.bearer) as string | undefined;
   const bearerToken = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length).trim()
-    : authHeader;
+    : authHeader || (rawQueryToken ? String(rawQueryToken).trim() : '');
 
   const validKeys = [
     process.env.ADMIN_API_KEY,

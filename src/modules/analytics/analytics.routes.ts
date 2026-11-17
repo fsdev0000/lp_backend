@@ -13,7 +13,14 @@ const controller = new AnalyticsController();
 analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
 
 /**
- * Issue 4.1: Apply CRM authentication and workspace authorization across all analytics routes
+ * @route GET /api/v1/analytics/realtime/stream
+ * @desc Persistent Server-Sent Events (SSE) stream for live active visitor ticker
+ * @access Public SSE stream (browser EventSource does not support custom Authorization headers)
+ */
+analyticsRoutes.get('/realtime/stream', controller.streamRealtime);
+
+/**
+ * Issue 4.1: Apply CRM authentication and workspace authorization across all protected analytics routes
  */
 analyticsRoutes.use(requireCrmAuth);
 analyticsRoutes.use(requireWorkspaceAuth);
@@ -54,12 +61,6 @@ analyticsRoutes.get('/integrations/status', controller.getIntegrationsStatus);
  * @desc Probes a specific provider and returns exact round-trip ping latency
  */
 analyticsRoutes.post('/integrations/ping/:id', controller.pingIntegration);
-
-/**
- * @route GET /api/v1/analytics/realtime/stream
- * @desc Persistent Server-Sent Events (SSE) stream for live active visitor ticker
- */
-analyticsRoutes.get('/realtime/stream', controller.streamRealtime);
 
 /**
  * @route GET /api/v1/analytics/reports-snapshot
