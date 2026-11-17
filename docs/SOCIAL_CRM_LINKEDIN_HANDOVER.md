@@ -35,7 +35,7 @@ LinkedIn's **Community Management API** cannot share an app with consumer sign-i
 ### Staging (`/opt/leadersperformance/lp_backend/.env`)
 ```env
 LINKEDIN_PUBLISHING_ENABLED="false"
-LINKEDIN_API_VERSION="202504"
+LINKEDIN_API_VERSION="202611"
 
 LINKEDIN_PAGE_CLIENT_ID="78ocx3kz1moo0s"
 LINKEDIN_PAGE_CLIENT_SECRET="<set-in-host-env-only>"
@@ -49,7 +49,7 @@ LINKEDIN_ORGANIZATION_VANITY_NAME="lioneleersteling"
 ### Local (`lp_backend/.env`)
 ```env
 LINKEDIN_PUBLISHING_ENABLED="false"
-LINKEDIN_API_VERSION="202504"
+LINKEDIN_API_VERSION="202611"
 
 LINKEDIN_PAGE_CLIENT_ID="78ocx3kz1moo0s"
 LINKEDIN_PAGE_CLIENT_SECRET="<set-in-local-env-only>"

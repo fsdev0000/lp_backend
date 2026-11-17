@@ -35,11 +35,11 @@ export function isLinkedInPublishingEnabled(): boolean {
 
 /**
  * Single environment variable for LinkedIn REST API version header ('LinkedIn-Version').
- * Replaces sunset version 202401.
+ * Currently active version: 202611.
  */
 export function getLinkedInApiVersion(): string {
   const envVer = process.env.LINKEDIN_API_VERSION?.trim();
-  return envVer && envVer.length >= 6 ? envVer : '202504';
+  return envVer && envVer.length >= 6 ? envVer : '202611';
 }
 
 /**

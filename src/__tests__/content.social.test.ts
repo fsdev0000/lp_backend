@@ -420,7 +420,7 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       expect(res.body.url).toContain('rw_organization_admin');
       expect(res.body.url).not.toContain('w_member_social');
 
-      expect(getLinkedInApiVersion()).toBe(process.env.LINKEDIN_API_VERSION || '202504');
+      expect(getLinkedInApiVersion()).toBe(process.env.LINKEDIN_API_VERSION || '202611');
       expect(getLinkedInApiVersion()).not.toBe('202401');
     });
 

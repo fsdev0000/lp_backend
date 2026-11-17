@@ -68,7 +68,7 @@ const swaggerOptions = {
       },
       {
         name: 'LinkedIn Social CRM',
-        description: 'LinkedIn OAuth 2.0 connection lifecycle (member & read-only company page), Community Management API v202504 analytics (Organization ID 18948042 / vanityName lioneleersteling), and kill-switch-protected publishing.',
+        description: 'LinkedIn OAuth 2.0 connection lifecycle (member & read-only company page), Community Management API v202611 analytics (Organization ID 18948042 / vanityName lioneleersteling), and kill-switch-protected publishing.',
       },
       {
         name: 'Instagram Social CRM',
@@ -2008,7 +2008,7 @@ const swaggerOptions = {
       '/analytics/social/linkedin': {
         get: {
           summary: 'Retrieve LinkedIn Company Page Analytics',
-          description: 'Returns followers, follower growth, page impressions, clicks, engagement rate, page views, and GA4 website visitors for Organization ID `18948042` (`vanityName: lioneleersteling`) via LinkedIn Community Management API version `202504`. Never returns estimates or sample numbers (returns null if unverified/unconnected).',
+          description: 'Returns followers, follower growth, page impressions, clicks, engagement rate, page views, and GA4 website visitors for Organization ID `18948042` (`vanityName: lioneleersteling`) via LinkedIn Community Management API version `202611`. Never returns estimates or sample numbers (returns null if unverified/unconnected).',
           tags: ['Analytics & Performance', 'LinkedIn Social CRM'],
           parameters: [
             {
