@@ -752,6 +752,50 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       // 2. Item 11: Fetch per-post statistics via organizationalEntityShareStatistics with shares / ugcPosts params
       await this.enrichPostsWithShareStatistics(orgUrn, postsRows, headers);
 
+      // 3. Fallback to Content Calendar posts if LinkedIn API returned 0 posts
+      if (postsRows.length === 0) {
+        try {
+          const crmPosts = await (analyticsPrisma as any).post.findMany({
+            where: { platform: 'LINKEDIN' },
+            include: { contentItem: true },
+            orderBy: { scheduledAt: 'desc' },
+            take: 30,
+          });
+          for (const p of crmPosts) {
+            const ch = (p.contentItem?.channelRaw || '').toLowerCase();
+            if (!ch.includes('business') && !ch.includes('company')) continue;
+            const text = p.caption || p.contentItem?.subject || p.title;
+            if (!text) continue;
+            const u = p.platformPostId || `urn:li:post:${p.id}`;
+            postsRows.push({
+              id: u,
+              urn: u,
+              title: p.title || p.contentItem?.subject || (text.length > 60 ? `${text.substring(0, 57)}...` : text),
+              text,
+              publishedAt: p.publishedAt
+                ? new Date(p.publishedAt).toISOString()
+                : new Date(p.scheduledAt).toISOString(),
+              mediaUrl: null,
+              mediaType: 'article',
+              impressions: null,
+              clicks: null,
+              reactions: null,
+              comments: null,
+              reposts: null,
+              engagementRate: null,
+              engagementRateFormatted: null,
+              url:
+                p.platformUrl ||
+                (p.platformPostId && p.platformPostId.startsWith('urn:li:')
+                  ? `https://www.linkedin.com/feed/update/${encodeURIComponent(p.platformPostId)}`
+                  : undefined),
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       postsRows.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
       LinkedInAnalyticsAdapter.postsCache = {
@@ -1043,6 +1087,53 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         }
       } catch {
         // ignore
+      }
+
+      // 4b. Merge LinkedIn posts from Content Calendar (Post model)
+      try {
+        const crmCalendarPosts = await (analyticsPrisma as any).post.findMany({
+          where: { platform: 'LINKEDIN' },
+          include: { contentItem: true },
+          orderBy: { scheduledAt: 'desc' },
+          take: 30,
+        });
+        const existingUrns = new Set(postsRows.map((p) => p.urn));
+        for (const p of crmCalendarPosts) {
+          const ch = (p.contentItem?.channelRaw || '').toLowerCase();
+          // Exclude company page rows from personal profile view
+          if (ch.includes('business') || ch.includes('company')) continue;
+          const text = p.caption || p.contentItem?.subject || p.title;
+          if (!text) continue;
+          const u = p.platformPostId || `urn:li:post:${p.id}`;
+          if (!existingUrns.has(u)) {
+            postsRows.push({
+              id: u,
+              urn: u,
+              title: p.title || p.contentItem?.subject || (text.length > 60 ? `${text.substring(0, 57)}...` : text),
+              text,
+              publishedAt: p.publishedAt
+                ? new Date(p.publishedAt).toISOString()
+                : new Date(p.scheduledAt).toISOString(),
+              mediaUrl: null,
+              mediaType: 'article',
+              impressions: null,
+              clicks: null,
+              reactions: null,
+              comments: null,
+              reposts: null,
+              engagementRate: null,
+              engagementRateFormatted: null,
+              url:
+                p.platformUrl ||
+                (p.platformPostId && p.platformPostId.startsWith('urn:li:')
+                  ? `https://www.linkedin.com/feed/update/${encodeURIComponent(p.platformPostId)}`
+                  : undefined),
+            });
+            existingUrns.add(u);
+          }
+        }
+      } catch (crmErr: any) {
+        console.warn('[LinkedInAnalyticsAdapter] CRM Post query notice:', crmErr?.message);
       }
 
       // 5. Populate personal creator metrics if available (memberCreatorPostAnalytics & socialMetadata)
