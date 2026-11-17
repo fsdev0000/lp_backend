@@ -21,7 +21,13 @@ export function getLinkedInMemberScopes(): string[] {
   const clientId = process.env.LINKEDIN_CLIENT_ID?.trim();
   const pageClientId = process.env.LINKEDIN_PAGE_CLIENT_ID?.trim();
   if (clientId && pageClientId && clientId === pageClientId) {
-    return ['r_member_profileAnalytics', 'w_member_social', 'r_basicprofile'];
+    return [
+      'r_member_profileAnalytics',
+      'r_member_postAnalytics',
+      'r_1st_connections_size',
+      'r_basicprofile',
+      'w_member_social',
+    ];
   }
   return ['openid', 'profile', 'email', 'w_member_social'];
 }

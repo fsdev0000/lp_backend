@@ -265,7 +265,7 @@ export class LinkedInService {
 
     // Member personal profile connection ('LINKEDIN')
     const profile = await this.adapter.fetchUserProfile(tokenRes.access_token);
-    const directFollowers = await this.adapter.fetchMemberFollowersCount(tokenRes.access_token);
+    const directFollowers = await this.adapter.fetchMemberFollowersCount(tokenRes.access_token, profile.urn);
     const connection = await this.adapter.saveConnection({
       platform: LINKEDIN_MEMBER_PLATFORM,
       accountName: profile.name,
@@ -376,7 +376,7 @@ export class LinkedInService {
 
       if (memberConn && memberConn.followersCount == null && memberConn.accessToken) {
         try {
-          const directCount = await this.adapter.fetchMemberFollowersCount(memberConn.accessToken);
+          const directCount = await this.adapter.fetchMemberFollowersCount(memberConn.accessToken, memberConn.accountUrn || undefined);
           if (typeof directCount === 'number') {
             memberConn.followersCount = directCount;
             socialPrisma.socialAccountConnection.update({

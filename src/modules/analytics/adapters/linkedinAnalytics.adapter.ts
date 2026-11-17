@@ -513,6 +513,25 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
       } catch (err: any) {
         console.warn('[LinkedInAnalyticsAdapter] memberFollowersCount notice:', err?.message);
       }
+
+      if (followers == null && conn?.accountUrn) {
+        try {
+          const netUrl = `https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(
+            conn.accountUrn
+          )}?edgeType=MemberFollowedByMember`;
+          const netRes = await fetch(netUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (netRes.ok) {
+            const netData = (await netRes.json()) as any;
+            if (typeof netData.firstDegreeSize === 'number') {
+              followers = netData.firstDegreeSize;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
 
     try {

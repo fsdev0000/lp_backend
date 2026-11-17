@@ -338,12 +338,12 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Fetches the member's live follower count via Community Management API (memberFollowersCount).
-   * Available when authorized with r_member_profileAnalytics.
+   * Fetches the member's live follower count via Community Management API (memberFollowersCount)
+   * or networkSizes (r_1st_connections_size).
    */
-  public async fetchMemberFollowersCount(accessToken: string): Promise<number | null> {
+  public async fetchMemberFollowersCount(accessToken: string, memberUrn?: string): Promise<number | null> {
+    const apiVersion = getLinkedInApiVersion();
     try {
-      const apiVersion = getLinkedInApiVersion();
       const url = 'https://api.linkedin.com/rest/memberFollowersCount?q=me';
       const res = await fetch(url, {
         headers: {
@@ -363,6 +363,26 @@ export class LinkedInAdapter {
     } catch (err: any) {
       console.warn('[LinkedInAdapter] fetchMemberFollowersCount notice:', err?.message);
     }
+
+    if (memberUrn) {
+      try {
+        const netUrl = `https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(
+          memberUrn
+        )}?edgeType=MemberFollowedByMember`;
+        const netRes = await fetch(netUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (netRes.ok) {
+          const netData = (await netRes.json()) as any;
+          if (typeof netData.firstDegreeSize === 'number') {
+            return netData.firstDegreeSize;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     return null;
   }
 
