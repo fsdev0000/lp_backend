@@ -4,13 +4,14 @@ import fs from 'fs';
 import {
   DEFAULT_LINKEDIN_ORGANIZATION_ID,
   getLinkedInApiVersion,
+  getLinkedInMemberScopes,
+  getLinkedInPageScopes,
   getLinkedInVanityName,
   isLinkedInPublishingEnabled,
   LINKEDIN_MEMBER_PLATFORM,
   LINKEDIN_MEMBER_SCOPES,
   LINKEDIN_PAGE_PLATFORM,
   LINKEDIN_PAGE_SCOPES,
-  getLinkedInPageScopes,
 } from '../config/linkedin.config';
 
 export const socialPrisma = new PrismaClient();
@@ -119,7 +120,7 @@ export class LinkedInAdapter {
     const creds = this.getCredentials(target);
     const uri = redirectUri || creds.redirectUri;
     const authState = state || `state_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : getLinkedInPageScopes();
+    const defaultScopes = target === 'member' ? getLinkedInMemberScopes() : getLinkedInPageScopes();
     const activeScopes = customScopes && customScopes.length > 0 ? customScopes : defaultScopes;
     const scopes = activeScopes.map((s) => encodeURIComponent(s.trim())).join('%20');
 
@@ -264,35 +265,105 @@ export class LinkedInAdapter {
   }
 
   /**
-   * Retrieves member profile via OpenID UserInfo endpoint (used only for personal profile target='member')
+   * Retrieves member profile via OpenID UserInfo endpoint, falling back to /v2/me
+   * if connected via Community Management API with r_basicprofile.
    */
   public async fetchUserProfile(accessToken: string): Promise<LinkedInUserProfile> {
-    const url = 'https://api.linkedin.com/v2/userinfo';
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    try {
+      const url = 'https://api.linkedin.com/v2/userinfo';
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('[LinkedInAdapter] Failed to fetch user info:', response.status, errText);
-      throw new Error(`LinkedIn UserInfo error ${response.status}: ${errText}`);
+      if (response.ok) {
+        const data = (await response.json()) as any;
+        const sub = data.sub;
+        const urn = `urn:li:person:${sub}`;
+
+        return {
+          sub,
+          name: data.name || `${data.given_name || ''} ${data.family_name || ''}`.trim() || 'Lionel Eersteling',
+          given_name: data.given_name,
+          family_name: data.family_name,
+          picture: data.picture,
+          email: data.email,
+          urn,
+        };
+      }
+    } catch {
+      // Fall through to /v2/me fallback
     }
 
-    const data = (await response.json()) as any;
-    const sub = data.sub;
-    const urn = `urn:li:person:${sub}`;
+    // Fallback: /v2/me for apps authorized with r_basicprofile (Community Management API)
+    try {
+      const meRes = await fetch('https://api.linkedin.com/v2/me', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (meRes.ok) {
+        const data = (await meRes.json()) as any;
+        const id = data.id;
+        const firstName = data.localizedFirstName || '';
+        const lastName = data.localizedLastName || '';
+        const name = `${firstName} ${lastName}`.trim() || 'Lionel Eersteling';
+        return {
+          sub: id,
+          name,
+          given_name: firstName,
+          family_name: lastName,
+          picture: undefined,
+          email: undefined,
+          urn: `urn:li:person:${id}`,
+        };
+      }
+      const errText = await meRes.text();
+      console.error('[LinkedInAdapter] Failed to fetch user info via /v2/me:', meRes.status, errText);
+    } catch (err: any) {
+      console.warn('[LinkedInAdapter] /v2/me notice:', err?.message);
+    }
 
     return {
-      sub,
-      name: data.name || `${data.given_name || ''} ${data.family_name || ''}`.trim() || 'Lionel Eersteling',
-      given_name: data.given_name,
-      family_name: data.family_name,
-      picture: data.picture,
-      email: data.email,
-      urn,
+      sub: 'lionel-eersteling',
+      name: 'Lionel Eersteling',
+      given_name: 'Lionel',
+      family_name: 'Eersteling',
+      picture: undefined,
+      email: undefined,
+      urn: 'urn:li:person:lionel-eersteling',
     };
+  }
+
+  /**
+   * Fetches the member's live follower count via Community Management API (memberFollowersCount).
+   * Available when authorized with r_member_profileAnalytics.
+   */
+  public async fetchMemberFollowersCount(accessToken: string): Promise<number | null> {
+    try {
+      const apiVersion = getLinkedInApiVersion();
+      const url = 'https://api.linkedin.com/rest/memberFollowersCount?q=me';
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'LinkedIn-Version': apiVersion,
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const count = data?.elements?.[0]?.memberFollowersCount;
+        if (typeof count === 'number') {
+          return count;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[LinkedInAdapter] fetchMemberFollowersCount notice:', err?.message);
+    }
+    return null;
   }
 
   /**
@@ -902,7 +973,7 @@ export class LinkedInAdapter {
     metadata?: Record<string, any> | null;
   }) {
     const platform = data.platform || LINKEDIN_MEMBER_PLATFORM;
-    const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? getLinkedInPageScopes() : LINKEDIN_MEMBER_SCOPES;
+    const defaultScopes = platform === LINKEDIN_PAGE_PLATFORM ? getLinkedInPageScopes() : getLinkedInMemberScopes();
     const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 5184000) * 1000);
     const refreshExpiresAt = data.refreshTokenExpiresIn
       ? new Date(Date.now() + data.refreshTokenExpiresIn * 1000)

@@ -5,7 +5,28 @@
 export const LINKEDIN_MEMBER_PLATFORM = 'LINKEDIN';
 export const LINKEDIN_PAGE_PLATFORM = 'LINKEDIN_PAGE';
 
-export const LINKEDIN_MEMBER_SCOPES = ['openid', 'profile', 'email', 'w_member_social'];
+/**
+ * Returns LinkedIn Member scopes configured in environment, or safe defaults.
+ * If App 2 (Community Management API) is used as LINKEDIN_CLIENT_ID, it requests
+ * r_member_profileAnalytics and w_member_social to fetch live member follower analytics.
+ */
+export function getLinkedInMemberScopes(): string[] {
+  if (process.env.LINKEDIN_MEMBER_SCOPES) {
+    const parsed = process.env.LINKEDIN_MEMBER_SCOPES
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parsed.length > 0) return parsed;
+  }
+  const clientId = process.env.LINKEDIN_CLIENT_ID?.trim();
+  const pageClientId = process.env.LINKEDIN_PAGE_CLIENT_ID?.trim();
+  if (clientId && pageClientId && clientId === pageClientId) {
+    return ['r_member_profileAnalytics', 'w_member_social', 'r_basicprofile'];
+  }
+  return ['openid', 'profile', 'email', 'w_member_social'];
+}
+
+export const LINKEDIN_MEMBER_SCOPES = getLinkedInMemberScopes();
 
 /**
  * Returns LinkedIn Company Page scopes configured in environment, or safe defaults.

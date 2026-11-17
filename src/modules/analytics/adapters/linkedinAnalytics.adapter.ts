@@ -493,22 +493,25 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
     let postEngagement = 0;
     let postCount = 0;
 
-    if (isTokenValid && conn?.accountUrn) {
+    if (isTokenValid && token) {
       try {
-        const netUrl = `https://api.linkedin.com/v2/networkSizes/${encodeURIComponent(
-          conn.accountUrn
-        )}?edgeType=MemberFollowedByMember`;
-        const netRes = await fetch(netUrl, {
-          headers: { Authorization: `Bearer ${token}` },
+        const countUrl = 'https://api.linkedin.com/rest/memberFollowersCount?q=me';
+        const countRes = await fetch(countUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'LinkedIn-Version': getLinkedInApiVersion(),
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
         });
-        if (netRes.ok) {
-          const netData = (await netRes.json()) as any;
-          if (typeof netData.firstDegreeSize === 'number') {
-            followers = netData.firstDegreeSize;
+        if (countRes.ok) {
+          const countData = (await countRes.json()) as any;
+          const directCount = countData?.elements?.[0]?.memberFollowersCount;
+          if (typeof directCount === 'number') {
+            followers = directCount;
           }
         }
       } catch (err: any) {
-        console.warn('[LinkedInAnalyticsAdapter] Personal follower count notice:', err?.message);
+        console.warn('[LinkedInAnalyticsAdapter] memberFollowersCount notice:', err?.message);
       }
     }
 

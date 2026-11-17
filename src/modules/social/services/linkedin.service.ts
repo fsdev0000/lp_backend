@@ -7,6 +7,7 @@ import {
   LINKEDIN_MEMBER_SCOPES,
   LINKEDIN_PAGE_PLATFORM,
   LINKEDIN_PAGE_SCOPES,
+  getLinkedInMemberScopes,
   getLinkedInPageScopes,
 } from '../config/linkedin.config';
 import { LinkedInAnalyticsAdapter } from '../../analytics/adapters/linkedinAnalytics.adapter';
@@ -54,7 +55,7 @@ export class LinkedInService {
       target,
       redirectUri: meta.redirectUri,
       returnTo: meta.returnTo,
-      scopes: meta.scopes || (target === 'member' ? LINKEDIN_MEMBER_SCOPES : LINKEDIN_PAGE_SCOPES),
+      scopes: meta.scopes || (target === 'member' ? getLinkedInMemberScopes() : LINKEDIN_PAGE_SCOPES),
       createdAt: Date.now(),
     };
     this.pendingStates.set(state, entry);
@@ -101,7 +102,7 @@ export class LinkedInService {
       );
     }
 
-    const defaultScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : getLinkedInPageScopes();
+    const defaultScopes = target === 'member' ? getLinkedInMemberScopes() : getLinkedInPageScopes();
     const activeScopes =
       scopes && scopes.length > 0
         ? scopes
@@ -177,7 +178,7 @@ export class LinkedInService {
       if (state === 'lp_member_auth') {
         stateEntry = {
           target: 'member',
-          scopes: LINKEDIN_MEMBER_SCOPES,
+          scopes: getLinkedInMemberScopes(),
           createdAt: Date.now(),
         };
       } else if (state === 'lp_page_auth') {
@@ -264,6 +265,7 @@ export class LinkedInService {
 
     // Member personal profile connection ('LINKEDIN')
     const profile = await this.adapter.fetchUserProfile(tokenRes.access_token);
+    const directFollowers = await this.adapter.fetchMemberFollowersCount(tokenRes.access_token);
     const connection = await this.adapter.saveConnection({
       platform: LINKEDIN_MEMBER_PLATFORM,
       accountName: profile.name,
@@ -274,13 +276,14 @@ export class LinkedInService {
       refreshToken: tokenRes.refresh_token,
       expiresInSeconds: tokenRes.expires_in,
       refreshTokenExpiresIn: tokenRes.refresh_token_expires_in,
-      scopes: tokenRes.scope ? tokenRes.scope.split(/[\s,]+/).filter(Boolean) : LINKEDIN_MEMBER_SCOPES,
+      scopes: tokenRes.scope ? tokenRes.scope.split(/[\s,]+/).filter(Boolean) : getLinkedInMemberScopes(),
+      followersCount: directFollowers ?? undefined,
       metadata: {
         sub: profile.sub,
         givenName: profile.given_name,
         familyName: profile.family_name,
         email: profile.email,
-        clientId: process.env.LINKEDIN_CLIENT_ID?.trim() || '86mkbep31a3f0n',
+        clientId: process.env.LINKEDIN_CLIENT_ID?.trim() || '78ocx3kz1moo0s',
         connectedAt: new Date().toISOString(),
       },
     });
@@ -368,6 +371,21 @@ export class LinkedInService {
           } catch {
             // Keep existing DB connection if upstream check fails
           }
+        }
+      }
+
+      if (memberConn && memberConn.followersCount == null && memberConn.accessToken) {
+        try {
+          const directCount = await this.adapter.fetchMemberFollowersCount(memberConn.accessToken);
+          if (typeof directCount === 'number') {
+            memberConn.followersCount = directCount;
+            socialPrisma.socialAccountConnection.update({
+              where: { id: memberConn.id },
+              data: { followersCount: directCount },
+            }).catch(() => {});
+          }
+        } catch {
+          // ignore
         }
       }
 

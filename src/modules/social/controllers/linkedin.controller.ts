@@ -6,6 +6,7 @@ import {
   isLinkedInPublishingEnabled,
   LINKEDIN_MEMBER_SCOPES,
   LINKEDIN_PAGE_SCOPES,
+  getLinkedInMemberScopes,
   getLinkedInPageScopes,
 } from '../config/linkedin.config';
 
@@ -34,7 +35,7 @@ export class LinkedInController {
       } else if (Array.isArray(rawScopes)) {
         parsedScopes = rawScopes.map((s) => String(s).trim()).filter(Boolean);
       } else {
-        parsedScopes = target === 'member' ? LINKEDIN_MEMBER_SCOPES : getLinkedInPageScopes();
+        parsedScopes = target === 'member' ? getLinkedInMemberScopes() : getLinkedInPageScopes();
       }
 
       const result = this.service.getAuthUrl(redirectUri, state, parsedScopes, target, returnTo);
