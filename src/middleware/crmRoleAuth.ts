@@ -127,7 +127,10 @@ export function crmUserFromSupabase(user: VerifiedSupabaseUser): AuthenticatedCr
  */
 export async function requireCrmAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const url = req.originalUrl || req.path || '';
-  const isStrictAuthRoute = url.includes('/reports/export') || url.includes('/notifications');
+  const isStrictAuthRoute =
+    url.includes('/reports/export') ||
+    url.includes('/notifications') ||
+    url.includes('/ai-referrals');
   if (
     process.env.NODE_ENV === 'test' &&
     !req.headers.authorization &&

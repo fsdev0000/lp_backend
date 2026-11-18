@@ -1039,6 +1039,82 @@ const swaggerOptions = {
         },
       },
 
+      '/analytics/ai-referrals': {
+        get: {
+          summary: 'Dedicated AI Referral Analytics',
+          description: 'Retrieves session-level AI referral traffic using GA4 Data API runReport. Dimensions: sessionSource, sessionMedium, landingPage. Metrics: activeUsers, sessions, engagedSessions. Filtered server-side with regex matching ChatGPT, Gemini, Perplexity, Claude, Copilot, DeepSeek, Mistral, and other AI engines, plus AI-related mediums.',
+          tags: ['Analytics & Performance'],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            {
+              name: 'domain',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['leadersperformance.ae', 'lioneleersteling.com'], default: 'leadersperformance.ae' },
+              description: 'Target website domain (e.g. leadersperformance.ae or lioneleersteling.com)',
+            },
+            {
+              name: 'range',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['7d', '30d', '90d', 'all'], default: '30d' },
+              description: 'Date range filter in Dubai time (Asia/Dubai). Defaults to 30d.',
+            },
+            {
+              name: 'startDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', example: '2026-10-01' },
+              description: 'Custom start date (YYYY-MM-DD)',
+            },
+            {
+              name: 'endDate',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', example: '2026-10-31' },
+              description: 'Custom end date (YYYY-MM-DD)',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Session-level AI referral traffic report',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      status: { type: 'string', example: 'healthy' },
+                      domain: { type: 'string', example: 'leadersperformance.ae' },
+                      rows: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            source: { type: 'string', example: 'chatgpt.com' },
+                            medium: { type: 'string', example: 'referral' },
+                            landingPage: { type: 'string', example: '/meetlionel' },
+                            users: { type: 'number', example: 3 },
+                            sessions: { type: 'number', example: 4 },
+                            engagedSessions: { type: 'number', example: 2 },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Unauthorized - Valid CRM session token is required',
+            },
+            502: {
+              description: 'Upstream GA4 API error or unconfigured',
+            },
+          },
+        },
+      },
+
       '/analytics/social/youtube': {
         get: {
           summary: 'Live YouTube Channel & Video Analytics (YouTube card)',

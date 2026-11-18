@@ -69,6 +69,12 @@ analyticsRoutes.post('/integrations/ping/:id', controller.pingIntegration);
 analyticsRoutes.get('/reports-snapshot', controller.getReportsSnapshot);
 
 /**
+ * @route GET /api/v1/analytics/ai-referrals
+ * @desc Get AI referral analytics (ChatGPT, Gemini, Perplexity, Claude, Copilot, etc.)
+ */
+analyticsRoutes.get('/ai-referrals', controller.getAiReferrals);
+
+/**
  * @route GET /api/v1/analytics/clarity/sessions
  * @desc Get Clarity recorded sessions with direct playback URLs, dwell times, and lead attribution for frontend embed
  */

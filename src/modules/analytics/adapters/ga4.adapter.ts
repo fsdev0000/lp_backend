@@ -13,6 +13,8 @@ import {
   YouTubeWebsiteVisitors,
   LinkedInWebsiteVisitors,
   InstagramWebsiteVisitors,
+  AiReferralRow,
+  AiReferralsResponse,
 } from './interfaces';
 import { validateAnalyticsCredentials } from './credentialValidator';
 import { LiveErrorBoundary } from './liveErrorBoundary';
@@ -1073,6 +1075,155 @@ export class Ga4Adapter implements IGa4Adapter {
         reportingPeriod: {
           startDate: resolvedStart,
           endDate: resolvedEnd,
+        },
+      };
+    }
+  }
+
+  /**
+   * Task 1: Dedicated AI Referral Analytics API
+   * Queries GA4 runReport with sessionSource, sessionMedium, landingPage,
+   * activeUsers, sessions, engagedSessions filtered for AI assistants.
+   */
+  public async getAiReferrals(
+    range = '30d',
+    domain?: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<AiReferralsResponse> {
+    const target = this.resolveGa4Target(domain);
+    let resolvedStart = startDate;
+    let resolvedEnd = endDate;
+
+    if (!resolvedStart || !resolvedEnd || resolvedStart.includes('Ago') || resolvedEnd === 'today') {
+      const win = resolveWindow(
+        range || '30d',
+        1,
+        startDate && !startDate.includes('Ago') ? startDate : undefined,
+        endDate && endDate !== 'today' ? endDate : undefined
+      );
+      resolvedStart = win.startDate;
+      resolvedEnd = win.endDate;
+    }
+
+    if (!this.client || !target.propertyId) {
+      const status = target.isUnsupported ? 'unsupported_domain' : 'not_configured';
+      return {
+        status,
+        domain: target.domain,
+        rows: [],
+        reportingPeriod: {
+          startDate: resolvedStart || '',
+          endDate: resolvedEnd || '',
+        },
+      };
+    }
+
+    const aiRegex =
+      'chatgpt\\.com|chat\\.openai\\.com|gemini\\.google\\.com|bard\\.google\\.com|perplexity\\.ai|claude\\.ai|copilot\\.microsoft\\.com|copilot\\.cloud\\.microsoft|edgeservices\\.bing\\.com|deepseek\\.com|meta\\.ai|grok\\.com|x\\.ai|chat\\.mistral\\.ai|you\\.com|poe\\.com|phind\\.com';
+
+    const aiExpression = {
+      orGroup: {
+        expressions: [
+          {
+            filter: {
+              fieldName: 'sessionSource',
+              stringFilter: {
+                matchType: 'PARTIAL_REGEXP' as const,
+                value: aiRegex,
+                caseSensitive: false,
+              },
+            },
+          },
+          {
+            filter: {
+              fieldName: 'sessionMedium',
+              inListFilter: {
+                values: ['ai', 'ai-assistant', 'ai_assistant', 'llm'],
+                caseSensitive: false,
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    const hostFilter = target.hostNameFilter ? this.buildHostNameFilter(target.domain) : null;
+    const dimensionFilter = hostFilter
+      ? {
+          andGroup: {
+            expressions: [hostFilter, aiExpression],
+          },
+        }
+      : aiExpression;
+
+    try {
+      const [res] = await this.executeWithBackoff(async () => {
+        return this.client!.runReport(
+          {
+            property: `properties/${target.propertyId}`,
+            dateRanges: [{ startDate: resolvedStart, endDate: resolvedEnd }],
+            dimensions: [
+              { name: 'sessionSource' },
+              { name: 'sessionMedium' },
+              { name: 'landingPage' },
+            ],
+            metrics: [
+              { name: 'activeUsers' },
+              { name: 'sessions' },
+              { name: 'engagedSessions' },
+            ],
+            dimensionFilter,
+            orderBys: [
+              {
+                metric: { metricName: 'sessions' },
+                desc: true,
+              },
+            ],
+            limit: 10000,
+          },
+          { timeout: GA4_TIMEOUT_MS }
+        );
+      });
+
+      const rows: AiReferralRow[] = [];
+      for (const r of res.rows || []) {
+        const source = r.dimensionValues?.[0]?.value || '';
+        const medium = r.dimensionValues?.[1]?.value || '';
+        const landingPage = r.dimensionValues?.[2]?.value || '';
+        const users = parseInt(r.metricValues?.[0]?.value || '0', 10);
+        const sessions = parseInt(r.metricValues?.[1]?.value || '0', 10);
+        const engagedSessions = parseInt(r.metricValues?.[2]?.value || '0', 10);
+
+        rows.push({
+          source,
+          medium,
+          landingPage,
+          users: isNaN(users) ? 0 : users,
+          sessions: isNaN(sessions) ? 0 : sessions,
+          engagedSessions: isNaN(engagedSessions) ? 0 : engagedSessions,
+        });
+      }
+
+      return {
+        status: 'healthy',
+        domain: target.domain,
+        rows,
+        reportingPeriod: {
+          startDate: resolvedStart,
+          endDate: resolvedEnd,
+        },
+      };
+    } catch (error: any) {
+      await LiveErrorBoundary.logUpstreamError('GA4', 'getAiReferrals', error);
+      return {
+        status: 'error',
+        error: error?.message || 'GA4 API request failed',
+        domain: target.domain,
+        rows: [],
+        reportingPeriod: {
+          startDate: resolvedStart || '',
+          endDate: resolvedEnd || '',
         },
       };
     }

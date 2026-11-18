@@ -131,6 +131,32 @@ export class AnalyticsController {
     }
   };
 
+  public getAiReferrals = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const range = (req.query.range as string) || '30d';
+      const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
+      const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
+
+      const data = await this.service.getAiReferrals(range, domain, startDate, endDate);
+      res.status(200).json({
+        success: data.status === 'healthy',
+        status: data.status,
+        rows: data.rows,
+        data,
+        domain: data.domain || domain,
+      });
+    } catch (error: any) {
+      console.error('[AnalyticsController] getAiReferrals failed:', error);
+      res.status(502).json({
+        success: false,
+        status: 'error',
+        rows: [],
+        error: error?.message || 'Failed to retrieve AI referral analytics',
+      });
+    }
+  };
+
   public getClaritySessions = async (req: Request, res: Response): Promise<void> => {
     try {
       const website = ((req.query.domain as string) || (req.query.website as string) || 'leaders_performance') as string;

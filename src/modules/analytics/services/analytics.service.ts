@@ -463,6 +463,10 @@ export class AnalyticsService {
     return this.ga4.getReportsSnapshot(startDate, endDate, limit, domain, range);
   }
 
+  public async getAiReferrals(range = '30d', domain?: string, startDate?: string, endDate?: string) {
+    return this.ga4.getAiReferrals(range, domain, startDate, endDate);
+  }
+
   public async getClaritySessions(limit = 20, websiteKey = 'leaders_performance') {
     return this.clarity.getSessions(limit, websiteKey);
   }

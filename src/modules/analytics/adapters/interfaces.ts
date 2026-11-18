@@ -143,12 +143,33 @@ export interface ReportsSnapshotData {
   };
 }
 
+export interface AiReferralRow {
+  source: string;
+  medium: string;
+  landingPage: string;
+  users: number;
+  sessions: number;
+  engagedSessions: number;
+}
+
+export interface AiReferralsResponse {
+  status: 'healthy' | 'not_configured' | 'unsupported_domain' | 'error' | string;
+  rows: AiReferralRow[];
+  error?: string;
+  domain?: string;
+  reportingPeriod?: {
+    startDate: string;
+    endDate: string;
+  };
+}
+
 export interface IGa4Adapter {
   getRealtimeActiveUsers(domain?: string): Promise<{ activeUsers: number | null; byCountry: Record<string, number>; domain?: string; isConfigured?: boolean; status?: string; error?: string }>;
   getTotalActiveUsers(startDate: string, endDate: string, domain?: string): Promise<number | null>;
   getTrafficReport(startDate: string, endDate: string, domain?: string): Promise<TrafficMetricRow[]>;
   getCampaignYield(dateRange: string, domain?: string): Promise<CampaignYieldRow[]>;
   getReportsSnapshot(startDate?: string, endDate?: string, limit?: number, domain?: string, range?: string): Promise<ReportsSnapshotData>;
+  getAiReferrals(range?: string, domain?: string, startDate?: string, endDate?: string): Promise<AiReferralsResponse>;
   getYouTubeWebsiteVisitors(range?: string): Promise<YouTubeWebsiteVisitors>;
   getLinkedInWebsiteVisitors(range?: string): Promise<LinkedInWebsiteVisitors>;
   getInstagramWebsiteVisitors(range?: string): Promise<InstagramWebsiteVisitors>;
