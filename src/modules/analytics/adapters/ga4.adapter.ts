@@ -26,7 +26,7 @@ import {
   formatDubaiDateString,
   getDubaiTodayString,
 } from '../utils/dateRange';
-import { inquiryVisitWhere, isLeDomain, scanWhere, siteVisitWhere, TEST_LEAD_EMAILS } from '../utils/inquiries';
+import { inquiryVisitWhere, isLeDomain, isTestLeadEmail, scanWhere, siteVisitWhere, TEST_LEAD_EMAILS } from '../utils/inquiries';
 
 import path from 'path';
 import fs from 'fs';
@@ -825,7 +825,8 @@ export class Ga4Adapter implements IGa4Adapter {
       }
     }
 
-    // 3. Merge real UTM campaign visits & inquiries from application database (including today)
+    // 3. Merge real UTM campaign inquiries from application database (including today)
+    // Item 2.1: Visits are taken strictly from GA4 sessions. AttributionVisit is used only for inquiries (rows with an email).
     try {
       const start = dubaiDateToStartOfDayUtc(win.startDate);
       const end = dubaiDateToEndOfDayUtc(getDubaiTodayString());
@@ -834,6 +835,16 @@ export class Ga4Adapter implements IGa4Adapter {
         where: {
           AND: [
             { utmCampaign: { not: null } },
+            { email: { not: null, notIn: TEST_LEAD_EMAILS } },
+            {
+              NOT: [
+                { email: { endsWith: '@example.com' } },
+                { email: { endsWith: '@test.com' } },
+                { email: { endsWith: '@enterprise.ae' } },
+                { email: { contains: 'alexander.vance' } },
+                { leadName: { contains: 'Alexander Vance', mode: 'insensitive' } },
+              ],
+            },
             { createdAt: { gte: start, lte: end } },
             siteVisitWhere(target.domain),
           ],
@@ -844,8 +855,6 @@ export class Ga4Adapter implements IGa4Adapter {
           email: true,
         },
       });
-
-      const testEmailSet = new Set(TEST_LEAD_EMAILS.map((e) => e.toLowerCase()));
 
       for (const v of visits) {
         const campaign = (v.utmCampaign || '').trim();
@@ -862,9 +871,8 @@ export class Ga4Adapter implements IGa4Adapter {
           dbEmails: new Set<string>(),
         };
 
-        existing.dbClicks += 1;
         const email = v.email?.trim().toLowerCase();
-        if (email && !testEmailSet.has(email)) {
+        if (email && !isTestLeadEmail(email)) {
           existing.dbEmails.add(email);
         }
         campaignMap.set(key, existing);
@@ -880,7 +888,8 @@ export class Ga4Adapter implements IGa4Adapter {
     return Array.from(campaignMap.values())
       .map((c) => {
         const leads = Math.max(c.ga4Leads, c.dbEmails.size);
-        const clicks = Math.max(c.clicks, c.dbClicks, leads);
+        // Visits come strictly from GA4 sessions (or verified inquiries when GA4 has attribution delay)
+        const clicks = Math.max(c.clicks, leads);
         const convRate = clicks > 0 ? `${((leads / clicks) * 100).toFixed(1)}%` : '0.0%';
         return {
           campaign: c.campaign,
@@ -891,6 +900,7 @@ export class Ga4Adapter implements IGa4Adapter {
           convRate,
         };
       })
+      .filter((c) => c.clicks > 0 || c.leads > 0)
       .sort((a, b) => b.clicks - a.clicks || b.leads - a.leads);
   }
 

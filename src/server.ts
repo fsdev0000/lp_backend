@@ -81,6 +81,8 @@ const corsOptions: cors.CorsOptions = {
     'x-published',
     'X-Internal-Key',
     'x-internal-key',
+    'X-LE-Sync-Secret',
+    'x-le-sync-secret',
   ],
   credentials: true,
 };

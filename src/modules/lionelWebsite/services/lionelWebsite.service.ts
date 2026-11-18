@@ -264,6 +264,18 @@ export class LionelWebsiteService {
       throw err;
     }
 
+    const isInternal = Boolean(
+      (req as any)?.isInternal ||
+      (req as any)?.user ||
+      process.env.NODE_ENV === 'test'
+    );
+
+    // Item 1.3: The server decides about GHL and email (ignore client flags from public unauthenticated requests)
+    if (!isInternal) {
+      inquiry.skipGhlUpsert = true;
+      inquiry.skipEmailNotification = true;
+    }
+
     let ghlContactId = inquiry.ghlContactId;
     if (!inquiry.skipGhlUpsert && process.env.NODE_ENV !== 'test') {
       try {

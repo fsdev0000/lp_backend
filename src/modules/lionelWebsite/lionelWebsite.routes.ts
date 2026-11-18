@@ -37,7 +37,7 @@ function allowLionelWebsiteCors(req: Request, res: Response, next: NextFunction)
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Api-Key, X-Client-Info, Apikey, X-LE-Sync-Secret, X-Internal-Key'
+    'Content-Type, Authorization, X-Api-Key, X-Client-Info, Apikey, X-LE-Sync-Secret, X-Internal-Key, x-le-sync-secret, x-internal-key, x-api-key'
   );
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -62,6 +62,7 @@ function protectPublicContactSubmission(req: Request, res: Response, next: NextF
     req.headers['x-api-key'];
 
   if (sharedSecret && providedSecret && String(providedSecret).trim() === sharedSecret) {
+    (req as any).isInternal = true;
     next();
     return;
   }

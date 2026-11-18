@@ -169,6 +169,43 @@ export function extractClientLocation(req: Request): {
   return { country, city, region };
 }
 
+export function isBotUserAgent(ua?: string): boolean {
+  if (!ua) return false;
+  const lower = ua.toLowerCase();
+  const botSignatures = [
+    'bot',
+    'crawl',
+    'spider',
+    'slurp',
+    'facebookexternalhit',
+    'google-safety',
+    'google-read-aloud',
+    'mediapartners-google',
+    'adsbot-google',
+    'appengine-google',
+    'feedfetcher',
+    'curl',
+    'wget',
+    'python-requests',
+    'go-http-client',
+    'postmanruntime',
+    'headlesschrome',
+    'preview',
+    'link-checker',
+    'linkcheck',
+    'bytespider',
+    'yandex',
+    'bingbot',
+    'twitterbot',
+    'linkedinbot',
+    'whatsapp',
+    'telegrambot',
+    'discordbot',
+    'slackbot',
+  ];
+  return botSignatures.some((sig) => lower.includes(sig));
+}
+
 /**
  * Capture an incoming visit from external sources (UTMs, Referrer, Landing Page, IP, Geo).
  */
@@ -182,6 +219,11 @@ export async function recordVisitorAttribution(
   const ipAddress = extractClientIp(req);
   const location = extractClientLocation(req);
   const userAgent = (req.headers['user-agent'] as string) || undefined;
+
+  // Item 2.1: Skip recording visits from automated link-checker bots, scanners, and crawlers
+  if (isBotUserAgent(userAgent)) {
+    return id;
+  }
 
   const anonymousId = payload.anonymousId || undefined;
   const landingPage = payload.landingPage || req.originalUrl || '/';
