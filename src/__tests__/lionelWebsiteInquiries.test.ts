@@ -82,6 +82,7 @@ describe('Lionel Eersteling Website Inquiries & Per-Campaign Inquiries (Tasks 1 
         landing_page: 'https://lioneleersteling.com/contact?utm_campaign=le_advisory_q4&utm_source=linkedin',
         skipGhlUpsert: true,
         skipEmailNotification: true,
+        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       });
 
     expect(postRes.status).toBe(200);

@@ -1214,6 +1214,7 @@ export class Ga4Adapter implements IGa4Adapter {
         status,
         domain: target.domain,
         rows: [],
+        totals: { users: 0, sessions: 0, engagedSessions: 0 },
         reportingPeriod: {
           startDate: resolvedStart || '',
           endDate: resolvedEnd || '',
@@ -1221,8 +1222,9 @@ export class Ga4Adapter implements IGa4Adapter {
       };
     }
 
+    // Anchored regex: ensures you.com, x.ai, meta.ai do not match unintended subwords like foryou.com
     const aiRegex =
-      'chatgpt\\.com|chat\\.openai\\.com|gemini\\.google\\.com|bard\\.google\\.com|perplexity\\.ai|claude\\.ai|copilot\\.microsoft\\.com|copilot\\.cloud\\.microsoft|edgeservices\\.bing\\.com|deepseek\\.com|meta\\.ai|grok\\.com|x\\.ai|chat\\.mistral\\.ai|you\\.com|poe\\.com|phind\\.com';
+      '(^|.*\\.)(chatgpt\\.com|chat\\.openai\\.com|gemini\\.google\\.com|bard\\.google\\.com|perplexity\\.ai|claude\\.ai|copilot\\.microsoft\\.com|copilot\\.cloud\\.microsoft|edgeservices\\.bing\\.com|deepseek\\.com|meta\\.ai|grok\\.com|x\\.ai|chat\\.mistral\\.ai|you\\.com|poe\\.com|phind\\.com)($|[\\/:].*)';
 
     const aiExpression = {
       orGroup: {
@@ -1231,7 +1233,7 @@ export class Ga4Adapter implements IGa4Adapter {
             filter: {
               fieldName: 'sessionSource',
               stringFilter: {
-                matchType: 'PARTIAL_REGEXP' as const,
+                matchType: 'FULL_REGEXP' as const,
                 value: aiRegex,
                 caseSensitive: false,
               },
@@ -1260,7 +1262,7 @@ export class Ga4Adapter implements IGa4Adapter {
       : aiExpression;
 
     try {
-      const [res] = await this.executeWithBackoff(async () => {
+      const reportResponse = await this.executeWithBackoff(async () => {
         return this.client!.runReport(
           {
             property: `properties/${target.propertyId}`,
@@ -1276,6 +1278,7 @@ export class Ga4Adapter implements IGa4Adapter {
               { name: 'engagedSessions' },
             ],
             dimensionFilter,
+            metricAggregations: ['TOTAL' as any],
             orderBys: [
               {
                 metric: { metricName: 'sessions' },
@@ -1287,6 +1290,8 @@ export class Ga4Adapter implements IGa4Adapter {
           { timeout: GA4_TIMEOUT_MS }
         );
       });
+
+      const res = Array.isArray(reportResponse) ? reportResponse[0] : (reportResponse as any);
 
       const rows: AiReferralRow[] = [];
       for (const r of res.rows || []) {
@@ -1307,10 +1312,23 @@ export class Ga4Adapter implements IGa4Adapter {
         });
       }
 
+      const totalUsers = parseInt(res.totals?.[0]?.metricValues?.[0]?.value || '0', 10);
+      const totalSessions = parseInt(res.totals?.[0]?.metricValues?.[1]?.value || '0', 10);
+      const totalEngagedSessions = parseInt(res.totals?.[0]?.metricValues?.[2]?.value || '0', 10);
+
+      const totals = {
+        users: isNaN(totalUsers) ? (rows.length === 0 ? 0 : rows.reduce((acc, r) => acc + r.users, 0)) : totalUsers,
+        sessions: isNaN(totalSessions) ? rows.reduce((acc, r) => acc + r.sessions, 0) : totalSessions,
+        engagedSessions: isNaN(totalEngagedSessions)
+          ? rows.reduce((acc, r) => acc + r.engagedSessions, 0)
+          : totalEngagedSessions,
+      };
+
       return {
         status: 'healthy',
         domain: target.domain,
         rows,
+        totals,
         reportingPeriod: {
           startDate: resolvedStart,
           endDate: resolvedEnd,
@@ -1323,6 +1341,7 @@ export class Ga4Adapter implements IGa4Adapter {
         error: error?.message || 'GA4 API request failed',
         domain: target.domain,
         rows: [],
+        totals: { users: 0, sessions: 0, engagedSessions: 0 },
         reportingPeriod: {
           startDate: resolvedStart || '',
           endDate: resolvedEnd || '',

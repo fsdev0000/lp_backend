@@ -99,6 +99,15 @@ describe('Task 1: Dedicated AI Referral Analytics API', () => {
               ],
             },
           ],
+          totals: [
+            {
+              metricValues: [
+                { value: '11' },
+                { value: '18' },
+                { value: '11' },
+              ],
+            },
+          ],
         },
       ]);
 
@@ -160,6 +169,13 @@ describe('Task 1: Dedicated AI Referral Analytics API', () => {
         engagedSessions: 3,
       });
 
+      // Verify totals
+      expect(result.totals).toEqual({
+        users: 11,
+        sessions: 18,
+        engagedSessions: 11,
+      });
+
       // Verify runReport was called with correct structure
       expect(mockRunReport).toHaveBeenCalledTimes(1);
       const callArgs = mockRunReport.mock.calls[0][0];
@@ -173,6 +189,7 @@ describe('Task 1: Dedicated AI Referral Analytics API', () => {
         { name: 'sessions' },
         { name: 'engagedSessions' },
       ]);
+      expect(callArgs.metricAggregations).toEqual(['TOTAL']);
       expect(callArgs.dimensionFilter).toBeDefined();
       expect(callArgs.dimensionFilter.andGroup).toBeDefined();
     });

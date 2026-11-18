@@ -139,19 +139,34 @@ export class AnalyticsController {
       const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
 
       const data = await this.service.getAiReferrals(range, domain, startDate, endDate);
+
+      if (data.status === 'error') {
+        res.status(503).json({
+          success: false,
+          status: 'error',
+          error: data.error || 'GA4 service temporarily unavailable',
+          rows: [],
+          totals: data.totals || { users: 0, sessions: 0, engagedSessions: 0 },
+          domain: data.domain || domain,
+        });
+        return;
+      }
+
       res.status(200).json({
-        success: data.status === 'healthy',
+        success: true,
         status: data.status,
         rows: data.rows,
+        totals: data.totals,
         data,
         domain: data.domain || domain,
       });
     } catch (error: any) {
       console.error('[AnalyticsController] getAiReferrals failed:', error);
-      res.status(502).json({
+      res.status(503).json({
         success: false,
         status: 'error',
         rows: [],
+        totals: { users: 0, sessions: 0, engagedSessions: 0 },
         error: error?.message || 'Failed to retrieve AI referral analytics',
       });
     }

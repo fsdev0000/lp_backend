@@ -36,6 +36,8 @@ export interface LionelContactInquiryInput {
   ghlContactId?: string;
   skipGhlUpsert?: boolean;
   skipEmailNotification?: boolean;
+  skipInboxNotification?: boolean;
+  isSync?: boolean;
   attribution?: {
     utm_source?: string;
     utm_medium?: string;
@@ -57,7 +59,7 @@ export interface NormalizedLionelInquiry {
   role: string | null;
   preferredContactMethod: string;
   howDidYouHear: string | null;
-  message: string;
+  message: string | null;
   createdAt: Date;
   utmSource: string | null;
   utmMedium: string | null;
@@ -70,6 +72,8 @@ export interface NormalizedLionelInquiry {
   honeypot: string;
   skipGhlUpsert: boolean;
   skipEmailNotification: boolean;
+  skipInboxNotification: boolean;
+  isSync: boolean;
 }
 
 export interface StoredLionelInquiry {
@@ -81,7 +85,7 @@ export interface StoredLionelInquiry {
   phone: string | null;
   company: string | null;
   role: string | null;
-  message: string;
+  message: string | null;
   preferredContactMethod: string;
   howDidYouHear: string | null;
   source: string;
@@ -91,6 +95,16 @@ export interface StoredLionelInquiry {
   utmCampaign: string | null;
   landingPage: string;
   timestamp: string;
+}
+
+function escapeHtml(str?: string | null): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 const INTERNAL_OR_QA_EMAILS = new Set([
@@ -129,7 +143,7 @@ export class LionelWebsiteService {
       (body.preferred_contact_method || body.preferredContactMethod || 'Email').trim();
     const howDidYouHear =
       (body.how_did_you_hear || body.howDidYouHear || '').trim() || null;
-    const message = (body.message || body.context || '').trim();
+    const message = (body.message || body.context || '').trim() || null;
 
     const attr = body.attribution || {};
     const utmSource =
@@ -176,6 +190,8 @@ export class LionelWebsiteService {
       honeypot: (body.honeypot || '').trim(),
       skipGhlUpsert: Boolean(body.skipGhlUpsert),
       skipEmailNotification: Boolean(body.skipEmailNotification),
+      skipInboxNotification: Boolean(body.skipInboxNotification),
+      isSync: Boolean(body.isSync),
     };
   }
 
@@ -187,11 +203,13 @@ export class LionelWebsiteService {
     if (!inquiry.email || inquiry.email.length > 254 || !emailRegex.test(inquiry.email)) {
       return 'Please provide a valid email address.';
     }
-    if (!inquiry.message || inquiry.message.length < 2) {
-      return 'Please provide a message.';
-    }
-    if (inquiry.message.length > 2000) {
-      return 'Message cannot exceed 2,000 characters.';
+    if (!inquiry.isSync) {
+      if (!inquiry.message || inquiry.message.length < 2) {
+        return 'Please provide a message.';
+      }
+      if (inquiry.message.length > 2000) {
+        return 'Message cannot exceed 2,000 characters.';
+      }
     }
     return null;
   }
@@ -348,30 +366,34 @@ export class LionelWebsiteService {
         where: { key: `le_website_inquiry_${visit.id}` },
         update: {
           value: JSON.stringify(storedRecord),
+          updatedAt: new Date(),
         },
         create: {
           key: `le_website_inquiry_${visit.id}`,
           value: JSON.stringify(storedRecord),
+          updatedAt: new Date(),
         },
       });
-    } catch {
-      // Non-blocking metadata storage
+    } catch (err: any) {
+      console.error('[LionelWebsiteService] systemConfig storage error:', err?.message || err);
     }
 
-    // Notify Social CRM Inbox under the lionel_eersteling workspace
-    inboxService
-      .notify({
-        category: 'LEAD',
-        type: 'CONTACT_FORM_SUBMITTED',
-        title: 'New Lionel Eersteling Website Inquiry',
-        message: `${inquiry.fullName} (${inquiry.company || inquiry.email}) sent a contact message on lioneleersteling.com`,
-        link: '/analytics',
-        workspace: 'lionel_eersteling',
-        entityId: visit.id,
-        dedupeKey: `LE_CONTACT_INQUIRY:${visit.id}`,
-        roles: ['Approver', 'Advisor'],
-      })
-      .catch(() => {});
+    // Notify Social CRM Inbox under the lionel_eersteling workspace only for live user submissions (not background syncs)
+    if (!inquiry.skipInboxNotification) {
+      inboxService
+        .notify({
+          category: 'LEAD',
+          type: 'CONTACT_FORM_SUBMITTED',
+          title: 'New Lionel Eersteling Website Inquiry',
+          message: `${inquiry.fullName} (${inquiry.company || inquiry.email}) sent a contact message on lioneleersteling.com`,
+          link: '/analytics',
+          workspace: 'lionel_eersteling',
+          entityId: visit.id,
+          dedupeKey: `LE_CONTACT_INQUIRY:${visit.id}`,
+          roles: ['Approver', 'Advisor'],
+        })
+        .catch(() => {});
+    }
 
     return {
       success: true,
@@ -384,8 +406,14 @@ export class LionelWebsiteService {
   /**
    * Links lp_backend with the lioneleersteling.com Supabase project DB and dedicated GHL location
    * to pull any contact inquiries that were submitted directly through the Vercel deployment.
+   * Runs strictly on manual/scheduled POST /api/v1/le/sync, never on GET reads.
    */
   public async syncExternalInquiries(force = false): Promise<{ synced: number }> {
+    const cfg = getLionelWebsiteConfig();
+    if (!cfg.isConfigured) {
+      return { synced: 0 };
+    }
+
     const now = Date.now();
     if (!force && now - LionelWebsiteService.lastExternalSyncAt < LionelWebsiteService.SYNC_TTL_MS) {
       return { synced: 0 };
@@ -396,53 +424,72 @@ export class LionelWebsiteService {
       return { synced: 0 };
     }
 
-    const cfg = getLionelWebsiteConfig();
     let synced = 0;
 
-    // 1. Check lioneleersteling.com Supabase project (efhkllmdcduqerevtsbk) for any public contact/inquiry rows
-    try {
-      const tables = ['contact_submissions', 'inquiries', 'contacts'];
-      for (const table of tables) {
-        const res = await fetch(`${cfg.supabaseUrl}/rest/v1/${table}?select=*&limit=50`, {
-          headers: {
-            apikey: cfg.supabaseAnonKey,
-            Authorization: `Bearer ${cfg.supabaseAnonKey}`,
-          },
-        });
-        if (res.ok) {
-          const rows = (await res.json()) as any[];
-          for (const row of rows || []) {
-            const email = String(row.email || '').trim().toLowerCase();
-            if (!email || INTERNAL_OR_QA_EMAILS.has(email) || email.endsWith('@example.com')) continue;
-            await this.submitContactInquiry({
-              first_name: row.first_name || row.firstName,
-              last_name: row.last_name || row.lastName,
-              name: row.name || row.full_name,
-              email,
-              phone: row.phone,
-              company: row.company,
-              role: row.role,
-              message: row.message || row.context || 'Strategic conversation inquiry',
-              how_did_you_hear: row.how_did_you_hear,
-              preferred_contact_method: row.preferred_contact_method,
-              utm_source: row.utm_source,
-              utm_medium: row.utm_medium,
-              utm_campaign: row.utm_campaign,
-              createdAt: row.created_at || row.createdAt,
-              skipGhlUpsert: true,
-              skipEmailNotification: true,
-            });
-            synced++;
+    // 1. Check lioneleersteling.com Supabase project for contact/inquiry rows
+    if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+      try {
+        const tables = ['contact_submissions', 'inquiries', 'contacts'];
+        for (const table of tables) {
+          const res = await fetch(`${cfg.supabaseUrl}/rest/v1/${table}?select=*&limit=50`, {
+            headers: {
+              apikey: cfg.supabaseAnonKey,
+              Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+            },
+          });
+          if (res.ok) {
+            const rows = (await res.json()) as any[];
+            for (const row of rows || []) {
+              const email = String(row.email || '').trim().toLowerCase();
+              if (!email || INTERNAL_OR_QA_EMAILS.has(email) || email.endsWith('@example.com')) continue;
+
+              const externalId = `sb_${table}_${row.id || email}`;
+              const existing = await prisma.attributionVisit.findFirst({
+                where: {
+                  OR: [
+                    { ghlContactId: externalId },
+                    {
+                      email,
+                      leadForm: 'le_contact_form',
+                    },
+                  ],
+                },
+              });
+              if (existing) continue;
+
+              await this.submitContactInquiry({
+                first_name: row.first_name || row.firstName,
+                last_name: row.last_name || row.lastName,
+                name: row.name || row.full_name,
+                email,
+                phone: row.phone,
+                company: row.company,
+                role: row.role,
+                message: (row.message || row.context || '').trim() || undefined,
+                how_did_you_hear: row.how_did_you_hear,
+                preferred_contact_method: row.preferred_contact_method,
+                utm_source: row.utm_source,
+                utm_medium: row.utm_medium,
+                utm_campaign: row.utm_campaign,
+                createdAt: row.created_at || row.createdAt || undefined,
+                ghlContactId: externalId,
+                isSync: true,
+                skipGhlUpsert: true,
+                skipEmailNotification: true,
+                skipInboxNotification: true,
+              });
+              synced++;
+            }
           }
         }
+      } catch {
+        // Non-blocking if table is not exposed via PostgREST
       }
-    } catch {
-      // Non-blocking if table is not exposed via PostgREST
     }
 
     // 2. Sync from Lionel Eersteling's dedicated GHL location (where Supabase Edge Function `contact-us` writes)
-    try {
-      if (cfg.ghlApiKey && cfg.ghlLocationId) {
+    if (cfg.ghlApiKey && cfg.ghlLocationId) {
+      try {
         const res = await fetch(
           `${cfg.ghlBaseUrl}/contacts/?locationId=${encodeURIComponent(cfg.ghlLocationId)}&limit=50`,
           {
@@ -479,35 +526,43 @@ export class LionelWebsiteService {
 
             const existing = await prisma.attributionVisit.findFirst({
               where: {
-                email,
                 OR: [
                   { ghlContactId: c.id },
-                  { leadForm: 'le_contact_form' },
+                  {
+                    email,
+                    leadForm: 'le_contact_form',
+                  },
                 ],
               },
             });
 
-            if (!existing) {
-              await this.submitContactInquiry({
-                first_name: c.firstName || '',
-                last_name: c.lastName || '',
-                name: c.contactName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-                email,
-                phone: c.phone || undefined,
-                company: companyName || undefined,
-                message: 'Strategic consultation inquiry via lioneleersteling.com',
-                createdAt: c.dateAdded || new Date().toISOString(),
-                ghlContactId: c.id,
-                skipGhlUpsert: true,
-                skipEmailNotification: true,
-              });
-              synced++;
-            }
+            if (existing) continue;
+
+            const customMessage = c.customFields?.find(
+              (f: any) => f.id === 'message' || f.key === 'message'
+            )?.value;
+
+            await this.submitContactInquiry({
+              first_name: c.firstName || '',
+              last_name: c.lastName || '',
+              name: c.contactName || `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+              email,
+              phone: c.phone || undefined,
+              company: companyName || undefined,
+              message: customMessage ? String(customMessage).trim() : undefined,
+              createdAt: c.dateAdded || undefined,
+              ghlContactId: c.id,
+              isSync: true,
+              skipGhlUpsert: true,
+              skipEmailNotification: true,
+              skipInboxNotification: true,
+            });
+            synced++;
           }
         }
+      } catch (err: any) {
+        console.warn('[LionelWebsiteService] External GHL sync notice:', err?.message);
       }
-    } catch (err: any) {
-      console.warn('[LionelWebsiteService] External GHL sync notice:', err?.message);
     }
 
     return { synced };
@@ -515,14 +570,13 @@ export class LionelWebsiteService {
 
   /**
    * Retrieves stored lioneleersteling.com contact form inquiries.
+   * Strictly read-only query — never calls external sync or sends notifications on read.
    */
   public async getInquiries(options: {
     limit?: number;
     startDate?: Date;
     endDate?: Date;
   } = {}): Promise<StoredLionelInquiry[]> {
-    await this.syncExternalInquiries(false);
-
     const limit = options.limit || 50;
     const visits = await prisma.attributionVisit.findMany({
       where: {
@@ -533,8 +587,6 @@ export class LionelWebsiteService {
         OR: [
           { leadForm: 'le_contact_form' },
           { module: 'le_website' },
-          { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-          { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
         ],
       },
       orderBy: { createdAt: 'desc' },
@@ -655,8 +707,14 @@ export class LionelWebsiteService {
       Version: '2021-07-28',
     };
 
-    const subject = `[New Consultation Enquiry] ${inquiry.fullName} (${inquiry.company || 'Individual'})`;
-    const html = `<p>New inquiry on <strong>lioneleersteling.com</strong> from <strong>${inquiry.fullName}</strong> (${inquiry.email}).</p><p>Company: ${inquiry.company || 'N/A'} | Role: ${inquiry.role || 'N/A'}</p><p>Message: ${inquiry.message}</p>`;
+    const safeName = escapeHtml(inquiry.fullName);
+    const safeEmail = escapeHtml(inquiry.email);
+    const safeCompany = escapeHtml(inquiry.company || 'N/A');
+    const safeRole = escapeHtml(inquiry.role || 'N/A');
+    const safeMessage = escapeHtml(inquiry.message || 'No message provided');
+
+    const subject = `[New Consultation Enquiry] ${safeName} (${inquiry.company ? safeCompany : 'Individual'})`;
+    const html = `<p>New inquiry on <strong>lioneleersteling.com</strong> from <strong>${safeName}</strong> (${safeEmail}).</p><p>Company: ${safeCompany} | Role: ${safeRole}</p><p>Message: ${safeMessage}</p>`;
 
     for (const r of recipients) {
       const uRes = await fetch(`${cfg.ghlBaseUrl}/contacts/upsert`, {

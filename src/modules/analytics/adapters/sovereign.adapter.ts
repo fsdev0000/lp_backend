@@ -19,15 +19,11 @@ const prisma = new PrismaClient();
 
 export class SovereignAdapter implements ISovereignAdapter {
   public async getAttributedLeadsCount(startDateOrRange: string, endDate?: string, domain?: string): Promise<number> {
-    if (isLeDomain(domain)) {
-      await lionelWebsiteService.syncExternalInquiries(false).catch(() => {});
-    }
-
     const { startDate, endDate: resolvedEnd } = this.resolveDates(startDateOrRange, endDate);
-    const yesterdayDubai = resolveWindow('7d', 1).endDate;
-    const effectiveEnd = resolvedEnd >= yesterdayDubai ? getDubaiTodayString() : resolvedEnd;
+    // Align leads reporting window with GA4 visitors (ending yesterday / requested end date)
+    const effectiveEnd = resolvedEnd;
 
-    // Item 2.8: Use Asia/Dubai timezone boundaries (including today for the active reporting period)
+    // Item 2.8: Use Asia/Dubai timezone boundaries
     const start = dubaiDateToStartOfDayUtc(startDate);
     const end = dubaiDateToEndOfDayUtc(effectiveEnd);
 
@@ -93,10 +89,6 @@ export class SovereignAdapter implements ISovereignAdapter {
         ? { gte: dubaiDateToStartOfDayUtc(startDate), lte: dubaiDateToEndOfDayUtc(endDate) }
         : undefined;
     const isLe = isLeDomain(domain);
-
-    if (isLe) {
-      await lionelWebsiteService.syncExternalInquiries(false).catch(() => {});
-    }
 
     const [visits, scans] = await Promise.all([
       // Website forms. A scan's own visit (lead_form founder_pressure_scan) is left out: the scan is listed itself.

@@ -155,6 +155,11 @@ export interface AiReferralRow {
 export interface AiReferralsResponse {
   status: 'healthy' | 'not_configured' | 'unsupported_domain' | 'error' | string;
   rows: AiReferralRow[];
+  totals?: {
+    users: number;
+    sessions: number;
+    engagedSessions: number;
+  };
   error?: string;
   domain?: string;
   reportingPeriod?: {

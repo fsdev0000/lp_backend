@@ -29,29 +29,23 @@ export function siteVisitWhere(domain?: string): Record<string, any> {
   if (isLeDomain(domain)) {
     return {
       OR: [
-        { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
-        { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } },
+        { leadForm: 'le_contact_form' },
+        { module: 'le_website' },
+        {
+          AND: [
+            { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } },
+            { NOT: { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } } },
+          ],
+        },
       ],
     };
   }
   return {
-    AND: [
-      {
-        OR: [
-          { landingPage: { startsWith: '/' } },
-          { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
-          { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
-        ],
-      },
-      { NOT: { landingPage: { contains: 'lioneleersteling', mode: 'insensitive' } } },
-      // Most visits have no referrer. In SQL, NOT (NULL LIKE …) is NULL, which dropped every such visit (and so every
-      // website form) from the count; a missing referrer has to pass explicitly.
-      {
-        OR: [
-          { referrer: null },
-          { NOT: { referrer: { contains: 'lioneleersteling', mode: 'insensitive' } } },
-        ],
-      },
+    OR: [
+      { landingPage: { startsWith: '/' } },
+      { landingPage: { contains: 'leadersperformance', mode: 'insensitive' } },
+      { referrer: { contains: 'leadersperformance', mode: 'insensitive' } },
+      { module: 'leaders_performance' },
     ],
   };
 }
