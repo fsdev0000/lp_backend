@@ -3,6 +3,7 @@ import path from 'path';
 import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
+import { checkCanApprovePostWorkspace } from '../../../middleware/crmRoleAuth';
 
 /** Who made the request, for the activity log: the signed-in CRM user, or the API key when nobody is signed in. */
 function actorOf(req: Request): string {
@@ -195,9 +196,13 @@ export class ContentController {
     try {
       const id = String(req.params.id);
       const user = (req as any).crmUser || (req as any).user;
-      if (user && user.role === 'editor') {
-        res.status(403).json({ success: false, error: 'Editors cannot approve posts. Admin or Approver role required.' });
-        return;
+      const existing = await this.service.getPostById(id);
+      if (user && user.authenticatedVia !== 'api_key') {
+        const check = checkCanApprovePostWorkspace(user, existing.workspace);
+        if (!check.allowed) {
+          res.status(check.statusCode).json({ success: false, code: check.code, error: check.error });
+          return;
+        }
       }
       // Item 27: the approver is whoever is signed in, never a name sent in the request body.
       const approverEmail = user?.email || 'API key';
@@ -218,9 +223,13 @@ export class ContentController {
     try {
       const id = String(req.params.id);
       const user = (req as any).crmUser || (req as any).user;
-      if (user && user.role === 'editor') {
-        res.status(403).json({ success: false, error: 'Editors cannot reject posts. Admin or Approver role required.' });
-        return;
+      const existing = await this.service.getPostById(id);
+      if (user && user.authenticatedVia !== 'api_key') {
+        const check = checkCanApprovePostWorkspace(user, existing.workspace);
+        if (!check.allowed) {
+          res.status(check.statusCode).json({ success: false, code: check.code, error: check.error });
+          return;
+        }
       }
       const { reason } = req.body;
       if (!reason || !reason.trim()) {
@@ -238,10 +247,15 @@ export class ContentController {
 
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
+      const id = String(req.params.id);
       const user = (req as any).crmUser || (req as any).user;
-      if (user && user.role === 'editor') {
-        res.status(403).json({ success: false, error: 'Editors cannot publish posts. Admin or Approver role required.' });
-        return;
+      const existing = await this.service.getPostById(id);
+      if (user && user.authenticatedVia !== 'api_key') {
+        const check = checkCanApprovePostWorkspace(user, existing.workspace);
+        if (!check.allowed) {
+          res.status(check.statusCode).json({ success: false, code: check.code, error: check.error });
+          return;
+        }
       }
       if (!isLinkedInPublishingEnabled()) {
         res.status(403).json({
@@ -251,7 +265,6 @@ export class ContentController {
         return;
       }
 
-      const id = String(req.params.id);
       const actor = user?.name || user?.email;
       const post = await this.service.publishPostNow(id, req.ip, actor);
       res.status(200).json({ success: true, message: 'Live dispatch completed successfully', data: post });

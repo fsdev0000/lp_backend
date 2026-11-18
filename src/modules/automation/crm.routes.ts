@@ -23,64 +23,64 @@ crmAutomationRouter.use(requireCrmAuth);
 crmAutomationRouter.get('/posts', crmPostsController.listPosts);
 crmAutomationRouter.get('/posts/:id', crmPostsController.getPostDetail);
 
-// Editor & Admin actions (edit, replace media, resubmit, manual-done)
+// Draft & Editor actions (edit, replace media, resubmit, manual-done)
 crmAutomationRouter.patch(
   '/posts/:id',
-  requireCrmRoles('editor', 'admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager', 'user'),
   crmPostsController.updatePost
 );
 crmAutomationRouter.post(
   '/posts/:id/media',
-  requireCrmRoles('editor', 'admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager', 'user'),
   upload.single('file'),
   crmPostsController.uploadMedia
 );
 crmAutomationRouter.post(
   '/posts/:id/submit',
-  requireCrmRoles('editor', 'admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager', 'user'),
   crmPostsController.submitPost
 );
 crmAutomationRouter.post(
   '/posts/:id/manual-done',
-  requireCrmRoles('editor', 'admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager', 'user'),
   crmPostsController.manualDone
 );
 
-// Approver (Mr. Lionel) & Admin actions (approve, request changes, reject)
+// Super Admin & Manager actions (approve, request changes, reject — scoped to assigned workspaces for managers)
 crmAutomationRouter.post(
   '/posts/:id/approve',
-  requireCrmRoles('approver', 'admin'),
+  requireCrmRoles('super_admin', 'manager'),
   crmPostsController.approvePost
 );
 crmAutomationRouter.post(
   '/posts/:id/request-changes',
-  requireCrmRoles('approver', 'admin'),
+  requireCrmRoles('super_admin', 'manager'),
   crmPostsController.requestChanges
 );
 crmAutomationRouter.post(
   '/posts/:id/reject',
-  requireCrmRoles('approver', 'admin'),
+  requireCrmRoles('super_admin', 'manager'),
   crmPostsController.rejectPost
 );
 
-// Comment thread (accessible to approver, editor, admin)
+// Comment thread (accessible to all signed-in CRM roles)
 crmAutomationRouter.post(
   '/posts/:id/comments',
-  requireCrmRoles('approver', 'editor', 'admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager', 'user'),
   crmPostsController.addComment
 );
 
-// Admin actions (retry FAILED post)
+// Super Admin & Admin actions (retry FAILED post)
 crmAutomationRouter.post(
   '/posts/:id/retry',
-  requireCrmRoles('admin'),
+  requireCrmRoles('super_admin', 'admin', 'manager'),
   crmPostsController.retryPost
 );
 
-// Approver & Admin action: Publish now (only allowed for APPROVED posts)
+// Super Admin & Manager action: Publish now (only allowed for APPROVED posts in assigned workspace)
 crmAutomationRouter.post(
   '/posts/:id/publish-now',
-  requireCrmRoles('approver', 'admin'),
+  requireCrmRoles('super_admin', 'manager'),
   crmPostsController.publishNow
 );
 

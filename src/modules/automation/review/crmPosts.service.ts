@@ -22,7 +22,11 @@ import {
   extractDocxText,
 } from '../ingest/fileParsers';
 import { PLATFORM_LIMITS } from './geminiDraft.service';
-import { AuthenticatedCrmUser } from '../../../middleware/crmRoleAuth';
+import {
+  AuthenticatedCrmUser,
+  checkCanApprovePostWorkspace,
+} from '../../../middleware/crmRoleAuth';
+import { resolvePostWorkspace } from '../workspace';
 
 export interface ListPostsQuery {
   workspace?: string;
@@ -705,13 +709,36 @@ export class CrmPostsService {
   }
 
   /**
-   * POST /posts/:id/approve — Lionel (Approver) or Admin approves a PENDING_REVIEW post.
+   * Verifies that `actor` is allowed to approve/reject/request-changes/publish `postId`
+   * (Super Admin anywhere; Manager only in their assigned workspaces; Admin & User forbidden).
+   */
+  public async assertCanApprovePost(postId: string, actor: AuthenticatedCrmUser): Promise<void> {
+    const post = await automationPrisma.post.findUnique({
+      where: { id: postId },
+      include: { contentItem: true },
+    });
+    if (!post) {
+      throw new Error(`Post ${postId} not found`);
+    }
+    const postWorkspace = resolvePostWorkspace(post);
+    const check = checkCanApprovePostWorkspace(actor, postWorkspace);
+    if (!check.allowed) {
+      const err = new Error(check.error) as Error & { statusCode: number; code: string };
+      err.statusCode = check.statusCode;
+      err.code = check.code;
+      throw err;
+    }
+  }
+
+  /**
+   * POST /posts/:id/approve — Super Admin or assigned Manager approves a PENDING_REVIEW post.
    */
   public async approvePost(
     postId: string,
     actor: AuthenticatedCrmUser,
     comment?: string
   ) {
+    await this.assertCanApprovePost(postId, actor);
     const updatedPost = await transition(postId, 'APPROVE', {
       actorId: actor.email,
       comment,
@@ -734,13 +761,14 @@ export class CrmPostsService {
   }
 
   /**
-   * POST /posts/:id/request-changes — Lionel (Approver) or Admin requests changes (comment required).
+   * POST /posts/:id/request-changes — Super Admin or assigned Manager requests changes (comment required).
    */
   public async requestChanges(
     postId: string,
     actor: AuthenticatedCrmUser,
     comment: string
   ) {
+    await this.assertCanApprovePost(postId, actor);
     const updatedPost = await transition(postId, 'REQUEST_CHANGES', {
       actorId: actor.email,
       comment,
@@ -767,13 +795,14 @@ export class CrmPostsService {
   }
 
   /**
-   * POST /posts/:id/reject — Lionel (Approver) or Admin rejects a post (comment required).
+   * POST /posts/:id/reject — Super Admin or assigned Manager rejects a post (comment required).
    */
   public async rejectPost(
     postId: string,
     actor: AuthenticatedCrmUser,
     comment: string
   ) {
+    await this.assertCanApprovePost(postId, actor);
     const updatedPost = await transition(postId, 'REJECT', {
       actorId: actor.email,
       comment,

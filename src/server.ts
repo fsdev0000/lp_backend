@@ -227,6 +227,10 @@ app.use('/api/v1/le', lionelWebsiteRoutes);
 app.use('/api/lionel-website', lionelWebsiteRoutes);
 app.use('/api/v1/lionel-website', lionelWebsiteRoutes);
 
+import { crmUsersRouter } from './modules/users/crmUsers.routes';
+app.use('/api/crm/users', crmUsersRouter);
+app.use('/api/v1/crm/users', crmUsersRouter);
+
 const healthCheckHandler = (_req: express.Request, res: express.Response) => {
   res.status(200).json({
     status: 'ok',

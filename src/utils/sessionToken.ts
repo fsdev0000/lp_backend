@@ -5,8 +5,38 @@ export interface CrmSessionPayload {
   email: string;
   name?: string;
   role: string;
+  workspaces?: string[];
+  roleVersion?: number;
   iat: number;
   exp: number;
+}
+
+/**
+ * In-memory registry of deactivated user IDs and emails so existing lp_sess.* tokens
+ * are rejected immediately upon deactivation without waiting for 24h token expiry.
+ */
+const revokedUserIds = new Set<string>();
+const revokedUserEmails = new Set<string>();
+
+export function revokeUserSessions(userId?: string | null, email?: string | null): void {
+  if (userId) revokedUserIds.add(userId.trim());
+  if (email) revokedUserEmails.add(email.trim().toLowerCase());
+}
+
+export function restoreUserSessions(userId?: string | null, email?: string | null): void {
+  if (userId) revokedUserIds.delete(userId.trim());
+  if (email) revokedUserEmails.delete(email.trim().toLowerCase());
+}
+
+export function isUserSessionRevoked(userId?: string | null, email?: string | null): boolean {
+  if (userId && revokedUserIds.has(userId.trim())) return true;
+  if (email && revokedUserEmails.has(email.trim().toLowerCase())) return true;
+  return false;
+}
+
+export function clearRevokedUserSessions(): void {
+  revokedUserIds.clear();
+  revokedUserEmails.clear();
 }
 
 function getSessionSecret(): string {
@@ -21,7 +51,14 @@ function getSessionSecret(): string {
  * Creates a signed, expiring session token for CRM staff (default 24h TTL)
  */
 export function generateCrmSessionToken(
-  user: { id: string; email: string; name?: string; role: string },
+  user: {
+    id: string;
+    email: string;
+    name?: string;
+    role: string;
+    workspaces?: string[];
+    roleVersion?: number;
+  },
   expiresInSeconds = 24 * 60 * 60
 ): string {
   const now = Math.floor(Date.now() / 1000);
@@ -30,6 +67,8 @@ export function generateCrmSessionToken(
     email: user.email.toLowerCase(),
     name: user.name || user.email.split('@')[0],
     role: user.role.toLowerCase(),
+    ...(Array.isArray(user.workspaces) ? { workspaces: user.workspaces } : {}),
+    ...(typeof user.roleVersion === 'number' ? { roleVersion: user.roleVersion } : {}),
     iat: now,
     exp: now + expiresInSeconds,
   };
@@ -43,7 +82,7 @@ export function generateCrmSessionToken(
 }
 
 /**
- * Verifies a CRM session token, checking signature and expiration
+ * Verifies a CRM session token, checking signature, expiration, and immediate deactivation revocation.
  */
 export function verifyCrmSessionToken(token: string): CrmSessionPayload | null {
   if (!token || !token.startsWith('lp_sess.')) {
@@ -80,9 +119,11 @@ export function verifyCrmSessionToken(token: string): CrmSessionPayload | null {
     if (!payload.exp || payload.exp < now) {
       return null; // Expired
     }
+    if (isUserSessionRevoked(payload.id, payload.email)) {
+      return null; // Deactivated
+    }
     return payload;
   } catch {
     return null;
   }
 }
-

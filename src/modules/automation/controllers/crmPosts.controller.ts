@@ -5,6 +5,14 @@ import { InvalidTransitionError } from '../state/transition';
 import { FatalError } from '../publisher/adapters/base.adapter';
 
 function handleControllerError(res: Response, err: any, fallbackMessage: string): void {
+  if (err?.statusCode === 403) {
+    res.status(403).json({
+      success: false,
+      code: err?.code || 'FORBIDDEN',
+      error: err.message,
+    });
+    return;
+  }
   if (err instanceof InvalidTransitionError || err instanceof FatalError) {
     res.status(400).json({
       success: false,
@@ -272,6 +280,9 @@ export class CrmPostsController {
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
       const postId = String(req.params.id || '').trim();
+      if (req.crmUser) {
+        await crmPostsService.assertCanApprovePost(postId, req.crmUser);
+      }
       const outcome = await publisherService.publishSinglePost(postId, {
         now: new Date(),
         forceImmediate: true,

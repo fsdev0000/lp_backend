@@ -1,15 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyCrmSessionToken } from '../utils/sessionToken';
+import {
+  verifyCrmSessionToken,
+  isUserSessionRevoked,
+  revokeUserSessions,
+  restoreUserSessions,
+} from '../utils/sessionToken';
 import { getSupabaseClient } from '../services/supabaseStorageService';
 
-export type SocialCrmRole = 'approver' | 'editor' | 'admin';
+export type CanonicalCrmRole = 'super_admin' | 'admin' | 'manager' | 'user';
+export type SocialCrmRole = CanonicalCrmRole | 'approver' | 'editor';
 
 export interface AuthenticatedCrmUser {
   id: string;
   email: string;
   name: string;
-  role: SocialCrmRole;
-  workspaces?: string[];
+  role: CanonicalCrmRole;
+  workspaces: string[];
+  roleVersion: 2;
 }
 
 declare global {
@@ -20,117 +27,305 @@ declare global {
   }
 }
 
-export function normalizeWorkspace(raw?: string): string {
+export const ALL_WORKSPACES = ['leaders_performance', 'lionel_eersteling'] as const;
+
+export function normalizeWorkspace(raw?: string | null): string {
   const norm = (raw || 'leaders_performance').toLowerCase().trim();
-  if (norm.includes('lioneleersteling') || norm.includes('lionel_eersteling') || norm === 'le') {
+  if (
+    norm.includes('lioneleersteling') ||
+    norm.includes('lionel_eersteling') ||
+    norm === 'le' ||
+    norm === 'personal'
+  ) {
     return 'lionel_eersteling';
   }
   return 'leaders_performance';
 }
 
-const ALL_WORKSPACES = ['leaders_performance', 'lionel_eersteling'];
-
-/** Default approver while EMAIL_APPROVER is unset. Stays Asif's address for now (owner's decision, 13 Nov 2026). */
-export const DEFAULT_APPROVER_EMAIL = 'asif@leadersperformance.ae';
-
-export function mapEmailAndRoleToCrmRole(email: string, rawRole: string): SocialCrmRole {
-  const lowerEmail = (email || '').toLowerCase().trim();
-  const lowerRole = (rawRole || '').toLowerCase().trim();
-
-  const approverEnv = (process.env.EMAIL_APPROVER || DEFAULT_APPROVER_EMAIL)
-    .toLowerCase()
-    .split(',')
-    .map((s) => s.trim());
-  const editorsEnv = (
-    process.env.EMAIL_EDITORS ||
-    'sharathkiranpr@gmail.com,mirza@leadersperformance.ae'
-  )
-    .toLowerCase()
-    .split(',')
-    .map((s) => s.trim());
-  const adminEnv = (process.env.EMAIL_ADMIN || 'asif@leadersperformance.ae,mirza@leadersperformance.ae')
-    .toLowerCase()
-    .split(',')
-    .map((s) => s.trim());
-
-  if (lowerRole === 'approver' || lowerRole === 'founder' || approverEnv.includes(lowerEmail)) {
-    return 'approver';
+export function cleanWorkspacesForRole(
+  role: CanonicalCrmRole,
+  rawWorkspaces?: unknown,
+  defaultAllIfMissing = true
+): string[] {
+  if (role === 'super_admin' || role === 'admin') {
+    return [...ALL_WORKSPACES];
   }
-  if (lowerRole === 'admin' || adminEnv.includes(lowerEmail)) {
-    return 'admin';
+  if (Array.isArray(rawWorkspaces)) {
+    const valid = rawWorkspaces
+      .filter((w): w is string => typeof w === 'string' && w.trim().length > 0)
+      .map((w) => normalizeWorkspace(w))
+      .filter((w) => (ALL_WORKSPACES as readonly string[]).includes(w));
+    return [...new Set(valid)];
   }
-  if (
-    lowerRole === 'editor' ||
-    lowerRole === 'staff' ||
-    lowerRole === 'content_manager' ||
-    editorsEnv.includes(lowerEmail)
-  ) {
-    return 'editor';
-  }
-  return 'editor';
+  return defaultAllIfMissing ? [...ALL_WORKSPACES] : [];
 }
 
-type VerifiedSupabaseUser = {
+/** Default approver while EMAIL_APPROVER is unset (used strictly as notification recipient). */
+export const DEFAULT_APPROVER_EMAIL = 'asif@leadersperformance.ae';
+
+/**
+ * Live user state overrides from User Management (/api/v1/crm/users) so role/workspace updates
+ * and deactivations apply immediately on /auth/me and protected routes without re-signing in.
+ */
+interface LiveUserOverride {
+  id: string;
+  email: string;
+  name?: string;
+  role: CanonicalCrmRole;
+  workspaces: string[];
+  status: 'active' | 'invited' | 'deactivated';
+}
+
+const liveOverridesById = new Map<string, LiveUserOverride>();
+const liveOverridesByEmail = new Map<string, LiveUserOverride>();
+
+export function setLiveUserOverride(override: LiveUserOverride): void {
+  const cleanEmail = override.email.trim().toLowerCase();
+  const normalized: LiveUserOverride = {
+    ...override,
+    email: cleanEmail,
+    workspaces: cleanWorkspacesForRole(override.role, override.workspaces, false),
+  };
+  liveOverridesById.set(override.id, normalized);
+  liveOverridesByEmail.set(cleanEmail, normalized);
+
+  if (override.status === 'deactivated') {
+    revokeUserSessions(override.id, cleanEmail);
+  } else {
+    restoreUserSessions(override.id, cleanEmail);
+  }
+}
+
+export function getLiveUserOverride(id?: string | null, email?: string | null): LiveUserOverride | null {
+  if (id && liveOverridesById.has(id)) {
+    return liveOverridesById.get(id)!;
+  }
+  if (email && liveOverridesByEmail.has(email.trim().toLowerCase())) {
+    return liveOverridesByEmail.get(email.trim().toLowerCase())!;
+  }
+  return null;
+}
+
+export function clearLiveUserOverrides(): void {
+  liveOverridesById.clear();
+  liveOverridesByEmail.clear();
+}
+
+/**
+ * Maps a raw role name to the V2 4-role model (owner's decision, 17 Nov 2026):
+ * - super_admin
+ * - admin
+ * - manager (formerly approver / founder)
+ * - user (formerly editor / staff / crm)
+ *
+ * EMAIL_APPROVER / EMAIL_EDITORS / EMAIL_ADMIN are NO LONGER used for role assignment
+ * (they remain only as notification recipients).
+ * Legacy tokens without roleVersion === 2 map 'admin' -> 'super_admin' so legacy admin tokens keep full access.
+ */
+export function mapEmailAndRoleToCrmRole(
+  _email: string,
+  rawRole: string,
+  roleVersion?: number
+): CanonicalCrmRole {
+  const lowerRole = (rawRole || '').toLowerCase().trim();
+
+  if (lowerRole === 'super_admin') {
+    return 'super_admin';
+  }
+  if (lowerRole === 'admin') {
+    return roleVersion === 2 ? 'admin' : 'super_admin';
+  }
+  if (lowerRole === 'manager' || lowerRole === 'approver' || lowerRole === 'founder') {
+    return 'manager';
+  }
+  if (
+    lowerRole === 'user' ||
+    lowerRole === 'editor' ||
+    lowerRole === 'staff' ||
+    lowerRole === 'crm' ||
+    lowerRole === 'content_manager'
+  ) {
+    return 'user';
+  }
+  return 'user';
+}
+
+export type VerifiedSupabaseUser = {
   id: string;
   email?: string;
   email_confirmed_at?: string | null;
   confirmed_at?: string | null;
+  banned_until?: string | null;
+  last_sign_in_at?: string | null;
+  invited_at?: string | null;
+  created_at?: string | null;
   app_metadata?: Record<string, any>;
   user_metadata?: Record<string, any>;
 };
 
+export function isSupabaseUserDeactivated(user: VerifiedSupabaseUser): boolean {
+  if (isUserSessionRevoked(user.id, user.email)) return true;
+  if (user.app_metadata?.deactivated === true || user.app_metadata?.status === 'deactivated') {
+    return true;
+  }
+  if (user.banned_until) {
+    const bannedUntilMs = new Date(user.banned_until).getTime();
+    if (!isNaN(bannedUntilMs) && bannedUntilMs > Date.now()) {
+      return true;
+    }
+  }
+  if (user.app_metadata?.deactivated === false || user.app_metadata?.status === 'active') {
+    return false;
+  }
+  const live = getLiveUserOverride(user.id, user.email);
+  if (live && live.status === 'deactivated') {
+    return true;
+  }
+  return false;
+}
+
 /**
- * A Supabase JWT, verified by Supabase itself. Returns null for a token Supabase doesn't accept (or when it can't be
- * reached): the token's own payload is never trusted, because anyone can write a token claiming any email or role.
+ * A Supabase JWT, verified by Supabase itself. Returns null for a token Supabase doesn't accept.
  */
 export async function verifySupabaseToken(token: string): Promise<VerifiedSupabaseUser | null> {
   if (token.split('.').length !== 3) return null;
   try {
     const supabase = await getSupabaseClient();
     const { data, error } = await supabase.auth.getUser(token);
-    return !error && data?.user ? (data.user as VerifiedSupabaseUser) : null;
+    if (error || !data?.user) return null;
+    return data.user as VerifiedSupabaseUser;
   } catch {
     return null;
   }
 }
 
-/** Same staff rule as requireApiKey: a CRM role in app_metadata, or a confirmed @leadersperformance.ae address. */
+/** Checks whether a verified Supabase user is an authorized CRM staff member (and not deactivated). */
 export function isStaffSupabaseUser(user: VerifiedSupabaseUser): boolean {
+  if (isSupabaseUserDeactivated(user)) return false;
   const role = String(user.app_metadata?.role || '').toLowerCase();
   const email = (user.email || '').toLowerCase();
   const confirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
   return (
-    ['admin', 'approver', 'founder', 'staff', 'crm', 'editor', 'content_manager'].includes(role) ||
+    [
+      'super_admin',
+      'admin',
+      'manager',
+      'user',
+      'approver',
+      'founder',
+      'staff',
+      'crm',
+      'editor',
+      'content_manager',
+    ].includes(role) ||
     (confirmed && email.endsWith('@leadersperformance.ae')) ||
     Boolean(process.env.CRM_ADMIN_EMAIL && email === process.env.CRM_ADMIN_EMAIL.toLowerCase())
   );
 }
 
-/** The CRM user for a verified Supabase staff account. Role comes from app_metadata (users can't edit it) and the email lists. */
+/** Builds the AuthenticatedCrmUser from a verified Supabase account, honoring live overrides. */
 export function crmUserFromSupabase(user: VerifiedSupabaseUser): AuthenticatedCrmUser {
   const email = (user.email || '').toLowerCase();
-  const workspaces = user.app_metadata?.workspaces;
+  const live = getLiveUserOverride(user.id, email);
+  if (live) {
+    return {
+      id: user.id,
+      email,
+      name:
+        live.name ||
+        user.app_metadata?.name ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        email.split('@')[0] ||
+        'CRM User',
+      role: live.role,
+      workspaces: cleanWorkspacesForRole(live.role, live.workspaces, false),
+      roleVersion: 2,
+    };
+  }
+
+  const rawRole = String(user.app_metadata?.role || 'user');
+  const roleVersion = user.app_metadata?.roleVersion;
+  const role = mapEmailAndRoleToCrmRole(email, rawRole, roleVersion);
+  const hasExplicitWorkspaces = Array.isArray(user.app_metadata?.workspaces);
+  const workspaces = cleanWorkspacesForRole(
+    role,
+    user.app_metadata?.workspaces,
+    !hasExplicitWorkspaces && roleVersion !== 2
+  );
+
   return {
     id: user.id,
     email,
-    name: user.user_metadata?.full_name || user.user_metadata?.name || email.split('@')[0] || 'CRM User',
-    role: mapEmailAndRoleToCrmRole(email, String(user.app_metadata?.role || 'staff')),
-    workspaces: Array.isArray(workspaces) && workspaces.length > 0 ? workspaces : ALL_WORKSPACES,
+    name:
+      user.app_metadata?.name ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      email.split('@')[0] ||
+      'CRM User',
+    role,
+    workspaces,
+    roleVersion: 2,
+  };
+}
+
+/** Builds AuthenticatedCrmUser from a verified lp_sess.* payload, honoring live role/workspace/deactivation overrides. */
+export function crmUserFromSessionPayload(verified: {
+  id: string;
+  email: string;
+  name?: string;
+  role: string;
+  workspaces?: string[];
+  roleVersion?: number;
+}): AuthenticatedCrmUser | null {
+  if (isUserSessionRevoked(verified.id, verified.email)) {
+    return null;
+  }
+  const live = getLiveUserOverride(verified.id, verified.email);
+  if (live) {
+    if (live.status === 'deactivated') return null;
+    return {
+      id: verified.id,
+      email: verified.email,
+      name: live.name || verified.name || verified.email.split('@')[0],
+      role: live.role,
+      workspaces: cleanWorkspacesForRole(live.role, live.workspaces, false),
+      roleVersion: 2,
+    };
+  }
+
+  const role = mapEmailAndRoleToCrmRole(verified.email, verified.role, verified.roleVersion);
+  const hasExplicitWorkspaces = Array.isArray(verified.workspaces);
+  const workspaces = cleanWorkspacesForRole(
+    role,
+    verified.workspaces,
+    !hasExplicitWorkspaces && verified.roleVersion !== 2
+  );
+
+  return {
+    id: verified.id,
+    email: verified.email,
+    name: verified.name || verified.email.split('@')[0],
+    role,
+    workspaces,
+    roleVersion: 2,
   };
 }
 
 /**
  * Authenticates logged-in CRM users via either:
  * 1. Bearer session token (`lp_sess.*`)
- * 2. Supabase JWT (item 7.7)
- * Attaches `req.crmUser` with their role (`approver`, `editor`, or `admin`) and workspaces.
+ * 2. Supabase JWT
+ * Attaches `req.crmUser` with their V2 role (`super_admin`, `admin`, `manager`, or `user`), workspaces, and roleVersion: 2.
  */
 export async function requireCrmAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const url = req.originalUrl || req.path || '';
   const isStrictAuthRoute =
     url.includes('/reports/export') ||
     url.includes('/notifications') ||
-    url.includes('/ai-referrals');
+    url.includes('/ai-referrals') ||
+    url.includes('/crm/users') ||
+    url.includes('/auth/me');
   if (
     process.env.NODE_ENV === 'test' &&
     !req.headers.authorization &&
@@ -141,16 +336,22 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
       id: 'test-admin',
       email: 'admin@leadersperformance.ae',
       name: 'Test Administrator',
-      role: 'admin',
-      workspaces: ['leaders_performance', 'lionel_eersteling'],
+      role: 'super_admin',
+      workspaces: [...ALL_WORKSPACES],
+      roleVersion: 2,
     };
     next();
     return;
   }
 
-  const apiKeyHeader = (req.headers['x-api-key'] || req.headers['x-api-token'] || req.query.api_key || req.query.apiKey) as string | undefined;
+  const apiKeyHeader = (req.headers['x-api-key'] ||
+    req.headers['x-api-token'] ||
+    req.query.api_key ||
+    req.query.apiKey) as string | undefined;
   const authHeader = String(req.headers.authorization || '').trim();
-  const rawQueryToken = (req.query.token || req.query.auth_token || req.query.bearer) as string | undefined;
+  const rawQueryToken = (req.query.token || req.query.auth_token || req.query.bearer) as
+    | string
+    | undefined;
   const bearerToken = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length).trim()
     : authHeader || (rawQueryToken ? String(rawQueryToken).trim() : '');
@@ -167,30 +368,38 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
 
   const candidateKey = apiKeyHeader?.trim() || bearerToken;
 
-  // A signed-in user comes first, also when the request carries an API key (the CRM's proxy adds the key to
-  // every call): audit logs then name the person and role checks apply. The key alone acts as an administrator.
   if (bearerToken && !validKeys.includes(bearerToken)) {
     // 1. Internal signed CRM session token (lp_sess.*)
     if (bearerToken.startsWith('lp_sess.')) {
       const verified = verifyCrmSessionToken(bearerToken);
       if (verified) {
-        req.crmUser = {
-          id: verified.id,
-          email: verified.email,
-          name: verified.name || verified.email.split('@')[0],
-          role: mapEmailAndRoleToCrmRole(verified.email, verified.role),
-          workspaces: ['leaders_performance', 'lionel_eersteling'],
-        };
+        const crmUser = crmUserFromSessionPayload(verified);
+        if (!crmUser) {
+          res.status(401).json({
+            success: false,
+            code: 'UNAUTHORIZED',
+            error: 'This account has been deactivated.',
+          });
+          return;
+        }
+        req.crmUser = crmUser;
         next();
         return;
       }
     }
 
-    // 2. Item 7.7: Supabase Auth JWT, only when Supabase verifies it, and only for staff.
+    // 2. Supabase Auth JWT
     const supabaseUser = await verifySupabaseToken(bearerToken);
     if (supabaseUser) {
+      if (isSupabaseUserDeactivated(supabaseUser)) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'This account has been deactivated.',
+        });
+        return;
+      }
       if (!isStaffSupabaseUser(supabaseUser)) {
-        // 403, not 401: the sign-in is real, it just isn't a CRM account.
         res.status(403).json({
           success: false,
           code: 'FORBIDDEN',
@@ -209,8 +418,9 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
       id: 'api-key-admin',
       email: process.env.CRM_ADMIN_EMAIL || 'admin@leadersperformance.ae',
       name: 'API Key Administrator',
-      role: 'admin',
-      workspaces: ['leaders_performance', 'lionel_eersteling'],
+      role: 'super_admin',
+      workspaces: [...ALL_WORKSPACES],
+      roleVersion: 2,
     };
     next();
     return;
@@ -236,16 +446,10 @@ export async function optionalCrmAuth(req: Request, res: Response, next: NextFun
     if (bearerToken.startsWith('lp_sess.')) {
       const verified = verifyCrmSessionToken(bearerToken);
       if (verified) {
-        req.crmUser = {
-          id: verified.id,
-          email: verified.email,
-          name: verified.name || verified.email.split('@')[0],
-          role: mapEmailAndRoleToCrmRole(verified.email, verified.role),
-          workspaces: ['leaders_performance', 'lionel_eersteling'],
-        };
+        const crmUser = crmUserFromSessionPayload(verified);
+        if (crmUser) req.crmUser = crmUser;
       }
     } else {
-      // Verified by Supabase only; an unverified payload never sets a user.
       const supabaseUser = await verifySupabaseToken(bearerToken);
       if (supabaseUser && isStaffSupabaseUser(supabaseUser)) {
         req.crmUser = crmUserFromSupabase(supabaseUser);
@@ -256,8 +460,9 @@ export async function optionalCrmAuth(req: Request, res: Response, next: NextFun
 }
 
 /**
- * Item 4.1: Workspace-level authorization guard
- * Returns 401 if unauthenticated, 403 if user lacks access to requested workspace.
+ * Workspace-level authorization guard.
+ * super_admin and admin have universal access to all workspaces.
+ * manager and user may only access workspaces assigned in req.crmUser.workspaces.
  */
 export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunction): void {
   if (!req.crmUser) {
@@ -279,13 +484,13 @@ export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunc
 
   const normalizedWorkspace = normalizeWorkspace(rawTarget);
 
-  // Admin and approver (founder) have universal access to all workspaces
-  if (req.crmUser.role === 'admin' || req.crmUser.role === 'approver') {
+  // super_admin and admin always have access to both workspaces
+  if (req.crmUser.role === 'super_admin' || req.crmUser.role === 'admin') {
     next();
     return;
   }
 
-  const allowed = req.crmUser.workspaces || ['leaders_performance', 'lionel_eersteling'];
+  const allowed = req.crmUser.workspaces || [];
   if (!allowed.includes(normalizedWorkspace)) {
     res.status(403).json({
       success: false,
@@ -299,12 +504,28 @@ export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunc
 }
 
 /**
- * Role guard enforcing Plan Section 1 & 7 role permissions:
- * - Mr. Lionel (approver): approve, request changes, reject, comment, publish-now
- * - Sarath & Asad (editor): edit post, replace media, resubmit, fix blocked posts, comment, manual-done
- * - Asif (admin): everything
+ * Normalizes a list of allowed roles (supporting legacy 'approver' -> 'manager' and 'editor' -> 'user').
+ */
+function expandAllowedRoles(roles: SocialCrmRole[]): Set<CanonicalCrmRole> {
+  const set = new Set<CanonicalCrmRole>();
+  for (const r of roles) {
+    if (r === 'super_admin') set.add('super_admin');
+    else if (r === 'admin') set.add('admin');
+    else if (r === 'manager' || r === 'approver') set.add('manager');
+    else if (r === 'user' || r === 'editor') set.add('user');
+  }
+  return set;
+}
+
+/**
+ * Role guard enforcing the V2 4-role matrix:
+ * - super_admin: permitted on all routes
+ * - admin: manages users (not Super Admins) & integrations; does NOT approve or publish
+ * - manager: approves posts and publishes website texts in assigned workspaces
+ * - user: analytics and drafts in assigned workspaces
  */
 export function requireCrmRoles(...allowedRoles: SocialCrmRole[]) {
+  const expanded = expandAllowedRoles(allowedRoles);
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.crmUser) {
       res.status(401).json({
@@ -315,8 +536,7 @@ export function requireCrmRoles(...allowedRoles: SocialCrmRole[]) {
       return;
     }
 
-    // Admin (Asif) can perform all actions per Plan Section 1 ("Everything + connect accounts, retry/replay, settings")
-    if (req.crmUser.role === 'admin' || allowedRoles.includes(req.crmUser.role)) {
+    if (req.crmUser.role === 'super_admin' || expanded.has(req.crmUser.role)) {
       next();
       return;
     }
@@ -324,8 +544,56 @@ export function requireCrmRoles(...allowedRoles: SocialCrmRole[]) {
     res.status(403).json({
       success: false,
       code: 'FORBIDDEN_ROLE',
-      error: `Role "${req.crmUser.role}" is not permitted to perform this action. Allowed: ${allowedRoles.join(', ')}.`,
+      error: `Role "${req.crmUser.role}" is not permitted to perform this action.`,
     });
   };
 }
 
+/**
+ * Verifies that the signed-in user may approve, reject, request changes, or publish a post in `postWorkspace`.
+ * - super_admin: allowed in all workspaces.
+ * - manager: allowed ONLY if `postWorkspace` is in `crmUser.workspaces`.
+ * - admin / user: never allowed to approve or publish (403).
+ */
+export function checkCanApprovePostWorkspace(
+  crmUser: AuthenticatedCrmUser | undefined | null,
+  postWorkspace?: string | null
+): { allowed: boolean; statusCode: number; code: string; error: string } {
+  if (!crmUser) {
+    return {
+      allowed: false,
+      statusCode: 401,
+      code: 'UNAUTHORIZED',
+      error: 'Authentication required.',
+    };
+  }
+
+  if (crmUser.role === 'super_admin') {
+    return { allowed: true, statusCode: 200, code: 'OK', error: '' };
+  }
+
+  if (crmUser.role !== 'manager') {
+    return {
+      allowed: false,
+      statusCode: 403,
+      code: 'FORBIDDEN_ROLE',
+      error:
+        crmUser.role === 'admin'
+          ? 'Admins cannot approve or publish posts. Only Super Admins and Managers can approve.'
+          : 'Users cannot approve or publish posts. Only Super Admins and Managers can approve.',
+    };
+  }
+
+  const targetWs = normalizeWorkspace(postWorkspace);
+  const assigned = Array.isArray(crmUser.workspaces) ? crmUser.workspaces : [];
+  if (!assigned.includes(targetWs)) {
+    return {
+      allowed: false,
+      statusCode: 403,
+      code: 'FORBIDDEN_WORKSPACE',
+      error: `You can only approve or publish posts in your assigned workspaces (${assigned.join(', ') || 'none'}).`,
+    };
+  }
+
+  return { allowed: true, statusCode: 200, code: 'OK', error: '' };
+}

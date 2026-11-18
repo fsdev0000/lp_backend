@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyCrmSessionToken } from '../utils/sessionToken';
 import {
+  ALL_WORKSPACES,
+  crmUserFromSessionPayload,
   crmUserFromSupabase,
   isStaffSupabaseUser,
-  mapEmailAndRoleToCrmRole,
+  isSupabaseUserDeactivated,
   verifySupabaseToken,
 } from './crmRoleAuth';
 
@@ -13,34 +15,28 @@ function bearerOf(authHeader?: string): string | undefined {
   return token || undefined;
 }
 
-/** A signed CRM session token as the CRM user, with the same role mapping as requireCrmAuth. */
-function crmUserFromSession(sessionUser: { id: string; email: string; name?: string; role: string }) {
-  return {
-    ...sessionUser,
-    name: sessionUser.name || sessionUser.email.split('@')[0],
-    role: mapEmailAndRoleToCrmRole(sessionUser.email, sessionUser.role),
-    workspaces: ['leaders_performance', 'lionel_eersteling'],
-  };
-}
-
 /**
  * The request passed on its API key; if it also carries a signed-in user's token (the CRM's proxy adds the key to
- * every call), note who that is, so audit logs name them and role checks apply. Never blocks the request.
+ * every call), note who that is, so audit logs name them and role checks apply.
  */
 async function attachSignedInUser(req: Request, token: string | undefined, validKeys: string[]) {
   if (!token || validKeys.includes(token)) return;
   if (token.startsWith('lp_sess.')) {
     const sessionUser = verifyCrmSessionToken(token);
     if (sessionUser) {
-      (req as any).user = sessionUser;
-      (req as any).crmUser = crmUserFromSession(sessionUser);
+      const crmUser = crmUserFromSessionPayload(sessionUser);
+      if (crmUser) {
+        (req as any).user = crmUser;
+        (req as any).crmUser = crmUser;
+      }
     }
     return;
   }
   const user = await verifySupabaseToken(token);
   if (user && isStaffSupabaseUser(user)) {
-    (req as any).user = user;
-    (req as any).crmUser = crmUserFromSupabase(user);
+    const crmUser = crmUserFromSupabase(user);
+    (req as any).user = crmUser;
+    (req as any).crmUser = crmUser;
   }
 }
 
@@ -99,30 +95,42 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       return next();
     }
 
-    // 2. Check signed expiring CRM session token (Item 1)
+    // 2. Check signed expiring CRM session token
     if (token && token.startsWith('lp_sess.')) {
       const sessionUser = verifyCrmSessionToken(token);
       if (sessionUser) {
-        (req as any).user = sessionUser;
-        (req as any).crmUser = crmUserFromSession(sessionUser);
+        const crmUser = crmUserFromSessionPayload(sessionUser);
+        if (!crmUser) {
+          return res.status(401).json({
+            success: false,
+            error: 'Unauthorized: Account has been deactivated.',
+          });
+        }
+        (req as any).user = crmUser;
+        (req as any).crmUser = crmUser;
         return next();
       }
     }
 
-    // 3. If token looks like a Supabase JWT (3 dot-separated parts), verify via Supabase Auth
-    // Security: Only check app_metadata (Item 3: user_metadata can be edited by end-users)
-    // and require verified email for domain match. Same rules and role mapping as requireCrmAuth.
+    // 3. If token looks like a Supabase JWT, verify via Supabase Auth
     if (token) {
       const user = await verifySupabaseToken(token);
       if (user) {
+        if (isSupabaseUserDeactivated(user)) {
+          return res.status(401).json({
+            success: false,
+            error: 'Unauthorized: Account has been deactivated.',
+          });
+        }
         if (!isStaffSupabaseUser(user)) {
           return res.status(403).json({
             success: false,
             error: 'Forbidden: User is not authorized to access Social CRM resources.',
           });
         }
-        (req as any).user = user;
-        (req as any).crmUser = crmUserFromSupabase(user);
+        const crmUser = crmUserFromSupabase(user);
+        (req as any).user = crmUser;
+        (req as any).crmUser = crmUser;
         return next();
       }
     }
