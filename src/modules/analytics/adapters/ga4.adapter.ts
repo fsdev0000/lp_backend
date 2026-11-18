@@ -24,8 +24,9 @@ import {
   dubaiDateToStartOfDayUtc,
   dubaiDateToEndOfDayUtc,
   formatDubaiDateString,
+  getDubaiTodayString,
 } from '../utils/dateRange';
-import { inquiryVisitWhere, isLeDomain, scanWhere } from '../utils/inquiries';
+import { inquiryVisitWhere, isLeDomain, scanWhere, siteVisitWhere, TEST_LEAD_EMAILS } from '../utils/inquiries';
 
 import path from 'path';
 import fs from 'fs';
@@ -546,7 +547,9 @@ export class Ga4Adapter implements IGa4Adapter {
       // Item 2.11: Daily inquiries from the application database, in Dubai days. Same rules as "New inquiries"
       // (utils/inquiries.ts): different people per day, so a scan and its own form visit count once.
       try {
-        const createdAt = { gte: dubaiDateToStartOfDayUtc(resolvedStart), lte: dubaiDateToEndOfDayUtc(resolvedEnd) };
+        const yesterdayDubai = resolveWindow('7d', 1).endDate;
+        const effectiveDbEnd = resolvedEnd >= yesterdayDubai ? getDubaiTodayString() : resolvedEnd;
+        const createdAt = { gte: dubaiDateToStartOfDayUtc(resolvedStart), lte: dubaiDateToEndOfDayUtc(effectiveDbEnd) };
         const [visits, scans] = await Promise.all([
           prisma.attributionVisit.findMany({
             where: inquiryVisitWhere(target.domain, createdAt),
@@ -704,10 +707,26 @@ export class Ga4Adapter implements IGa4Adapter {
     const target = this.resolveGa4Target(domain);
     const win = resolveWindow(dateRange, 1);
 
-    if (this.client && target.propertyId) {
-      try {
-        const dimensionFilter = this.buildHostNameFilter(target.domain);
+    const campaignMap = new Map<
+      string,
+      {
+        campaign: string;
+        source: string;
+        clicks: number;
+        ga4Leads: number;
+        dbClicks: number;
+        dbEmails: Set<string>;
+      }
+    >();
 
+    const makeKey = (campaign: string, source: string) =>
+      `${campaign.trim().toLowerCase()}__${(source || 'direct').trim().toLowerCase()}`;
+
+    if (this.client && target.propertyId) {
+      const dimensionFilter = this.buildHostNameFilter(target.domain);
+
+      try {
+        // 1. Primary GA4 campaign sessions + Key Events (conversions)
         const [res] = await this.client.runReport(
           {
             property: `properties/${target.propertyId}`,
@@ -721,38 +740,103 @@ export class Ga4Adapter implements IGa4Adapter {
           { timeout: GA4_TIMEOUT_MS }
         );
 
-        const campaigns: CampaignYieldRow[] = [];
         for (const row of res.rows || []) {
           const campaign = row.dimensionValues?.[0]?.value || '';
-          const source = row.dimensionValues?.[1]?.value || '';
+          const source = row.dimensionValues?.[1]?.value || 'direct';
           if (campaign && campaign !== '(not set)' && campaign !== '(direct)') {
             const sessions = parseInt(row.metricValues?.[0]?.value || '0', 10);
             const conversions = parseInt(row.metricValues?.[2]?.value || '0', 10);
-            const convRate = sessions > 0 ? `${((conversions / sessions) * 100).toFixed(1)}%` : '0.0%';
-            campaigns.push({
+            const key = makeKey(campaign, source);
+            campaignMap.set(key, {
               campaign,
               source,
-              impressions: sessions, // Item 8.2: Return actual sessions without synthetic *4 multiplier
-              clicks: sessions,
-              leads: conversions,
-              convRate,
+              clicks: isNaN(sessions) ? 0 : sessions,
+              ga4Leads: isNaN(conversions) ? 0 : conversions,
+              dbClicks: 0,
+              dbEmails: new Set<string>(),
             });
           }
         }
-
-        if (campaigns.length > 0) return campaigns;
       } catch {
-        // Fallback to database
+        // Proceed to inquiry event & DB merge
+      }
+
+      try {
+        // 2. GA4 inquiry events (generate_lead, contact_form_submit, pressure_scan_complete, qualify_lead)
+        const inquiryEventFilter = {
+          andGroup: {
+            expressions: [
+              dimensionFilter,
+              {
+                filter: {
+                  fieldName: 'eventName',
+                  inListFilter: {
+                    values: [
+                      'generate_lead',
+                      'contact_form_submit',
+                      'pressure_scan_complete',
+                      'qualify_lead',
+                    ],
+                    caseSensitive: false,
+                  },
+                },
+              },
+            ],
+          },
+        };
+
+        const [leadRes] = await this.client.runReport(
+          {
+            property: `properties/${target.propertyId}`,
+            dateRanges: [{ startDate: win.startDate, endDate: win.endDate }],
+            dimensions: [{ name: 'sessionCampaignName' }, { name: 'sessionSource' }],
+            metrics: [{ name: 'activeUsers' }, { name: 'eventCount' }],
+            dimensionFilter: inquiryEventFilter,
+            limit: 100,
+          },
+          { timeout: GA4_TIMEOUT_MS }
+        );
+
+        for (const row of leadRes.rows || []) {
+          const campaign = row.dimensionValues?.[0]?.value || '';
+          const source = row.dimensionValues?.[1]?.value || 'direct';
+          if (campaign && campaign !== '(not set)' && campaign !== '(direct)') {
+            const leadUsers = parseInt(row.metricValues?.[0]?.value || '0', 10);
+            const leadEvents = parseInt(row.metricValues?.[1]?.value || '0', 10);
+            const count = !isNaN(leadUsers) && leadUsers > 0 ? leadUsers : isNaN(leadEvents) ? 0 : leadEvents;
+            const key = makeKey(campaign, source);
+            const existing = campaignMap.get(key);
+            if (existing) {
+              existing.ga4Leads = Math.max(existing.ga4Leads, count);
+            } else if (count > 0) {
+              campaignMap.set(key, {
+                campaign,
+                source,
+                clicks: count,
+                ga4Leads: count,
+                dbClicks: 0,
+                dbEmails: new Set<string>(),
+              });
+            }
+          }
+        }
+      } catch {
+        // Non-blocking if event query fails
       }
     }
 
-    // Query real UTM campaigns from database
+    // 3. Merge real UTM campaign visits & inquiries from application database (including today)
     try {
-      const clean = domain ? domain.toLowerCase().trim() : undefined;
+      const start = dubaiDateToStartOfDayUtc(win.startDate);
+      const end = dubaiDateToEndOfDayUtc(getDubaiTodayString());
+
       const visits = await prisma.attributionVisit.findMany({
         where: {
-          utmCampaign: { not: null },
-          ...(clean ? { landingPage: { contains: clean, mode: 'insensitive' } } : {}),
+          AND: [
+            { utmCampaign: { not: null } },
+            { createdAt: { gte: start, lte: end } },
+            siteVisitWhere(target.domain),
+          ],
         },
         select: {
           utmCampaign: true,
@@ -761,35 +845,53 @@ export class Ga4Adapter implements IGa4Adapter {
         },
       });
 
-      const map = new Map<string, { campaign: string; source: string; clicks: number; leads: number }>();
-      for (const v of visits) {
-        const key = `${v.utmCampaign}__${v.utmSource || 'direct'}`;
-        const existing = map.get(key) || {
-          campaign: v.utmCampaign!,
-          source: v.utmSource || 'direct',
-          clicks: 0,
-          leads: 0,
-        };
-        existing.clicks += 1;
-        if (v.email) existing.leads += 1;
-        map.set(key, existing);
-      }
+      const testEmailSet = new Set(TEST_LEAD_EMAILS.map((e) => e.toLowerCase()));
 
-      if (map.size > 0) {
-        return Array.from(map.values()).map((c) => ({
-          campaign: c.campaign,
-          source: c.source,
-          impressions: c.clicks * 4,
-          clicks: c.clicks,
-          leads: c.leads,
-          convRate: c.clicks > 0 ? `${((c.leads / c.clicks) * 100).toFixed(1)}%` : '0.0%',
-        }));
+      for (const v of visits) {
+        const campaign = (v.utmCampaign || '').trim();
+        if (!campaign || campaign === '(not set)' || campaign === '(direct)') continue;
+        const source = (v.utmSource || 'direct').trim();
+        const key = makeKey(campaign, source);
+
+        const existing = campaignMap.get(key) || {
+          campaign,
+          source,
+          clicks: 0,
+          ga4Leads: 0,
+          dbClicks: 0,
+          dbEmails: new Set<string>(),
+        };
+
+        existing.dbClicks += 1;
+        const email = v.email?.trim().toLowerCase();
+        if (email && !testEmailSet.has(email)) {
+          existing.dbEmails.add(email);
+        }
+        campaignMap.set(key, existing);
       }
     } catch {
-      // Return empty if database query fails
+      // Non-blocking if database query fails
     }
 
-    return [];
+    if (campaignMap.size === 0) {
+      return [];
+    }
+
+    return Array.from(campaignMap.values())
+      .map((c) => {
+        const leads = Math.max(c.ga4Leads, c.dbEmails.size);
+        const clicks = Math.max(c.clicks, c.dbClicks, leads);
+        const convRate = clicks > 0 ? `${((leads / clicks) * 100).toFixed(1)}%` : '0.0%';
+        return {
+          campaign: c.campaign,
+          source: c.source,
+          impressions: clicks,
+          clicks,
+          leads,
+          convRate,
+        };
+      })
+      .sort((a, b) => b.clicks - a.clicks || b.leads - a.leads);
   }
 
   public async ping(): Promise<{ status: 'HEALTHY' | 'DEGRADED' | 'DOWN'; latencyMs: number }> {

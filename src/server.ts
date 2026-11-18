@@ -24,6 +24,8 @@ const httpServer = createServer(app);
 const ALLOWED_ORIGINS = [
   'https://leadersperformance.ae',
   'https://www.leadersperformance.ae',
+  'https://lioneleersteling.com',
+  'https://www.lioneleersteling.com',
   'https://api.leadersperformance.ae',
   'https://staging.leadersperformance.ae',
   'https://social.leadersperformance.ae',
@@ -218,6 +220,12 @@ app.use('/api/v1/cms', cmsRouter);
 import { notificationsRouter } from './api/routes/notifications.routes';
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/v1/notifications', notificationsRouter);
+
+import { lionelWebsiteRoutes } from './modules/lionelWebsite/lionelWebsite.routes';
+app.use('/api/le', lionelWebsiteRoutes);
+app.use('/api/v1/le', lionelWebsiteRoutes);
+app.use('/api/lionel-website', lionelWebsiteRoutes);
+app.use('/api/v1/lionel-website', lionelWebsiteRoutes);
 
 const healthCheckHandler = (_req: express.Request, res: express.Response) => {
   res.status(200).json({

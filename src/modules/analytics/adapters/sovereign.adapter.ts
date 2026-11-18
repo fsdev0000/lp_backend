@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { ISovereignAdapter } from './interfaces';
-import { resolveWindow, dubaiDateToStartOfDayUtc, dubaiDateToEndOfDayUtc } from '../utils/dateRange';
+import {
+  resolveWindow,
+  dubaiDateToStartOfDayUtc,
+  dubaiDateToEndOfDayUtc,
+  getDubaiTodayString,
+} from '../utils/dateRange';
 import {
   NOT_SCAN_VISIT,
   countDistinctEmails,
@@ -8,15 +13,23 @@ import {
   isLeDomain,
   scanWhere,
 } from '../utils/inquiries';
+import { lionelWebsiteService } from '../../lionelWebsite/services/lionelWebsite.service';
 
 const prisma = new PrismaClient();
 
 export class SovereignAdapter implements ISovereignAdapter {
   public async getAttributedLeadsCount(startDateOrRange: string, endDate?: string, domain?: string): Promise<number> {
+    if (isLeDomain(domain)) {
+      await lionelWebsiteService.syncExternalInquiries(false).catch(() => {});
+    }
+
     const { startDate, endDate: resolvedEnd } = this.resolveDates(startDateOrRange, endDate);
-    // Item 2.8: Use Asia/Dubai timezone boundaries
+    const yesterdayDubai = resolveWindow('7d', 1).endDate;
+    const effectiveEnd = resolvedEnd >= yesterdayDubai ? getDubaiTodayString() : resolvedEnd;
+
+    // Item 2.8: Use Asia/Dubai timezone boundaries (including today for the active reporting period)
     const start = dubaiDateToStartOfDayUtc(startDate);
-    const end = dubaiDateToEndOfDayUtc(resolvedEnd);
+    const end = dubaiDateToEndOfDayUtc(effectiveEnd);
 
     const createdAt = { gte: start, lte: end };
 
@@ -81,6 +94,10 @@ export class SovereignAdapter implements ISovereignAdapter {
         : undefined;
     const isLe = isLeDomain(domain);
 
+    if (isLe) {
+      await lionelWebsiteService.syncExternalInquiries(false).catch(() => {});
+    }
+
     const [visits, scans] = await Promise.all([
       // Website forms. A scan's own visit (lead_form founder_pressure_scan) is left out: the scan is listed itself.
       // Older submissions copied the email onto earlier visits, so read extra rows and keep the latest per email.
@@ -106,6 +123,21 @@ export class SovereignAdapter implements ISovereignAdapter {
           }),
     ]);
 
+    const leMetaById = new Map<string, any>();
+    if (isLe && visits.length > 0) {
+      try {
+        const configs = await prisma.systemConfig.findMany({
+          where: { key: { in: visits.map((v) => `le_website_inquiry_${v.id}`) } },
+        });
+        for (const cfg of configs) {
+          try {
+            const parsed = typeof cfg.value === 'string' ? JSON.parse(cfg.value) : cfg.value;
+            leMetaById.set(cfg.key.replace('le_website_inquiry_', ''), parsed);
+          } catch {}
+        }
+      } catch {}
+    }
+
     const seen = new Set<string>();
     const forms = visits
       .filter((v) => {
@@ -114,17 +146,21 @@ export class SovereignAdapter implements ISovereignAdapter {
         seen.add(email);
         return true;
       })
-      .map((v) => ({
-        id: v.id,
-        name: v.leadName || (v.email ? v.email.split('@')[0] : 'Website inquiry'),
-        company: v.email ? v.email.split('@')[1] : null,
-        revenueTier: null, // Item 2.2: Do not invent revenue tier
-        leadScore: null, // Item 2.2: forms have no score
-        status: 'NEW',
-        source: 'form',
-        form: v.leadForm,
-        timestamp: v.createdAt,
-      }));
+      .map((v) => {
+        const meta = leMetaById.get(v.id) || {};
+        return {
+          id: v.id,
+          name: v.leadName || meta.name || (v.email ? v.email.split('@')[0] : 'Website inquiry'),
+          company: meta.company || (v.email ? v.email.split('@')[1] : null),
+          message: meta.message || null,
+          revenueTier: null, // Item 2.2: Do not invent revenue tier
+          leadScore: null, // Item 2.2: forms have no score
+          status: 'NEW',
+          source: 'form',
+          form: v.leadForm,
+          timestamp: v.createdAt,
+        };
+      });
 
     const scanRows = scans.map((s) => ({
       id: s.id,

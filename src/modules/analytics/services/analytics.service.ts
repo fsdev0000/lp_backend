@@ -33,6 +33,10 @@ export class AnalyticsService {
   private static linkedinWebsiteVisitorsCache: Record<string, { data: LinkedInWebsiteVisitors; cachedAt: number }> = {};
   private static instagramWebsiteVisitorsCache: Record<string, { data: InstagramWebsiteVisitors; cachedAt: number }> = {};
 
+  public static clearOverviewCache(): void {
+    this.overviewCache = {};
+  }
+
   public async getOverview(range = '30d', domain = 'leadersperformance.ae') {
     const cacheKey = `${domain}_${range}`;
     const cached = AnalyticsService.overviewCache[cacheKey];
