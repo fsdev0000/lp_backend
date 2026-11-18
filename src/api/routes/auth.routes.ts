@@ -139,6 +139,15 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
             return;
           }
 
+          const sessionToken = generateCrmSessionToken({
+            id: managed.id,
+            email: managed.email,
+            name: managed.name,
+            role: managed.role,
+            workspaces: managed.workspaces,
+            roleVersion: 2,
+          });
+
           res.status(200).json({
             success: true,
             user: {
@@ -149,52 +158,15 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
               workspaces: managed.workspaces,
               roleVersion: 2,
             },
-            token: data.session.access_token,
+            token: sessionToken,
+            sessionToken,
+            supabaseAccessToken: data.session.access_token,
           });
           return;
         }
       }
     } catch (supabaseErr: any) {
-      console.warn('[AuthRouter] Supabase isolated signInWithPassword bypassed/failed:', supabaseErr?.message);
-    }
-
-    // 2. Fallback: Authenticate against configured CRM Admin credentials (owner / super_admin)
-    const configuredAdminEmail = (
-      process.env.CRM_ADMIN_EMAIL ||
-      process.env.SWAGGER_USER ||
-      'admin@leadersperformance.ae'
-    ).toLowerCase();
-    const configuredAdminPass = process.env.CRM_ADMIN_PASSWORD || process.env.SWAGGER_PASSWORD;
-
-    const isDirectMatch =
-      Boolean(configuredAdminPass) &&
-      cleanEmail === configuredAdminEmail &&
-      cleanPassword === configuredAdminPass;
-
-    if (isDirectMatch) {
-      const displayName = cleanEmail.startsWith('admin') ? 'CRM Administrator' : 'Lionel Eersteling';
-      const sessionToken = generateCrmSessionToken({
-        id: 'crm-admin',
-        email: cleanEmail,
-        name: displayName,
-        role: 'super_admin',
-        workspaces: [...ALL_WORKSPACES],
-        roleVersion: 2,
-      });
-
-      res.status(200).json({
-        success: true,
-        user: {
-          id: 'crm-admin',
-          email: cleanEmail,
-          name: displayName,
-          role: 'super_admin',
-          workspaces: [...ALL_WORKSPACES],
-          roleVersion: 2,
-        },
-        token: sessionToken,
-      });
-      return;
+      console.warn('[AuthRouter] Supabase signInWithPassword bypassed/failed:', supabaseErr?.message);
     }
 
     res.status(401).json({

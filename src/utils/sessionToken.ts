@@ -1,4 +1,9 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+const CONFIG_KEY = 'crm_revoked_users';
+let hasLoadedFromDb = false;
 
 export interface CrmSessionPayload {
   id: string;
@@ -12,23 +17,65 @@ export interface CrmSessionPayload {
 }
 
 /**
- * In-memory registry of deactivated user IDs and emails so existing lp_sess.* tokens
- * are rejected immediately upon deactivation without waiting for 24h token expiry.
+ * Registry of deactivated user IDs and emails, persisted in SystemConfig and cached in-memory,
+ * so existing lp_sess.* tokens are rejected immediately upon deactivation across restarts and instances.
  */
 const revokedUserIds = new Set<string>();
 const revokedUserEmails = new Set<string>();
 
+async function syncRevocationsFromDb(): Promise<void> {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    const row = await prisma.systemConfig.findUnique({ where: { key: CONFIG_KEY } });
+    if (row?.value) {
+      const data = JSON.parse(row.value) as { userIds?: string[]; emails?: string[] };
+      if (Array.isArray(data.userIds)) {
+        for (const id of data.userIds) revokedUserIds.add(id);
+      }
+      if (Array.isArray(data.emails)) {
+        for (const e of data.emails) revokedUserEmails.add(e.toLowerCase());
+      }
+    }
+    hasLoadedFromDb = true;
+  } catch {}
+}
+
+async function persistRevocationsToDb(): Promise<void> {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    const data = {
+      userIds: Array.from(revokedUserIds),
+      emails: Array.from(revokedUserEmails),
+    };
+    await prisma.systemConfig.upsert({
+      where: { key: CONFIG_KEY },
+      update: { value: JSON.stringify(data), updatedAt: new Date() },
+      create: { key: CONFIG_KEY, value: JSON.stringify(data), updatedAt: new Date() },
+    });
+  } catch (err: any) {
+    console.warn('[SessionToken] Failed to persist revoked users to DB:', err?.message);
+  }
+}
+
+// Initial hydration from DB on load
+syncRevocationsFromDb().catch(() => {});
+
 export function revokeUserSessions(userId?: string | null, email?: string | null): void {
   if (userId) revokedUserIds.add(userId.trim());
   if (email) revokedUserEmails.add(email.trim().toLowerCase());
+  persistRevocationsToDb().catch(() => {});
 }
 
 export function restoreUserSessions(userId?: string | null, email?: string | null): void {
   if (userId) revokedUserIds.delete(userId.trim());
   if (email) revokedUserEmails.delete(email.trim().toLowerCase());
+  persistRevocationsToDb().catch(() => {});
 }
 
 export function isUserSessionRevoked(userId?: string | null, email?: string | null): boolean {
+  if (!hasLoadedFromDb && process.env.NODE_ENV !== 'test') {
+    syncRevocationsFromDb().catch(() => {});
+  }
   if (userId && revokedUserIds.has(userId.trim())) return true;
   if (email && revokedUserEmails.has(email.trim().toLowerCase())) return true;
   return false;

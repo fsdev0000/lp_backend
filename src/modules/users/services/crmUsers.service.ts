@@ -47,6 +47,43 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+async function isPasswordTokenUsed(tokenHash: string): Promise<boolean> {
+  if (usedPasswordTokenHashes.has(tokenHash)) return true;
+  if (process.env.NODE_ENV === 'test') return false;
+  try {
+    const row = await contentPrisma.systemConfig.findUnique({
+      where: { key: `crm_used_pw_${tokenHash}` },
+    });
+    if (row) {
+      usedPasswordTokenHashes.add(tokenHash);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function markPasswordTokenUsed(tokenHash: string): Promise<void> {
+  usedPasswordTokenHashes.add(tokenHash);
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    await contentPrisma.systemConfig.upsert({
+      where: { key: `crm_used_pw_${tokenHash}` },
+      update: { value: new Date().toISOString(), updatedAt: new Date() },
+      create: { key: `crm_used_pw_${tokenHash}`, value: new Date().toISOString(), updatedAt: new Date() },
+    });
+  } catch {}
+}
+
+function escapeHtml(str?: string | null): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 export function createCrmHttpError(
   statusCode: number,
   message: string,
@@ -58,14 +95,28 @@ export function createCrmHttpError(
   return err;
 }
 
+const ALLOWED_CRM_ORIGINS = new Set([
+  'https://social.leadersperformance.ae',
+  'https://staging.leadersperformance.ae',
+  'https://leadersperformance.ae',
+  'https://www.leadersperformance.ae',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:4000',
+  'http://localhost:8080',
+]);
+
 export function resolveCrmOrigin(originHeader?: string): string {
-  if (
-    originHeader &&
-    (originHeader.includes('leadersperformance.ae') || originHeader.includes('localhost'))
-  ) {
-    return originHeader.replace(/\/$/, '');
+  const configuredBase = (process.env.CRM_BASE_URL || 'https://social.leadersperformance.ae').replace(/\/$/, '');
+  if (originHeader) {
+    const cleanOrigin = originHeader.trim().replace(/\/$/, '');
+    if (ALLOWED_CRM_ORIGINS.has(cleanOrigin) || cleanOrigin === configuredBase) {
+      return cleanOrigin;
+    }
   }
-  return (process.env.CRM_BASE_URL || 'https://social.leadersperformance.ae').replace(/\/$/, '');
+  return configuredBase;
 }
 
 export class CrmUsersService {
@@ -736,7 +787,8 @@ export class CrmUsersService {
     }
 
     const tokenHash = hashToken(accessToken);
-    if (usedPasswordTokenHashes.has(tokenHash)) {
+    const alreadyUsed = await isPasswordTokenUsed(tokenHash);
+    if (alreadyUsed) {
       throw createCrmHttpError(
         401,
         'This link has expired or was already used. Ask for a new one.',
@@ -787,7 +839,7 @@ export class CrmUsersService {
       throw createCrmHttpError(500, updateErr?.message || 'Failed to update password');
     }
 
-    usedPasswordTokenHashes.add(tokenHash);
+    await markPasswordTokenUsed(tokenHash);
     const managed = this.toManagedUser(updatedData.user as VerifiedSupabaseUser);
 
     const sessionToken = generateCrmSessionToken({
@@ -830,14 +882,15 @@ export class CrmUsersService {
     role: string,
     actionLink: string
   ): Promise<void> {
+    const safeName = escapeHtml(name);
     await sendSmtpEmail({
       to: email,
       subject: 'You are invited to Leaders Performance Social CRM',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111827;">
           <h2 style="margin-top: 0;">Welcome to Leaders Performance Social CRM</h2>
-          <p>Hello ${name},</p>
-          <p>You have been invited to join the Leaders Performance Social CRM with the role <strong>${role.replace('_', ' ')}</strong>.</p>
+          <p>Hello ${safeName},</p>
+          <p>You have been invited to join the Leaders Performance Social CRM with the role <strong>${escapeHtml(role.replace('_', ' '))}</strong>.</p>
           <p style="margin: 24px 0;">
             <a href="${actionLink}" style="background-color: #111827; color: #ffffff; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
               Set Your Password &amp; Sign In
@@ -854,13 +907,14 @@ export class CrmUsersService {
     name: string,
     actionLink: string
   ): Promise<void> {
+    const safeName = escapeHtml(name);
     await sendSmtpEmail({
       to: email,
       subject: 'Reset your Leaders Performance Social CRM password',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111827;">
           <h2 style="margin-top: 0;">Reset Your Password</h2>
-          <p>Hello ${name},</p>
+          <p>Hello ${safeName},</p>
           <p>Click the button below to choose a new password for your Leaders Performance Social CRM account.</p>
           <p style="margin: 24px 0;">
             <a href="${actionLink}" style="background-color: #111827; color: #ffffff; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">

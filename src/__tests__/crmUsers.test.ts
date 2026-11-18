@@ -14,6 +14,7 @@ import {
   generateCrmSessionToken,
 } from '../utils/sessionToken';
 import { workspaceForPlatform, resolvePostWorkspace } from '../modules/automation/workspace';
+import { resolveCrmOrigin } from '../modules/users/services/crmUsers.service';
 
 // In-memory mock Supabase Auth user store
 interface MockSupabaseUser {
@@ -600,6 +601,30 @@ describe('Social CRM User Management & Role V2 Backend', () => {
         .send({ email: 'nonexistent-person@example.com' });
       expect(unknownRes.status).toBe(200);
       expect(unknownRes.body.success).toBe(true);
+    });
+
+    it('rejects login with Swagger/admin environment passwords without a valid Supabase account', async () => {
+      process.env.SWAGGER_USER = 'admin';
+      process.env.SWAGGER_PASSWORD = 'SwaggerSecretPassword123!';
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: 'admin', password: 'SwaggerSecretPassword123!' });
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('Invalid email or password.');
+    });
+
+    it('strictly validates origins and blocks subdomain attacks on reset/invite redirects', () => {
+      const safeOrigin = resolveCrmOrigin('https://social.leadersperformance.ae');
+      expect(safeOrigin).toBe('https://social.leadersperformance.ae');
+
+      const localhostOrigin = resolveCrmOrigin('http://localhost:5173');
+      expect(localhostOrigin).toBe('http://localhost:5173');
+
+      // Attacker attempting subdomain match
+      const attackerOrigin = resolveCrmOrigin('https://leadersperformance.ae.attacker.com');
+      expect(attackerOrigin).not.toBe('https://leadersperformance.ae.attacker.com');
+      expect(attackerOrigin).toBe('https://social.leadersperformance.ae');
     });
   });
 });
