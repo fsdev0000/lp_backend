@@ -3,6 +3,7 @@ import path from 'path';
 import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
+import { isTikTokPublishingEnabled } from '../../social/adapters/tiktok.adapter';
 import { checkCanApprovePostWorkspace } from '../../../middleware/crmRoleAuth';
 
 /** Who made the request, for the activity log: the signed-in CRM user, or the API key when nobody is signed in. */
@@ -247,6 +248,14 @@ export class ContentController {
 
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
+      if (!isLinkedInPublishingEnabled() && !isTikTokPublishingEnabled()) {
+        res.status(403).json({
+          success: false,
+          error: 'Publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false, TIKTOK_PUBLISHING_ENABLED=false).',
+        });
+        return;
+      }
+
       const id = String(req.params.id);
       const user = (req as any).crmUser || (req as any).user;
       const existing = await this.service.getPostById(id);
@@ -257,10 +266,19 @@ export class ContentController {
           return;
         }
       }
-      if (!isLinkedInPublishingEnabled()) {
+
+      if (existing.platform === 'LINKEDIN' && !isLinkedInPublishingEnabled()) {
         res.status(403).json({
           success: false,
           error: 'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false).',
+        });
+        return;
+      }
+
+      if (existing.platform === 'TIKTOK' && !isTikTokPublishingEnabled()) {
+        res.status(403).json({
+          success: false,
+          error: 'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false).',
         });
         return;
       }

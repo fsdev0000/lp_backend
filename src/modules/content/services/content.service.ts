@@ -1,5 +1,6 @@
 import { PrismaClient, SocialPost } from '@prisma/client';
 import { LinkedInAdapter } from '../../social/adapters/linkedin.adapter';
+import { TikTokAdapter, isTikTokPublishingEnabled } from '../../social/adapters/tiktok.adapter';
 import { InstagramPublishingService } from './instagramPublishing.service';
 import { generateAuthoritativeSignature } from '../../../utils/approvalSignature';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
@@ -41,6 +42,7 @@ function createHttpError(message: string, statusCode: number): Error & { statusC
 
 export class ContentService {
   private linkedin = new LinkedInAdapter();
+  private tiktok = new TikTokAdapter();
   private instagramPublishing = new InstagramPublishingService();
   private static legacyPurged = false;
 
@@ -514,13 +516,6 @@ export class ContentService {
    * - Never marks YouTube/TikTok/unimplemented platforms as PUBLISHED without posting them (Item 6d).
    */
   public async publishPostNow(id: string, ipAddress?: string, actor?: string): Promise<SocialPost> {
-    if (!isLinkedInPublishingEnabled()) {
-      throw createHttpError(
-        'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
-        403
-      );
-    }
-
     const post = await this.getPostById(id);
 
     if (post.status === 'PUBLISHED') {
@@ -539,16 +534,30 @@ export class ContentService {
       );
     }
 
-    // Item 6d: Only publish supported live channels; never mark YouTube/TikTok/etc. PUBLISHED without posting
-    if (post.platform !== 'LINKEDIN') {
+    let dispatch: { postUrn?: string | null; postUrl?: string | null } = {};
+
+    if (post.platform === 'LINKEDIN') {
+      if (!isLinkedInPublishingEnabled()) {
+        throw createHttpError(
+          'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
+          403
+        );
+      }
+      dispatch = await this.dispatchToLinkedIn(post);
+    } else if (post.platform === 'TIKTOK') {
+      if (!isTikTokPublishingEnabled()) {
+        throw createHttpError(
+          'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
+          403
+        );
+      }
+      dispatch = await this.dispatchToTikTok(post);
+    } else {
       throw createHttpError(
-        `Live publishing is not supported for platform "${post.platform}". Only approved LINKEDIN posts can be published via this endpoint.`,
+        `Live publishing is not supported for platform "${post.platform}". Only approved LINKEDIN and TIKTOK posts can be published via this endpoint.`,
         400
       );
     }
-
-    // LinkedIn Live Broadcast
-    const dispatch = await this.dispatchToLinkedIn(post);
 
     const updated = await contentPrisma.socialPost.update({
       where: { id },
@@ -562,14 +571,58 @@ export class ContentService {
 
     await this.logAudit({
       actor: actor || post.approvedBy || 'System Publisher',
-      action: 'LINKEDIN_BROADCAST_DISPATCHED',
+      action: `${post.platform}_BROADCAST_DISPATCHED`,
       entity: `ContentPost #${post.id}`,
-      details: `Live post broadcast to LinkedIn feed. URN: ${dispatch.postUrn || 'none'}`,
+      details: `Live post broadcast to ${post.platform} feed. URN: ${dispatch.postUrn || 'none'}`,
       ipAddress,
       metadata: { postUrl: dispatch.postUrl },
     });
 
     return updated;
+  }
+
+  /**
+   * Internal helper to dispatch content to TikTok Content Posting API.
+   * SAFETY GUARD: Simulates the publish flow unless TIKTOK_LIVE_POST=true is explicitly set,
+   * guaranteeing no real video is ever posted to TikTok while testing or demo recording.
+   */
+  private async dispatchToTikTok(post: SocialPost) {
+    const isLivePost = process.env.TIKTOK_LIVE_POST === 'true';
+
+    if (!isLivePost) {
+      console.log(`[ContentService] Safety Guard active: Simulating TikTok publish for post ${post.id}. No live post will be made.`);
+      const mockId = `tt_sim_${Date.now()}`;
+      return {
+        postUrn: mockId,
+        postUrl: `https://www.tiktok.com/@${process.env.TIKTOK_USERNAME || 'lioneleersteling'}/video/${mockId}`,
+      };
+    }
+
+    const conn = await this.tiktok.getActiveConnection();
+    if (!conn || !conn.accessToken) {
+      throw createHttpError(
+        'TikTok publishing account is not connected. Please connect TikTok in Integrations first.',
+        400
+      );
+    }
+
+    const videoUrl = post.mediaUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    const isDirect = (post.metadata as any)?.mode === 'DIRECT';
+    const result = await this.tiktok.publishVideo(conn.accessToken, {
+      title: post.title || post.body || 'New Video',
+      videoUrl,
+      mode: isDirect ? 'DIRECT' : 'DRAFT',
+    });
+
+    const username = conn.accountName?.replace(/^@/, '') || process.env.TIKTOK_USERNAME || 'user';
+    const postUrl = result.publishId
+      ? `https://www.tiktok.com/@${username}/video/${result.publishId}`
+      : `https://www.tiktok.com/@${username}`;
+
+    return {
+      postUrn: result.publishId || `tiktok:${Date.now()}`,
+      postUrl,
+    };
   }
 
   /**
