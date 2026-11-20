@@ -165,6 +165,17 @@ export class HardeningController {
       const executionUrl = req.body?.executionUrl ? String(req.body.executionUrl) : undefined;
       const isTest = req.body?.isTest === true || workflowName === 'Example Workflow' || failedNode === 'Node With Error';
 
+      // False-positive guard: If health check reports HEALTHY, ignore and do not alert
+      if (
+        (workflowName.includes('Health') || failedNode === 'Health Evaluator') &&
+        errorMessage.includes('HEALTHY') &&
+        !errorMessage.includes('DEGRADED') &&
+        !errorMessage.includes('UNHEALTHY')
+      ) {
+        res.status(200).json({ success: true, ignored: true, reason: 'System reported HEALTHY' });
+        return;
+      }
+
       const jobRun = await automationPrisma.jobRun.create({
         data: {
           workflow: workflowName,
