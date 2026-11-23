@@ -125,7 +125,11 @@ export class CrmHealthService {
     let dbLatencyMs = 0;
 
     try {
-      await automationPrisma.$queryRaw`SELECT 1`;
+      // 5-second fast-fail timeout so a frozen DB pooler never hangs the daemon/worker for minutes
+      await Promise.race([
+        automationPrisma.$queryRaw`SELECT 1`,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('DB ping timeout (5s)')), 5000)),
+      ]);
       dbLatencyMs = Date.now() - startDb;
     } catch {
       dbStatus = 'DOWN';
