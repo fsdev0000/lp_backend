@@ -16,8 +16,12 @@ const upload = multer({
 // Caption/document file content preview (accessible to reviewer/approver with optional auth)
 crmAutomationRouter.get('/posts/:id/caption-file-content', optionalCrmAuth, crmPostsController.getCaptionFileContent);
 
-// All CRM automation write routes and admin management require a valid logged-in CRM session token
-crmAutomationRouter.use(requireCrmAuth);
+// All CRM automation write routes and admin management require a valid logged-in CRM session token.
+// Scoped explicitly to CRM paths so mounting crmAutomationRouter at bare /api/v1 doesn't block public site routes.
+crmAutomationRouter.use(
+  ['/posts', '/accounts', '/ingest', '/inventory', '/reminders', '/settings', '/health', '/crm'],
+  requireCrmAuth
+);
 
 // Read endpoints (accessible to approver, editor, admin)
 crmAutomationRouter.get('/posts', crmPostsController.listPosts);
