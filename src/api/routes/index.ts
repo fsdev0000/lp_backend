@@ -361,40 +361,18 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
     });
 
     if (dbSub) {
-      const answersArray = Array.isArray(dbSub.answers)
-        ? (dbSub.answers as any[]).map((a) => (typeof a === 'number' ? a : a.score ?? a.value ?? a.rating))
-        : [];
-
       return res.json({
         id: dbSub.id,
         sessionId: dbSub.id,
-        reference_number: dbSub.referenceNumber,
         referenceNumber: dbSub.referenceNumber,
-        answers: answersArray,
+        reference_number: dbSub.referenceNumber,
         founder: {
           name: dbSub.fullName,
-          company: dbSub.companyName,
           email: dbSub.email,
-          phone: dbSub.phone || '',
-          revenue: (dbSub.submittedContext as any)?.revenue || '',
-          reference_number: dbSub.referenceNumber,
+          company: dbSub.companyName,
         },
-        domainScores: dbSub.domainScores,
-        primarySignalAreas: dbSub.primarySignalAreas,
-        signalClassification: dbSub.signalClassification,
-        tier: dbSub.signalClassification,
-        overallMean: dbSub.overallRawMean,
-        overallNormalised: dbSub.overallNormalised,
-        score: Math.round(dbSub.overallNormalised),
-        methodologyVersion: dbSub.methodologyVersion,
-        reviewStatus: dbSub.reviewStatus,
-        reviewerNotes: dbSub.reviewerNotes,
-        reviewerDecision: dbSub.reviewerDecision,
-        reviewedAt: dbSub.reviewedAt,
-        reviewedBy: dbSub.reviewedBy,
-        zoomMeetingUrl: dbSub.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
         scheduledReviewAt: dbSub.scheduledReviewAt,
-        submittedAt: dbSub.createdAt,
+        zoomMeetingUrl: dbSub.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
       });
     }
 
@@ -402,14 +380,17 @@ apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
     const session = ephemeralSessions.get(sessionId);
     if (session && session.expiresAt > Date.now()) {
       return res.json({
-        answers: session.answers,
-        founder: session.founder,
-        reference_number: session.founder?.reference_number,
-        domainScores: session.domainScores,
-        score: session.finalScore,
-        tier: session.tier,
-        overallMean: session.overallMean,
-        methodologyVersion: session.methodologyVersion || '1.0',
+        id: sessionId,
+        sessionId,
+        referenceNumber: session.founder?.reference_number || sessionId,
+        reference_number: session.founder?.reference_number || sessionId,
+        founder: {
+          name: session.founder?.name || '',
+          email: session.founder?.email || '',
+          company: session.founder?.company || '',
+        },
+        scheduledReviewAt: null,
+        zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
       });
     }
 

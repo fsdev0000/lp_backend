@@ -247,37 +247,47 @@ export async function resolveScanPdfAttachmentUrl(
         const supabase = await getSupabaseClient();
         const suffix = audience === 'participant' ? 'Results' : 'Executive_Dossier';
         const objectPath = `scans/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`;
+        const bucket = 'dossiers';
         
-        // Use private bucket 'dossiers' with signed URL, fallback to 'avatars' with signed URL
-        let bucket = 'dossiers';
-        let uploadError = (await supabase.storage.from(bucket).upload(objectPath, pdfBuffer, {
-          contentType: 'application/pdf',
-          upsert: true,
-        })).error;
-
-        if (uploadError) {
-          bucket = 'avatars';
-          uploadError = (await supabase.storage.from('avatars').upload(`private-dossiers/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`, pdfBuffer, {
-            contentType: 'application/pdf',
-            upsert: true,
-          })).error;
+        // Ensure private 'dossiers' bucket exists (public: false)
+        try {
+          const { data: bucketInfo } = await supabase.storage.getBucket(bucket);
+          if (!bucketInfo) {
+            await supabase.storage.createBucket(bucket, {
+              public: false,
+              fileSizeLimit: 10485760, // 10MB
+              allowedMimeTypes: ['application/pdf'],
+            });
+          }
+        } catch {
+          await supabase.storage.createBucket(bucket, {
+            public: false,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['application/pdf'],
+          }).catch(() => {});
         }
 
+        const { error: uploadError } = await supabase.storage.from(bucket).upload(objectPath, pdfBuffer, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
         if (!uploadError) {
-          const path = bucket === 'dossiers' ? objectPath : `private-dossiers/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`;
           // Short-lived signed URL (valid for 7 days / 604800s)
-          const { data: signedData } = await supabase.storage.from(bucket).createSignedUrl(path, 7 * 24 * 3600);
+          const { data: signedData } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 7 * 24 * 3600);
           if (signedData?.signedUrl) {
             return signedData.signedUrl;
           }
+        } else {
+          console.error('[PDF Attachment] Failed to upload PDF to private dossiers bucket:', uploadError?.message || uploadError);
         }
       } catch (uploadErr) {
         console.warn('[PDF Attachment] Supabase storage upload notice:', uploadErr);
       }
     }
 
-    const backendUrl = process.env.BACKEND_URL || process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
-    return `${backendUrl}/api/v1/scan/review/${encodeURIComponent(cleanRef)}/pdf?audience=${audience}`;
+    // Do NOT fall back to avatars or public endpoints; send without attachment if private storage fails
+    return null;
   } catch (err: any) {
     console.warn('[PDF Attachment] Notice resolving scan PDF attachment:', err?.message || err);
     return null;
