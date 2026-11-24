@@ -302,7 +302,7 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
   try {
     const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
     const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
-    const subject = `[Founder Pressure Scan] Your Executive Results Report (Ref: ${data.referenceNumber})`;
+    const subject = `[Founder Pressure Scan] Next Steps: Schedule Your Executive Review (Ref: ${data.referenceNumber})`;
 
     const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -394,17 +394,17 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;padding-bottom:12px;">
-                    FOUNDER PRESSURE SCAN RESULTS
+                    FOUNDER PRESSURE SCAN &middot; ASSESSMENT RECEIVED
                   </td>
                 </tr>
                 <tr>
                   <td class="headline-text" style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
-                    Your Executive Results Report is ready
+                    Your assessment has been received
                   </td>
                 </tr>
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
-                    Dear ${escapeHtml(data.participantName)}, thank you for completing the Founder Pressure Scan. Your directional diagnostic evaluation has been compiled based on your 10 assessment answers.
+                    Dear ${escapeHtml(data.participantName)}, thank you for completing the Founder Pressure Scan. Your responses have been successfully compiled for executive evaluation.
                   </td>
                 </tr>
               </table>
@@ -437,33 +437,23 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
                   <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
-                    PRIMARY SIGNAL AREA
+                    REVIEW STATUS
                   </td>
                   <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
-                    ${escapeHtml(data.primarySignalArea || 'Operational Resilience')}
+                    Pending Scheduled Consultation
                   </td>
                 </tr>
-                ${data.signalClassification ? `
-                <tr style="border-bottom:1px solid #ebe4db;">
-                  <td class="meta-cell-label" style="padding:14px 20px 14px 0;width:190px;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
-                    SIGNAL LEVEL
-                  </td>
-                  <td class="meta-cell-value" style="padding:14px 0;vertical-align:top;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:500;line-height:22px;color:#1b2637;">
-                    ${escapeHtml(data.signalClassification)}
-                  </td>
-                </tr>
-                ` : ''}
               </table>
 
-              <!-- Callout Box: Executive Results Report Attached -->
+              <!-- Callout Box: Results Reviewed in Private Consultation -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
                 <tr>
                   <td style="padding:16px 20px;">
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
-                      EXECUTIVE RESULTS REPORT ATTACHED
+                      RESULTS REVIEW IN PRIVATE CONSULTATION
                     </div>
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
-                      Your complete Founder Pressure Scan Results Report PDF is attached directly to this email. It outlines your 5-domain intensity matrix, scaling contextual guidance, and a record of your answers.
+                      To ensure your diagnostic insights are accurately interpreted in context, your complete 5-domain results will be reviewed and discussed directly with you in a private consultation with Lionel Eersteling.
                     </div>
                   </td>
                 </tr>
@@ -473,13 +463,13 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
                 <tr>
                   <td style="font-family:'Inter',Arial,sans-serif;font-size:14px;line-height:22px;color:#4a5568;padding-bottom:18px;">
-                    To translate these observations into practical executive decoupling actions, you are invited to schedule a complimentary <strong>30-minute private consultation with Lionel Eersteling</strong>.
+                    Please select a convenient time below to schedule your complimentary <strong>30-minute private consultation</strong> to review your diagnostic evaluation and discuss actionable executive decoupling priorities.
                   </td>
                 </tr>
                 <tr>
                   <td align="center">
                     <a href="${escapeHtml(scheduleUrl)}" target="_blank" class="cta-btn" style="display:inline-block;background-color:#d0a35a;border:1px solid #d0a35a;color:#010d20;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:15px;font-weight:600;line-height:22px;padding:14px 32px;text-align:center;border-radius:2px;">
-                      Schedule Your Private Review Session &rarr;
+                      Schedule Your Review Session &rarr;
                     </a>
                   </td>
                 </tr>
@@ -507,15 +497,14 @@ export async function sendParticipantScanResultsEmail(data: ParticipantScanResul
         firstName: data.participantName.split(' ')[0],
         lastName: data.participantName.split(' ').slice(1).join(' ') || undefined,
         companyName: data.companyName,
-        tags: ['founder-pressure-scan', 'results-delivered'],
+        tags: ['founder-pressure-scan', 'assessment-received'],
       });
     }
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] Participant Results Email Sent with PDF to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results and PDF are reviewed in consultation; no PDF attached to founder email
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] Participant Assessment Received Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
     }
   } catch (err: any) {
     console.error('[ERROR] Failed to send Participant Results email:', err.message || err);
@@ -642,15 +631,15 @@ export async function sendCalendarBookingEmails(data: CalendarBookingEmailData) 
                 </tr>
               </table>
 
-              <!-- Callout Box: Executive Results Report Attached -->
+              <!-- Session Overview -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
                 <tr>
                   <td style="padding:16px 20px;">
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
-                      EXECUTIVE RESULTS REPORT ATTACHED
+                      CONSULTATION &amp; RESULTS REVIEW
                     </div>
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
-                      Your complete Founder Pressure Scan Results Report PDF (updated with your confirmed consultation date and Zoom access coordinates) is attached directly to this email.
+                      During your 30-minute private consultation, Lionel will walk you through your scan evaluation, analyze operational dependencies, and outline actionable priorities tailored to your organisation.
                     </div>
                   </td>
                 </tr>
@@ -690,10 +679,9 @@ export async function sendCalendarBookingEmails(data: CalendarBookingEmailData) 
     });
 
     if (founderContactId) {
-      const founderPdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const founderAttachments = founderPdfAttachmentUrl ? [founderPdfAttachmentUrl] : undefined;
-      await sendEmail(founderContactId, founderSubject, founderHtml, undefined, founderAttachments);
-      console.log(`[SUCCESS] Calendar Booking Email Sent to Founder with PDF attachment: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed live in consultation; no PDF attached to founder confirmation
+      await sendEmail(founderContactId, founderSubject, founderHtml, undefined, undefined);
+      console.log(`[SUCCESS] Calendar Booking Email Sent to Founder (No PDF attached): ${data.email} (Ref: ${data.referenceNumber})`);
     }
   } catch (err: any) {
     console.error('[ERROR] Failed to send Calendar booking email to founder:', err.message);
@@ -975,15 +963,15 @@ export async function sendBookingReminder24hEmail(data: BookingReminderEmailData
                 </tr>
               </table>
 
-              <!-- Callout Box: Executive Results Report Attached -->
+              <!-- Callout Box: Consultation Focus -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
                 <tr>
                   <td style="padding:16px 20px;">
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
-                      EXECUTIVE RESULTS REPORT ATTACHED
+                      STRATEGIC REVIEW CONSULTATION
                     </div>
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
-                      Your complete Founder Pressure Scan Results Report PDF is attached directly to this email so you can review your 5-domain evaluation prior to tomorrow's conversation.
+                      Lionel will review and discuss your diagnostic evaluation live with you during tomorrow's consultation to identify actionable executive decoupling priorities.
                     </div>
                   </td>
                 </tr>
@@ -1023,10 +1011,9 @@ export async function sendBookingReminder24hEmail(data: BookingReminderEmailData
     });
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] 24-Hour Reminder Email Sent with PDF to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed in consultation; no PDF attached to reminder emails
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] 24-Hour Reminder Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
       return true;
     }
     return false;
@@ -1037,7 +1024,7 @@ export async function sendBookingReminder24hEmail(data: BookingReminderEmailData
 }
 
 /**
- * 2-Hour Appointment Reminder Email with Participant Results PDF
+ * 2-Hour Appointment Reminder Email
  */
 export async function sendBookingReminder2hEmail(data: BookingReminderEmailData) {
   try {
@@ -1135,15 +1122,15 @@ export async function sendBookingReminder2hEmail(data: BookingReminderEmailData)
                 </tr>
               </table>
 
-              <!-- Callout Box: Executive Results Report Attached -->
+              <!-- Callout Box: Consultation Focus -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
                 <tr>
                   <td style="padding:16px 20px;">
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
-                      EXECUTIVE RESULTS REPORT ATTACHED
+                      CONSULTATION &amp; RESULTS REVIEW
                     </div>
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
-                      Your personalized Founder Pressure Scan Results Report PDF is attached for immediate reference during your consultation.
+                      Lionel will walk you through your diagnostic evaluation live during this session.
                     </div>
                   </td>
                 </tr>
@@ -1174,10 +1161,9 @@ export async function sendBookingReminder2hEmail(data: BookingReminderEmailData)
     });
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] 2-Hour Reminder Email Sent with PDF to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed in consultation; no PDF attached to reminder emails
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] 2-Hour Reminder Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
       return true;
     }
     return false;
@@ -1188,7 +1174,7 @@ export async function sendBookingReminder2hEmail(data: BookingReminderEmailData)
 }
 
 /**
- * 1-Hour Appointment Reminder Email with Participant Results PDF
+ * 1-Hour Appointment Reminder Email
  */
 export async function sendBookingReminder1hEmail(data: BookingReminderEmailData): Promise<boolean> {
   try {
@@ -1286,15 +1272,15 @@ export async function sendBookingReminder1hEmail(data: BookingReminderEmailData)
                 </tr>
               </table>
 
-              <!-- Callout Box: Executive Results Report Attached -->
+              <!-- Callout Box: Live Review -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf7f2;border:1px solid #d0a35a;border-radius:2px;margin-bottom:28px;">
                 <tr>
                   <td style="padding:16px 20px;">
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#9f6511;margin-bottom:4px;">
-                      EXECUTIVE RESULTS REPORT ATTACHED
+                      LIVE RESULTS REVIEW
                     </div>
                     <div style="font-family:'Inter',Arial,sans-serif;font-size:13.5px;color:#1b2637;line-height:20px;">
-                      Your personalized Founder Pressure Scan Results Report PDF is attached for immediate reference during your consultation.
+                      Lionel will review and discuss your diagnostic evaluation live with you during this consultation.
                     </div>
                   </td>
                 </tr>
@@ -1328,10 +1314,9 @@ export async function sendBookingReminder1hEmail(data: BookingReminderEmailData)
     } catch (_) {}
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] 1-Hour Reminder Email Sent with PDF to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed in consultation; no PDF attached to reminder emails
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] 1-Hour Reminder Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
       return true;
     }
     return false;
@@ -1356,8 +1341,7 @@ export interface FollowupEmailData {
 export function buildScanFollowup1Email(data: FollowupEmailData): { subject: string; html: string } {
   const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
   const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
-  const primarySignal = data.primarySignalArea || 'Operational Resilience';
-  const subject = `[Founder Pressure Scan] Reviewing your scan results & next steps (Ref: ${data.referenceNumber})`;
+  const subject = `[Founder Pressure Scan] Schedule your consultation to review your results (Ref: ${data.referenceNumber})`;
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -1392,17 +1376,17 @@ export function buildScanFollowup1Email(data: FollowupEmailData): { subject: str
                 </tr>
                 <tr>
                   <td style="font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;line-height:34px;color:#1b2637;padding-bottom:12px;">
-                    Translating your diagnostic signals into operational velocity
+                    Translating your diagnostic answers into operational velocity
                   </td>
                 </tr>
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:24px;">
-                    Dear ${escapeHtml(data.participantName)}, two days ago you completed the Founder Pressure Scan. Your directional diagnostic evaluation identified <strong>${escapeHtml(primarySignal)}</strong> as your primary structural signal area.
+                    Dear ${escapeHtml(data.participantName)}, two days ago you completed the Founder Pressure Scan. Your diagnostic answers have been compiled for executive evaluation.
                   </td>
                 </tr>
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
-                    Translating diagnostic clarity into sustainable founder decoupling requires examining where organizational dependencies continue to flow through your desk. We invite you to schedule your private 30-minute review consultation with <strong>Lionel Eersteling</strong> to unpack these findings.
+                    To review your findings and explore practical steps to systematically remove executive bottlenecks with Lionel Eersteling, we invite you to schedule your private 30-minute consultation.
                   </td>
                 </tr>
               </table>
@@ -1435,10 +1419,10 @@ export function buildScanFollowup1Email(data: FollowupEmailData): { subject: str
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
                   <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
-                    PRIMARY SIGNAL
+                    STATUS
                   </td>
                   <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
-                    ${escapeHtml(primarySignal)}
+                    Pending Consultation Review
                   </td>
                 </tr>
               </table>
@@ -1496,10 +1480,9 @@ export async function sendScanFollowup1Email(data: FollowupEmailData): Promise<b
     }
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] Follow-up 1 (Day 2) Email Sent to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed in consultation; no PDF attached to follow-up emails
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] Follow-up 1 (Day 2) Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
       return true;
     }
     return false;
@@ -1515,7 +1498,6 @@ export async function sendScanFollowup1Email(data: FollowupEmailData): Promise<b
 export function buildScanFollowup2Email(data: FollowupEmailData): { subject: string; html: string } {
   const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
   const scheduleUrl = `${frontendUrl}/diagnostics?book=${encodeURIComponent(data.referenceNumber)}`;
-  const primarySignal = data.primarySignalArea || 'Operational Resilience';
   const subject = `[Founder Pressure Scan] Final note regarding your strategic review (Ref: ${data.referenceNumber})`;
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -1561,7 +1543,7 @@ export function buildScanFollowup2Email(data: FollowupEmailData): { subject: str
                 </tr>
                 <tr>
                   <td style="font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:400;line-height:24px;color:#4a5568;padding-bottom:28px;">
-                    Your directional signal assessment in <strong>${escapeHtml(primarySignal)}</strong> remains on file. If you would like to explore practical steps to systematically remove bottlenecks and increase executive autonomy with Lionel Eersteling, please reserve your preferred consultation slot before your initial review window closes.
+                    Your assessment answers remain on file. If you would like to review your diagnostic evaluation and discuss practical decoupling priorities with Lionel Eersteling, please reserve your preferred consultation slot before your initial review window closes.
                   </td>
                 </tr>
               </table>
@@ -1594,10 +1576,10 @@ export function buildScanFollowup2Email(data: FollowupEmailData): { subject: str
                 </tr>
                 <tr style="border-bottom:1px solid #ebe4db;">
                   <td style="padding:15px 0;width:170px;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:12px;font-weight:600;line-height:17px;letter-spacing:1.44px;text-transform:uppercase;color:#9f6511;">
-                    PRIMARY SIGNAL
+                    STATUS
                   </td>
                   <td style="padding:15px 0;vertical-align:middle;font-family:'Inter',Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:22px;color:#9f6511;">
-                    ${escapeHtml(primarySignal)}
+                    Review Window Closing
                   </td>
                 </tr>
               </table>
@@ -1646,10 +1628,9 @@ export async function sendScanFollowup2Email(data: FollowupEmailData): Promise<b
     }
 
     if (contactId) {
-      const pdfAttachmentUrl = await resolveScanPdfAttachmentUrl(data.referenceNumber, 'participant');
-      const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-      await sendEmail(contactId, subject, html, undefined, attachments);
-      console.log(`[SUCCESS] Follow-up 2 (Day 5) Email Sent to: ${data.email} (Ref: ${data.referenceNumber})`);
+      // Results are reviewed in consultation; no PDF attached to follow-up emails
+      await sendEmail(contactId, subject, html, undefined, undefined);
+      console.log(`[SUCCESS] Follow-up 2 (Day 5) Email Sent (No PDF attached) to: ${data.email} (Ref: ${data.referenceNumber})`);
       return true;
     }
     return false;

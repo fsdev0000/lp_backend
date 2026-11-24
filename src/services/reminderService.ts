@@ -513,14 +513,9 @@ export async function processScheduledEmails(): Promise<{
             zoomMeetingUrl,
           });
         } else {
-          // Generic HTML body send
+          // Generic HTML body send (no PDF attached to founder)
           if (!contactId) throw new Error('Contact ID missing for generic scheduled email dispatch');
-          const pdfAttachmentUrl = emailRecord.referenceNumber
-            ? await resolveScanPdfAttachmentUrl(emailRecord.referenceNumber, 'participant')
-            : null;
-          const attachments = pdfAttachmentUrl ? [pdfAttachmentUrl] : undefined;
-
-          await sendEmail(contactId, emailRecord.subject, emailRecord.htmlBody, undefined, attachments);
+          await sendEmail(contactId, emailRecord.subject, emailRecord.htmlBody, undefined, undefined);
           dispatchSuccess = true;
         }
 

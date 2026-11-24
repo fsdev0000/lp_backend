@@ -832,8 +832,8 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
           contactId,
         });
 
-        // 3. Record Immediate Results Email in scheduled_emails ledger
-        const resultsSubject = `[Founder Pressure Scan] Your Executive Results Report (Ref: ${referenceNumber})`;
+        // 3. Record Immediate Assessment Received Email in scheduled_emails ledger
+        const resultsSubject = `[Founder Pressure Scan] Next Steps: Schedule Your Executive Review (Ref: ${referenceNumber})`;
         await prisma.scheduledEmail.upsert({
           where: { idempotencyKey: `results:${referenceNumber}` },
           create: {

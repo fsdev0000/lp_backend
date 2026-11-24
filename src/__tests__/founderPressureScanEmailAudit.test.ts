@@ -103,7 +103,7 @@ describe('Founder Pressure Scan — Complete Email Audit & Verification Suite', 
     expect(resultsEmail).not.toBeNull();
     expect(resultsEmail?.status).toBe('sent');
     expect(resultsEmail?.sentAt).not.toBeNull();
-    expect(resultsEmail?.subject).toContain('[Founder Pressure Scan] Your Executive Results Report');
+    expect(resultsEmail?.subject).toContain('[Founder Pressure Scan] Next Steps: Schedule Your Executive Review');
   });
 
   // ─── SCENARIO 2 & 3: FOLLOW-UPS (DAY 2 AND DAY 5) ─────────────────────────
@@ -131,7 +131,7 @@ describe('Founder Pressure Scan — Complete Email Audit & Verification Suite', 
 
     expect(f1).not.toBeNull();
     expect(f1?.status).toBe('pending');
-    expect(f1?.subject).toContain('Reviewing your scan results & next steps');
+    expect(f1?.subject).toContain('Schedule your consultation to review your results');
     // Day 2 should be approx 48 hours after subDate
     expect(f1?.sendAt.getTime()).toBeCloseTo(subDate.getTime() + 2 * 24 * 60 * 60 * 1000, -4);
 
@@ -170,7 +170,7 @@ describe('Founder Pressure Scan — Complete Email Audit & Verification Suite', 
         contactId: 'mock-contact-test-id',
         contactEmail: scanEmail,
         emailType: 'followup_1',
-        subject: `[Founder Pressure Scan] Reviewing your scan results & next steps (Ref: ${scanRef})`,
+        subject: `[Founder Pressure Scan] Schedule your consultation to review your results (Ref: ${scanRef})`,
         htmlBody: '<p>Followup</p>',
         sendAt: new Date(Date.now() - 60 * 1000), // Due 1 minute ago
         status: 'pending',
