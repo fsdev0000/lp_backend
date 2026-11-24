@@ -55,6 +55,20 @@ export interface PublishingFlags {
 
 const PUBLISHING_FLAGS_KEY = 'publishing_flags';
 
+/**
+ * Wraps a promise with a timeout in milliseconds.
+ * Ensures long-running or stalled DB pooler requests reject cleanly.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number = 5000): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 export const DEFAULT_PUBLISHING_FLAGS: PublishingFlags = {
   youtube: false,         // Off: no live posts until the owner says so (13 Nov 2026)
   instagram: false,       // Off: no live posts until the owner says so (13 Nov 2026)
@@ -73,9 +87,12 @@ export class CrmHealthService {
    */
   public async getPublishingFlags(): Promise<PublishingFlags> {
     try {
-      const setting = await (automationPrisma as any).crmSetting.findUnique({
-        where: { key: PUBLISHING_FLAGS_KEY },
-      });
+      const setting = await withTimeout<any>(
+        (automationPrisma as any).crmSetting.findUnique({
+          where: { key: PUBLISHING_FLAGS_KEY },
+        }),
+        5000
+      );
       if (setting && setting.value) {
         const val = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
         return {
@@ -100,15 +117,18 @@ export class CrmHealthService {
     };
 
     try {
-      await (automationPrisma as any).crmSetting.upsert({
-        where: { key: PUBLISHING_FLAGS_KEY },
-        update: { value: updated, updatedAt: new Date() },
-        create: {
-          key: PUBLISHING_FLAGS_KEY,
-          value: updated,
-          description: 'Per-platform auto-publishing toggles and dry-run flag for Social CRM',
-        },
-      });
+      await withTimeout(
+        (automationPrisma as any).crmSetting.upsert({
+          where: { key: PUBLISHING_FLAGS_KEY },
+          update: { value: updated, updatedAt: new Date() },
+          create: {
+            key: PUBLISHING_FLAGS_KEY,
+            value: updated,
+            description: 'Per-platform auto-publishing toggles and dry-run flag for Social CRM',
+          },
+        }),
+        5000
+      );
     } catch (e: any) {
       console.warn('[CrmHealthService] Could not persist publishing flags:', e?.message);
     }
@@ -125,29 +145,83 @@ export class CrmHealthService {
     let dbLatencyMs = 0;
 
     try {
-      // 5-second fast-fail timeout so a frozen DB pooler never hangs the daemon/worker for minutes
-      await Promise.race([
-        automationPrisma.$queryRaw`SELECT 1`,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('DB ping timeout (5s)')), 5000)),
-      ]);
+      // 5-second fast-fail timeout so a frozen DB pooler never hangs the daemon/worker
+      await withTimeout(automationPrisma.$queryRaw`SELECT 1`, 5000);
       dbLatencyMs = Date.now() - startDb;
     } catch {
       dbStatus = 'DOWN';
       dbLatencyMs = Date.now() - startDb;
     }
 
-    const publishingFlags = await this.getPublishingFlags();
     const now = new Date();
 
-    // Query social account connections from database
-    let connections: any[] = [];
-    try {
-      connections = await automationPrisma.socialAccount.findMany({
-        where: { isActive: true },
-      });
-    } catch {
-      connections = [];
-    }
+    // Query n8n flows from JobRun table with 5s timeout
+    const getFlowStatus = async (workflowName: string): Promise<FlowHealthStatus> => {
+      try {
+        const lastRun = await withTimeout(
+          automationPrisma.jobRun.findFirst({
+            where: { workflow: { contains: workflowName, mode: 'insensitive' } },
+            orderBy: { startedAt: 'desc' },
+          }),
+          5000
+        );
+
+        if (!lastRun) {
+          return {
+            name: workflowName,
+            lastRunAt: null,
+            lastStatus: 'NEVER_RUN',
+          };
+        }
+
+        const durationMs =
+          lastRun.finishedAt && lastRun.startedAt
+            ? new Date(lastRun.finishedAt).getTime() - new Date(lastRun.startedAt).getTime()
+            : null;
+
+        return {
+          name: workflowName,
+          lastRunAt: lastRun.finishedAt ? new Date(lastRun.finishedAt).toISOString() : new Date(lastRun.startedAt).toISOString(),
+          lastStatus: lastRun.error ? 'FAILED' : 'SUCCESS',
+          lastExecutionId: lastRun.id,
+          durationMs,
+        };
+      } catch {
+        return {
+          name: workflowName,
+          lastRunAt: null,
+          lastStatus: 'NEVER_RUN',
+        };
+      }
+    };
+
+    // Query social account connections with 5s timeout
+    const fetchConnections = async (): Promise<any[]> => {
+      try {
+        return await withTimeout(
+          automationPrisma.socialAccount.findMany({
+            where: { isActive: true },
+          }),
+          5000
+        );
+      } catch {
+        return [];
+      }
+    };
+
+    // Execute publishing flags, connections, and flow health queries concurrently to guarantee response <= 10s
+    const [publishingFlags, connections, [flow1, flow2, flow3, flow4, flow5, errorFlow]] = await Promise.all([
+      this.getPublishingFlags(),
+      fetchConnections(),
+      Promise.all([
+        getFlowStatus('Content Dump'),
+        getFlowStatus('Publisher'),
+        getFlowStatus('Inventory Check'),
+        getFlowStatus('Calendar Verification'),
+        getFlowStatus('Daily Digest'),
+        getFlowStatus('Error Alert'),
+      ]),
+    ]);
 
     const getDaysRemaining = (expDate?: Date | null): number | null => {
       if (!expDate) return null;
@@ -197,52 +271,6 @@ export class CrmHealthService {
       autoPublishEnabled: publishingFlags.linkedin && !publishingFlags.dryRunGlobal,
       details: 'Community Management API review in progress under App ID 78ocx3kz1moo0s',
     };
-
-    // Query n8n flows from JobRun table
-    const getFlowStatus = async (workflowName: string): Promise<FlowHealthStatus> => {
-      try {
-        const lastRun = await automationPrisma.jobRun.findFirst({
-          where: { workflow: { contains: workflowName, mode: 'insensitive' } },
-          orderBy: { startedAt: 'desc' },
-        });
-
-        if (!lastRun) {
-          return {
-            name: workflowName,
-            lastRunAt: null,
-            lastStatus: 'NEVER_RUN',
-          };
-        }
-
-        const durationMs =
-          lastRun.finishedAt && lastRun.startedAt
-            ? new Date(lastRun.finishedAt).getTime() - new Date(lastRun.startedAt).getTime()
-            : null;
-
-        return {
-          name: workflowName,
-          lastRunAt: lastRun.finishedAt ? new Date(lastRun.finishedAt).toISOString() : new Date(lastRun.startedAt).toISOString(),
-          lastStatus: lastRun.error ? 'FAILED' : 'SUCCESS',
-          lastExecutionId: lastRun.id,
-          durationMs,
-        };
-      } catch {
-        return {
-          name: workflowName,
-          lastRunAt: null,
-          lastStatus: 'NEVER_RUN',
-        };
-      }
-    };
-
-    const [flow1, flow2, flow3, flow4, flow5, errorFlow] = await Promise.all([
-      getFlowStatus('Content Dump'),
-      getFlowStatus('Publisher'),
-      getFlowStatus('Inventory Check'),
-      getFlowStatus('Calendar Verification'),
-      getFlowStatus('Daily Digest'),
-      getFlowStatus('Error Alert'),
-    ]);
 
     let overallStatus: 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY' = 'HEALTHY';
     if (dbStatus === 'DOWN') {
