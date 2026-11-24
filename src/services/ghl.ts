@@ -273,7 +273,7 @@ export async function bookAppointment(
     }
   }
 
-  const startTime = `${dateTime}+04:00`;
+  const startTime = dateTime.includes('+') ? dateTime : `${dateTime}+04:00`;
   const startDate = new Date(startTime);
   const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
 
@@ -327,7 +327,7 @@ export async function updateAppointment(
   durationMinutes: number = 45
 ) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
-  const startTime = `${dateTime}+04:00`;
+  const startTime = dateTime.includes('+') ? dateTime : `${dateTime}+04:00`;
   const startDate = new Date(startTime);
   const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
 

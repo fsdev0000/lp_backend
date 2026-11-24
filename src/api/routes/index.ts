@@ -26,6 +26,7 @@ import {
   formatDubaiDateTime,
 } from '../../services/reminderService';
 import { inboxService } from '../../modules/automation/notifications/inbox.service';
+import { requireCrmAuth } from '../../middleware/crmRoleAuth';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -871,13 +872,10 @@ apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) =>
     }
 
     // ─── Sub-Task 5: Public API Response Sanitization ─────────────────────────
-    // Strictly ZERO numerical percentages or diagnostic risk tiers returned!
+    // Strictly ZERO numerical percentages, scores, or diagnostic signal details returned to founder
     return res.status(201).json({
       success: true,
       referenceNumber,
-      primarySignalAreas,
-      openingCopy: `Based on your responses, the strongest current signal appears in ${primaryJoined}.`,
-      qualitativeInterpretation: primaryInsight.interp,
       humanReviewNotice:
         "The automated outcome identifies directional signals based on your answers. Lionel Eersteling's Human Review will examine the context, interpretation, and deliberate control structures.",
       nextSteps: {
@@ -1085,11 +1083,11 @@ apiRoutes.get('/scan/lookup', async (req, res) => {
 
 /**
  * GET /api/v1/scan/review/:referenceNumber
- * Protected dossier view for Mr. Lionel
+ * Protected dossier view for Mr. Lionel (Requires CRM Auth)
  */
-apiRoutes.get('/scan/review/:referenceNumber', async (req, res) => {
+apiRoutes.get('/scan/review/:referenceNumber', requireCrmAuth, async (req, res) => {
   try {
-    const { referenceNumber } = req.params;
+    const referenceNumber = String(req.params.referenceNumber);
     const submission = await prisma.pressureScanSubmission.findFirst({
       where: {
         OR: [{ referenceNumber }, { id: referenceNumber }],
@@ -1131,11 +1129,11 @@ apiRoutes.get('/scan/review/:referenceNumber', async (req, res) => {
 
 /**
  * PATCH /api/v1/scan/review/:referenceNumber
- * Allows Lionel to save reviewer notes, decision, and update reviewStatus
+ * Allows Lionel to save reviewer notes, decision, and update reviewStatus (Requires CRM Auth)
  */
-apiRoutes.patch('/scan/review/:referenceNumber', async (req, res) => {
+apiRoutes.patch('/scan/review/:referenceNumber', requireCrmAuth, async (req, res) => {
   try {
-    const { referenceNumber } = req.params;
+    const referenceNumber = String(req.params.referenceNumber);
     const { reviewerNotes, reviewerDecision, reviewStatus, zoomMeetingUrl, scheduledReviewAt, reviewedBy } = req.body;
 
     const existing = await prisma.pressureScanSubmission.findFirst({
@@ -1170,11 +1168,11 @@ apiRoutes.patch('/scan/review/:referenceNumber', async (req, res) => {
 
 /**
  * GET /api/v1/scan/review/:referenceNumber/pdf
- * Downloads standard PDF 1.4 Dossier
+ * Downloads standard PDF 1.4 Dossier (Requires CRM Auth)
  */
-apiRoutes.get('/scan/review/:referenceNumber/pdf', async (req, res) => {
+apiRoutes.get('/scan/review/:referenceNumber/pdf', requireCrmAuth, async (req, res) => {
   try {
-    const { referenceNumber } = req.params;
+    const referenceNumber = String(req.params.referenceNumber);
     const submission = await prisma.pressureScanSubmission.findFirst({
       where: {
         OR: [{ referenceNumber }, { id: referenceNumber }],
@@ -1483,12 +1481,14 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       return res.status(400).json({ error: 'Bookings are limited to 1:30 PM - 7:00 PM (Dubai time).' });
     }
 
-    const dateTimeStr = `${date}T${formattedTime}:00`;
+    const rawDateTimeStr = `${date}T${formattedTime}:00`;
+    const dateTimeWithTz = `${rawDateTimeStr}+04:00`;
+    const appointmentDate = new Date(dateTimeWithTz);
     const appointmentTitle = `Personal Review Conversation - ${name || email}${reference ? ` (${reference})` : ''}`;
-    const appointmentData: any = await bookAppointment(contactId, dateTimeStr, appointmentTitle);
+    const appointmentData: any = await bookAppointment(contactId, dateTimeWithTz, appointmentTitle);
     const appointmentId = appointmentData?.id || appointmentData?.calendarEvent?.id || undefined;
 
-    console.log(`[Booking Scheduled] Successfully booked for ${email} (${name || 'Founder'}) at ${dateTimeStr} [Ref: ${reference || 'N/A'}]`);
+    console.log(`[Booking Scheduled] Successfully booked for ${email} (${name || 'Founder'}) at ${dateTimeWithTz} [Ref: ${reference || 'N/A'}]`);
 
     if (reference) {
       await prisma.pressureScanSubmission.updateMany({
@@ -1499,7 +1499,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
           ],
         },
         data: {
-          scheduledReviewAt: new Date(dateTimeStr),
+          scheduledReviewAt: appointmentDate,
           zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
         },
       }).catch((e: unknown) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
@@ -1531,7 +1531,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
 
     // Record Immediate Booking Confirmation Email in scheduled_emails
     const bookingConfSubject = `[Confirmed] 1-on-1 Strategic Review with Lionel Eersteling (Ref: ${reference || 'FPS-2026-N/A'})`;
-    const bookingConfKey = `booking_confirmation:${reference || email}:${new Date(dateTimeStr).getTime()}`;
+    const bookingConfKey = `booking_confirmation:${reference || email}:${appointmentDate.getTime()}`;
     await prisma.scheduledEmail.upsert({
       where: { idempotencyKey: bookingConfKey },
       create: {
@@ -1563,7 +1563,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       participantName: finalName || 'Founder',
       companyName: finalCompany,
       phone: finalPhone,
-      appointmentDate: new Date(dateTimeStr),
+      appointmentDate: appointmentDate,
       zoomUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     });
 
@@ -1575,7 +1575,7 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       email: email,
       phone: finalPhone || undefined,
       companyName: finalCompany || 'Enterprise',
-      dateTimeStr: dateTimeStr,
+      dateTimeStr: dateTimeWithTz,
       referenceNumber: reference || 'FPS-2026-N/A',
       zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     }).catch((e) => console.error('[Pressure Scan] Error sending calendar booking emails:', e));
@@ -1602,11 +1602,22 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
     res.json({
       success: true,
       message: 'Session successfully booked',
-      scheduledReviewAt: dateTimeStr,
+      scheduledReviewAt: appointmentDate.toISOString(),
       zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error scheduling booking:', error);
+    const msg = (error?.message || String(error)).toLowerCase();
+    if (
+      msg.includes('already taken') ||
+      msg.includes('conflict') ||
+      msg.includes('busy') ||
+      msg.includes('unavailable') ||
+      msg.includes('slot') ||
+      error?.status === 409
+    ) {
+      return res.status(409).json({ error: 'This time slot is no longer available. Please select another time.' });
+    }
     res.status(500).json({ error: 'Failed to schedule booking' });
   }
 });
@@ -1638,8 +1649,9 @@ apiRoutes.post('/booking/reschedule', async (req, res) => {
       formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
     }
 
-    const dateTimeStr = `${date}T${formattedTime}:00`;
-    const newAppointmentDate = new Date(dateTimeStr);
+    const rawDateTimeStr = `${date}T${formattedTime}:00`;
+    const dateTimeWithTz = `${rawDateTimeStr}+04:00`;
+    const newAppointmentDate = new Date(dateTimeWithTz);
 
     // Update PressureScanSubmission
     if (reference || email) {
@@ -1670,7 +1682,7 @@ apiRoutes.post('/booking/reschedule', async (req, res) => {
       email: email.toLowerCase().trim(),
       phone: req.body.phone,
       companyName: req.body.company,
-      dateTimeStr,
+      dateTimeStr: dateTimeWithTz,
       referenceNumber: reference || 'FPS-2026-N/A',
       zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     }).catch((e) => console.error('[Booking Reschedule] Error sending confirmation:', e));
@@ -1686,12 +1698,12 @@ apiRoutes.post('/booking/reschedule', async (req, res) => {
       entityId: reference || appointmentId || email,
       dedupeKey: `BOOKING_RESCHEDULED:${email}:${date}:${time}`,
       roles: ['Approver', 'Advisor'],
-    }).catch((err) => console.warn('[Booking Reschedule] Inbox notify warning:', err?.message));
+      }).catch((err) => console.warn('[Booking Reschedule] Inbox notify warning:', err?.message));
 
     return res.status(200).json({
       success: true,
       message: 'Appointment successfully rescheduled',
-      scheduledReviewAt: dateTimeStr,
+      scheduledReviewAt: newAppointmentDate.toISOString(),
       reminderUpdate,
     });
   } catch (err: any) {

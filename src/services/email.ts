@@ -246,16 +246,29 @@ export async function resolveScanPdfAttachmentUrl(
       try {
         const supabase = await getSupabaseClient();
         const suffix = audience === 'participant' ? 'Results' : 'Executive_Dossier';
-        const objectPath = `pressure-scans/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`;
-        const { error: uploadError } = await supabase.storage.from('avatars').upload(objectPath, pdfBuffer, {
+        const objectPath = `scans/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`;
+        
+        // Use private bucket 'dossiers' with signed URL, fallback to 'avatars' with signed URL
+        let bucket = 'dossiers';
+        let uploadError = (await supabase.storage.from(bucket).upload(objectPath, pdfBuffer, {
           contentType: 'application/pdf',
           upsert: true,
-        });
+        })).error;
+
+        if (uploadError) {
+          bucket = 'avatars';
+          uploadError = (await supabase.storage.from('avatars').upload(`private-dossiers/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`, pdfBuffer, {
+            contentType: 'application/pdf',
+            upsert: true,
+          })).error;
+        }
 
         if (!uploadError) {
-          const { data: pubData } = supabase.storage.from('avatars').getPublicUrl(objectPath);
-          if (pubData?.publicUrl) {
-            return pubData.publicUrl;
+          const path = bucket === 'dossiers' ? objectPath : `private-dossiers/Founder_Pressure_Scan_${submission.referenceNumber}_${suffix}.pdf`;
+          // Short-lived signed URL (valid for 7 days / 604800s)
+          const { data: signedData } = await supabase.storage.from(bucket).createSignedUrl(path, 7 * 24 * 3600);
+          if (signedData?.signedUrl) {
+            return signedData.signedUrl;
           }
         }
       } catch (uploadErr) {
@@ -530,7 +543,10 @@ export async function sendCalendarBookingEmails(data: CalendarBookingEmailData) 
   // Format date nicely (Dubai GST)
   let formattedDate = data.dateTimeStr;
   try {
-    const d = new Date(data.dateTimeStr);
+    const strWithTz = data.dateTimeStr.includes('+') || data.dateTimeStr.endsWith('Z')
+      ? data.dateTimeStr
+      : `${data.dateTimeStr}+04:00`;
+    const d = new Date(strWithTz);
     formattedDate = d.toLocaleString('en-GB', {
       dateStyle: 'full',
       timeStyle: 'short',

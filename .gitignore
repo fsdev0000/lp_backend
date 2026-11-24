@@ -9,3 +9,5 @@ private/*.key
 # macOS Finder metadata
 .DS_Store
 .vercel
+uploads/
+uploads
