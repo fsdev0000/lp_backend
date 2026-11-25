@@ -372,7 +372,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
         organizationUrn: orgUrn,
         name: conn?.accountName || 'Leaders Performance',
         vanityName,
-        description: 'Executive Coaching, High-Performance Systems & Sovereign Leadership.',
+        description: 'Strategic Growth Partner | Executive Coaching, High-Performance Systems & Sovereign Leadership.',
         logoUrl: conn?.profilePictureUrl || null,
         connected: true,
         followers,
@@ -866,8 +866,8 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           typeof st.impressionCount === 'number'
             ? st.impressionCount
             : typeof st.uniqueImpressionsCount === 'number'
-            ? st.uniqueImpressionsCount
-            : 0;
+              ? st.uniqueImpressionsCount
+              : 0;
         const clicks = typeof st.clickCount === 'number' ? st.clickCount : 0;
         const reactions = typeof st.likeCount === 'number' ? st.likeCount : 0;
         const comments = typeof st.commentCount === 'number' ? st.commentCount : 0;
@@ -1160,15 +1160,15 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
                   row.comments =
                     typeof metaData?.commentSummary?.count === 'number' ? metaData.commentSummary.count : 0;
                 }
-              } catch {}
+              } catch { }
 
               // B. Creator post analytics (impressions, reshares)
               const types = ['IMPRESSION', 'RESHARE'];
               const entityTuple = row.urn.startsWith('urn:li:share:')
                 ? `(share:${encodeURIComponent(row.urn)})`
                 : row.urn.startsWith('urn:li:ugcPost:')
-                ? `(ugcPost:${encodeURIComponent(row.urn)})`
-                : encodeURIComponent(row.urn);
+                  ? `(ugcPost:${encodeURIComponent(row.urn)})`
+                  : encodeURIComponent(row.urn);
 
               for (const t of types) {
                 try {
@@ -1182,7 +1182,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
                       if (t === 'RESHARE') row.reposts = count;
                     }
                   }
-                } catch {}
+                } catch { }
               }
 
               if (typeof row.impressions === 'number' && row.impressions > 0) {

@@ -25,7 +25,7 @@ newsletterRouter.get('/newsletter/pdf', async (_req: Request, res: Response) => 
     const campaignKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     const signedUrl = await getNewsletterPdfAttachmentUrl(campaignKey);
     if (!signedUrl) {
-      return res.status(404).json({ success: false, message: 'Newsletter PDF not available for the current month' });
+      return res.status(404).json({ success: false, message: 'Newsletter PDF not available' });
     }
     res.set('Cache-Control', 'no-store');
     return res.redirect(302, signedUrl);

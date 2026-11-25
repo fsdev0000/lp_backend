@@ -34,21 +34,46 @@ export async function getNewsletterPdfAttachmentUrl(
 
     // If path is empty or a campaign key format like '2026-10'
     if (!targetPath || /^20\d\d-\d\d$/.test(targetPath)) {
-      const [year, month] = (targetPath || '2026-10').split('-');
-      const folderPath = `${year}/${month}`;
+      const now = new Date();
+      const defaultYear = now.getUTCFullYear();
+      const defaultMonth = now.getUTCMonth() + 1;
 
-      // Query files in that folder from Supabase storage
-      const { data: files } = await supabase.storage.from(NEWSLETTER_BUCKET).list(folderPath);
+      let targetYear = targetPath ? parseInt(targetPath.split('-')[0], 10) : defaultYear;
+      let targetMonth = targetPath ? parseInt(targetPath.split('-')[1], 10) : defaultMonth;
+      let resolvedFile: string | null = null;
 
-      const pdfFile = files?.find(
-        (f) => f.name.toLowerCase().endsWith('.pdf') && f.name !== '.emptyFolderPlaceholder'
-      );
+      // Check target month; if empty, fall back to the latest available preceding month (up to 12 months)
+      for (let i = 0; i < 12; i++) {
+        const folderPath = `${targetYear}/${String(targetMonth).padStart(2, '0')}`;
+        try {
+          const { data: files, error } = await supabase.storage.from(NEWSLETTER_BUCKET).list(folderPath);
 
-      if (pdfFile) {
-        targetPath = `${folderPath}/${pdfFile.name}`;
+          if (!error && Array.isArray(files) && files.length > 0) {
+            const pdfFile = files.find(
+              (f) => f.name.toLowerCase().endsWith('.pdf') && f.name !== '.emptyFolderPlaceholder'
+            );
+
+            if (pdfFile) {
+              resolvedFile = `${folderPath}/${pdfFile.name}`;
+              break;
+            }
+          }
+        } catch (_) {
+          // Continue search in previous month
+        }
+
+        targetMonth--;
+        if (targetMonth < 1) {
+          targetMonth = 12;
+          targetYear--;
+        }
+      }
+
+      if (resolvedFile) {
+        targetPath = resolvedFile;
       } else {
-        // Fallback default convention for October 2026
-        targetPath = `${folderPath}/NEWSLETTER_DESKTOP_FINAL_REVISED.pdf`;
+        // Fallback default convention
+        targetPath = '2026/11/NEWSLETTER NOVEMBER.pdf';
       }
     }
 
