@@ -1,2 +1,13 @@
 node_modules
 .env
+dist
+dist/
+*.log
+private/*.json
+private/*.key
+
+# macOS Finder metadata
+.DS_Store
+.vercel
+uploads/
+uploads

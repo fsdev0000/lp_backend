@@ -1,0 +1,539 @@
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, jest } from '@jest/globals';
+import request from 'supertest';
+import express from 'express';
+import { PrismaClient } from '@prisma/client';
+import { masterclassRouter } from '../api/routes/masterclass';
+
+const prisma = new PrismaClient();
+
+const app = express();
+app.use(express.json());
+app.use('/masterclass', masterclassRouter);
+app.use('/api/v1/masterclass', masterclassRouter);
+
+// Booking tests need bookable days, so they use weekdays about a week ahead instead of fixed dates that expire.
+const nextWeekday = (from: Date): Date => {
+  const d = new Date(from);
+  do {
+    d.setUTCDate(d.getUTCDate() + 1);
+  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d;
+};
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const BOOK_DAY = nextWeekday(new Date(Date.now() + 6 * 24 * 60 * 60 * 1000));
+const BOOK_DATE = ymd(BOOK_DAY);
+const RESCHEDULE_DATE = ymd(nextWeekday(BOOK_DAY));
+
+// Only the bookings these tests make. Deleting by date would also remove real bookings on those days.
+const TEST_BOOKING_EMAILS = ['founder_alpha@enterprise.com', 'founder_beta@enterprise.com'];
+
+describe('Masterclass API & Recognition Endpoints', () => {
+  beforeAll(async () => {
+    await prisma.masterclassBooking.deleteMany({ where: { email: { in: TEST_BOOKING_EMAILS } } });
+  });
+
+  afterAll(async () => {
+    await prisma.masterclassBooking.deleteMany({ where: { email: { in: TEST_BOOKING_EMAILS } } });
+    await prisma.$disconnect();
+  });
+
+  beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_mock_stripe_key';
+    process.env.FRONTEND_URL = 'https://leadersperformance.ae';
+  });
+
+  describe('Stage 1: Identification, Validation & Registration', () => {
+    it('should reject identify request when email is missing or invalid', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/auth/identify')
+        .send({ email: 'not-an-email' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject session creation with missing required fields', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/create-session')
+        .send({
+          email: 'alexander@example.com',
+          // missing fullName & company
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(res.body.details).toHaveProperty('fullName');
+      expect(res.body.details).toHaveProperty('company');
+    });
+
+    it('should require session_id in verify-payment endpoint', async () => {
+      const res = await request(app).get('/api/v1/masterclass/verify-payment');
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('MISSING_SESSION_ID');
+    });
+
+    it('should require session_id in payment-status endpoint', async () => {
+      const res = await request(app).get('/api/v1/masterclass/payment-status');
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('MISSING_SESSION_ID');
+    });
+  });
+
+  describe('Stage 2: Curriculum & Draft Auto-Saving', () => {
+    it('should return masterclass modules curriculum and structure', async () => {
+      const res = await request(app).get('/api/v1/masterclass/modules');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.totalModules).toBe(4);
+      expect(res.body.modules).toHaveLength(4);
+      expect(res.body.modules[0].stageNumber).toBe(1);
+      expect(res.body.modules[0].title).toBe('Define the Next Stage');
+      expect(res.body.modules[3].stageNumber).toBe(4);
+      expect(res.body.modules[3].title).toBe('Your Next Move');
+    });
+
+    it('should reject saving draft with missing email or invalid stage', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/save-draft')
+        .send({
+          email: 'not-valid',
+          currentStage: 99, // exceeds 4
+          formData: {},
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject draft fetch when email parameter is missing', async () => {
+      const res = await request(app).get('/api/v1/masterclass/draft');
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('MISSING_EMAIL');
+    });
+
+    it('should reject draft save when an answer exceeds 1,000 characters', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/save-draft')
+        .send({
+          email: 'alexander@example.com',
+          currentStage: 1,
+          formData: {
+            stage1_nextStage: 'A'.repeat(1001),
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+  });
+
+  describe('Stage 3: Workbook Submission & Storage Validation', () => {
+    it('should reject workbook submission when required fields are missing', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/submit-workbook')
+        .send({
+          participantDetails: {
+            fullName: 'Alexander Wright',
+            email: 'alexander@example.com',
+            company: 'Apex Dynamics',
+          },
+          formData: {
+            // Missing all stage 1-4 fields
+            stage1_nextStage: '',
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject workbook submission when an answer exceeds 1,000 characters', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/submit-workbook')
+        .send({
+          participantDetails: {
+            fullName: 'Alexander Wright',
+            email: 'alexander@example.com',
+            company: 'Apex Dynamics',
+          },
+          formData: {
+            stage1_nextStage: 'A'.repeat(1005),
+            stage1_possibility: 'Valid unlock',
+            stage1_strength: 'Valid strength',
+            stage2_changes: 'Valid changes',
+            stage2_demand1: 'Valid demand',
+            stage2_investment: 'Valid investment',
+            stage3_founderStrength: 'Valid standard',
+            stage3_teamStrength: 'Valid team standard',
+            stage3_orgStrength: 'Valid org standard',
+            stage4_priority90Days: 'Valid priority',
+            stage4_action7Days: 'Valid action',
+            stage4_evidence: 'Valid evidence',
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+  });
+
+  describe('Stage 4: 1-on-1 Strategic Review Available Slots & Booking', () => {
+    it('should return available strategic review slots and timezones', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ timezone: 'GST (UTC+4)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.timezone).toBe('GST (UTC+4)');
+      expect(Array.isArray(res.body.availableSlots)).toBe(true);
+      expect(res.body.availableSlots.length).toBeGreaterThan(0);
+      expect(Array.isArray(res.body.timezones)).toBe(true);
+    }, 10000);
+
+    it('should return exact 3 canonical slots (1:30 PM, 2:30 PM, 3:30 PM) for a specific date', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-11-09', timezone: 'GST (UTC+4)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      expect(res.body.slots[0].dubaiLabel).toBe('1:30 PM – 2:15 PM GST');
+      expect(res.body.slots[1].dubaiLabel).toBe('2:30 PM – 3:15 PM GST');
+      expect(res.body.slots[2].dubaiLabel).toBe('3:30 PM – 4:15 PM GST');
+    });
+
+    it('should correctly format slots in participant local timezone (e.g. EST)', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-11-09', timezone: 'EST (UTC-5)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      expect(res.body.slots[0].localRange).toContain('4:30 AM');
+      expect(res.body.slots[1].localRange).toContain('5:30 AM');
+      expect(res.body.slots[2].localRange).toContain('6:30 AM');
+    });
+
+    it('should return month availability mapping for DaisyBookingScreen calendar widget', async () => {
+      const res = await request(app)
+        .get('/api/v1/masterclass/availability/month')
+        .query({ year: BOOK_DAY.getUTCFullYear(), month: BOOK_DAY.getUTCMonth() + 1 });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body).toBe('object');
+      expect(res.body).toHaveProperty(BOOK_DATE);
+      expect(Array.isArray(res.body[BOOK_DATE])).toBe(true);
+      expect(res.body[BOOK_DATE]).toEqual(expect.arrayContaining(['13:30', '14:30', '15:30']));
+    });
+
+    it('should accurately identify passed time slots and mark them unavailable with isPast: true', async () => {
+      // Query a past date
+      const res = await request(app)
+        .get('/api/v1/masterclass/available-slots')
+        .query({ date: '2026-01-05', timezone: 'GST (UTC+4)' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.slots).toHaveLength(3);
+      // All slots in past date must be marked as passed and unavailable
+      expect(res.body.slots[0].isPast).toBe(true);
+      expect(res.body.slots[0].available).toBe(false);
+      expect(res.body.slots[0].status).toBe('passed');
+      expect(res.body.slots[1].isPast).toBe(true);
+      expect(res.body.slots[1].available).toBe(false);
+      expect(res.body.slots[2].isPast).toBe(true);
+      expect(res.body.slots[2].available).toBe(false);
+      // availableSlots array must be empty, not fall back to invalid slots
+      expect(res.body.availableSlots).toEqual([]);
+    });
+
+    it('should reject booking a slot whose scheduled time has already passed', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'past_tester@example.com',
+          fullName: 'Past Tester',
+          company: 'Past Corp',
+          selectedSlot: '2026-01-05 at 1:30 PM – 2:15 PM',
+          timezone: 'GST (UTC+4)',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('SLOT_PASSED');
+      expect(res.body.message).toContain('already passed');
+    });
+
+    it('should reject booking slot when participant info is missing', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'alexander@example.com',
+          // missing fullName, company, selectedSlot
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+      expect(res.body.details).toHaveProperty('fullName');
+      expect(res.body.details).toHaveProperty('company');
+      expect(res.body.details).toHaveProperty('selectedSlot');
+    });
+
+    it('should prevent overlapping or duplicate bookings with 409 Conflict', async () => {
+      // First booking
+      const res1 = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'founder_alpha@enterprise.com',
+          fullName: 'Founder Alpha',
+          company: 'Alpha Corp',
+          selectedSlot: `${BOOK_DATE} at 1:30 PM – 2:15 PM`,
+          timezone: 'GST (UTC+4)',
+          submissionRef: 'FNM-2026-ALPHA',
+        });
+
+      expect(res1.status).toBe(200);
+      expect(res1.body.success).toBe(true);
+      expect(res1.body.bookingRef).toMatch(/^MBK-\d{4}-\d{4}$/);
+
+      // Attempt conflicting booking for same date and slot
+      const res2 = await request(app)
+        .post('/api/v1/masterclass/book-slot')
+        .send({
+          email: 'founder_beta@enterprise.com',
+          fullName: 'Founder Beta',
+          company: 'Beta Corp',
+          selectedSlot: `${BOOK_DATE} at 1:30 PM – 2:15 PM`,
+          timezone: 'GST (UTC+4)',
+          submissionRef: 'FNM-2026-BETA',
+        });
+
+      expect(res2.status).toBe(409);
+      expect(res2.body.success).toBe(false);
+      expect(res2.body.message).toContain('no longer available');
+
+      // Reschedule first booking to a different time
+      const resResched = await request(app)
+        .post('/api/v1/masterclass/reschedule')
+        .send({
+          bookingRef: res1.body.bookingRef,
+          newDate: RESCHEDULE_DATE,
+          newSlotTime: '2:30 PM – 3:15 PM',
+          timezone: 'GST (UTC+4)',
+          reason: 'Founder board meeting rescheduled',
+        });
+
+      expect(resResched.status).toBe(200);
+      expect(resResched.body.success).toBe(true);
+      expect(resResched.body.slotTime).toContain(RESCHEDULE_DATE);
+    }, 30000);
+  });
+
+  describe('Stage 2: Dynamic Config, 4-Stage Questions & 6 Private Videos', () => {
+    it('should return masterclass dynamic config with 4 stages and 6 videos', async () => {
+      const res = await request(app).get('/api/v1/masterclass/config');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.stages)).toBe(true);
+      expect(res.body.stages.length).toBe(4);
+      expect(Array.isArray(res.body.videos)).toBe(true);
+      expect(res.body.videos.length).toBe(6);
+      expect(res.body.stages[0]).toHaveProperty('questions');
+      expect(res.body).toHaveProperty('thumbnails');
+      expect(res.body.thumbnails).toHaveProperty('welcome');
+      expect(res.body.thumbnails).toHaveProperty('stage1');
+      expect(res.body.thumbnails).toHaveProperty('stage2');
+      expect(res.body.thumbnails).toHaveProperty('stage3');
+      expect(res.body.thumbnails).toHaveProperty('stage4');
+      expect(res.body.thumbnails).toHaveProperty('closing');
+      expect(res.body.thumbnails.welcome).toContain('supabase.co');
+    }, 15000);
+
+    it('should allow POST /config with email', async () => {
+      const res = await request(app)
+        .post('/api/v1/masterclass/config')
+        .send({ email: 'newfounder@company.com' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.userExists).toBe(false);
+      expect(Array.isArray(res.body.videos)).toBe(true);
+      expect(Array.isArray(res.body.stages)).toBe(true);
+      expect(res.body.stages[0]).toHaveProperty('thumbnailUrl');
+    }, 15000);
+
+    it('should return 6 video objects with private signed URLs and thumbnails from GET /videos', async () => {
+      const res = await request(app).get('/api/v1/masterclass/videos');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.totalVideos).toBe(6);
+      expect(res.body.videos).toHaveLength(6);
+      expect(res.body.videos[1].fileName).toBe('STAGE-01.mp4');
+      expect(res.body.videos[1].signedUrl).toContain('supabase.co');
+      expect(res.body.videos[1].thumbnailFileName).toBe('STAGE-01.jpg');
+      expect(res.body.videos[1].thumbnailUrl).toContain('supabase.co');
+    }, 15000);
+
+    it('should allow updating masterclass questions via PUT /config/questions', async () => {
+      const res = await request(app)
+        .put('/api/v1/masterclass/config/questions')
+        .send({ reflectionPauseDurationSeconds: 45 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.config.reflectionPauseDurationSeconds).toBe(45);
+    });
+  });
+
+  describe('Worksheet Review & PDF Download Endpoints', () => {
+    let testSubmissionRef = 'FNM-2026-UNITTEST';
+    let testSubmissionId = '';
+
+    beforeAll(async () => {
+      // Clean up previous test data
+      await prisma.masterclassWorkbookSubmission.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+      await prisma.masterclassEnrollment.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+
+      // Create test enrollment
+      const enrollment = await prisma.masterclassEnrollment.create({
+        data: {
+          email: 'lionel_test_user@enterprise.com',
+          fullName: 'Alexander Vance',
+          company: 'Vance Aerospace',
+          role: 'Chief Executive Officer',
+          phone: '+971501234567',
+          paymentStatus: 'paid',
+          accessGranted: true,
+          courseProgress: 100,
+          currentStage: 4,
+        },
+      });
+
+      // Create test submission
+      const submission = await prisma.masterclassWorkbookSubmission.create({
+        data: {
+          submissionRef: testSubmissionRef,
+          enrollmentId: enrollment.id,
+          email: 'lionel_test_user@enterprise.com',
+          fullName: 'Alexander Vance',
+          company: 'Vance Aerospace',
+          role: 'Chief Executive Officer',
+          phone: '+971501234567',
+          status: 'submitted',
+          currentStage: 4,
+          formData: JSON.stringify({
+            stage1_nextStage: 'Global defense fleet expansion',
+            stage1_possibility: '10x capability enhancement',
+            stage1_strength: 'Proprietary propulsion tech',
+            stage2_changes: 'High regulatory scrutiny',
+            stage2_demand1: 'Sovereign governance board',
+            stage2_investment: 'Capital allocation shift',
+            stage3_founderStrength: 'Direct architectural vision',
+            stage3_focusArea: 'Operational scale-up',
+            stage4_priority30Days: 'Establish regional command center',
+            stage4_action7Days: 'Sign prime supplier agreements',
+          }),
+          personalNotes: JSON.stringify({
+            founderFocus: 'Prioritize executive alignment',
+          }),
+          submittedAt: new Date(),
+        },
+      });
+      testSubmissionId = submission.id;
+    });
+
+    afterAll(async () => {
+      await prisma.masterclassWorkbookSubmission.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+      await prisma.masterclassEnrollment.deleteMany({
+        where: { email: 'lionel_test_user@enterprise.com' },
+      });
+    });
+
+    it('should return user worksheet responses and progress via GET /masterclass/internal-review/:worksheetId', async () => {
+      const res = await request(app)
+        .get(`/masterclass/internal-review/${testSubmissionRef}`)
+        .set('Accept', 'application/json');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.email).toBe('lionel_test_user@enterprise.com');
+      expect(res.body.user.fullName).toBe('Alexander Vance');
+      expect(res.body.user.company).toBe('Vance Aerospace');
+      expect(res.body.progress.courseProgress).toBe(100);
+      expect(res.body.progress.currentStage).toBe(4);
+      expect(res.body.progress.isCompleted).toBe(true);
+      expect(res.body.responses.stage1_nextStage).toBe('Global defense fleet expansion');
+      expect(res.body.responses.stage4_priority30Days).toBe('Establish regional command center');
+      expect(res.body.personalNotes.founderFocus).toBe('Prioritize executive alignment');
+      expect(res.body.pdfDownloadUrl).toContain(`/masterclass/internal-review/`);
+      expect(res.body.pdfDownloadUrl).toContain(`/pdf`);
+    }, 15000);
+
+    it('should also load user responses by UUID via GET /masterclass/internal-review/:worksheetId', async () => {
+      const res = await request(app)
+        .get(`/masterclass/internal-review/${testSubmissionId}`)
+        .set('Accept', 'application/json');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.worksheetId).toBe(testSubmissionId);
+      expect(res.body.user.email).toBe('lionel_test_user@enterprise.com');
+      expect(res.body.responses.stage1_nextStage).toBe('Global defense fleet expansion');
+    }, 15000);
+
+    it('should download worksheet PDF via GET /masterclass/worksheet/:worksheetId/pdf', async () => {
+      const res = await request(app).get(`/masterclass/worksheet/${testSubmissionRef}/pdf`);
+
+      expect(res.status).toBe(200);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.header['content-disposition']).toContain(`WorkSheet-FNM-2026-UNITTEST.pdf`);
+      expect(res.body).toBeInstanceOf(Buffer);
+      expect(res.body.length).toBeGreaterThan(1000);
+      // Valid PDF magic header
+      expect(res.body.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    }, 15000);
+
+    it('should download worksheet PDF via GET /masterclass/internal-review/:worksheetId/pdf', async () => {
+      const res = await request(app).get(`/masterclass/internal-review/${testSubmissionId}/pdf`);
+
+      expect(res.status).toBe(200);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.body).toBeInstanceOf(Buffer);
+      expect(res.body.length).toBeGreaterThan(1000);
+      expect(res.body.slice(0, 5).toString('ascii')).toBe('%PDF-');
+    }, 15000);
+
+    it('should return 404 when worksheet is not found for PDF download', async () => {
+      const res = await request(app).get('/masterclass/worksheet/NON_EXISTENT_REF/pdf');
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('NOT_FOUND');
+    }, 15000);
+  });
+});
+

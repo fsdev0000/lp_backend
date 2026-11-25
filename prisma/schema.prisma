@@ -88,3 +88,1087 @@ model SystemLog {
   details   String?  // Serialized JSON of log context
   createdAt DateTime @default(now())
 }
+
+model ConsentAuditLog {
+  id                String   @id @default(uuid())
+  consentId         String
+  anonymousId       String?
+  eventType         String
+  strictlyNecessary Boolean  @default(true)
+  functional        Boolean
+  analytics         Boolean
+  marketing         Boolean
+  personalization   Boolean
+  policyVersion     String
+  bannerVersion     String
+  jurisdiction      String?
+  ipAddress         String?
+  userAgent         String?
+  idempotencyKey    String   @unique
+  createdAt         DateTime @default(now())
+
+  @@index([consentId])
+}
+
+model Article {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug            String    @unique
+  title           String
+  excerpt         String
+  pillar          String
+  pillarColor     String?   @default("hsl(122,31%,42%)") @map("pillar_color")
+  keywords        String[]  @default([])
+  metaTitle       String    @map("meta_title")
+  metaDescription String    @map("meta_description")
+  publishDate     DateTime? @default(now()) @db.Date @map("publish_date")
+  readingTime     Int?      @default(5) @map("reading_time")
+  author          String?   @default("Lionel Eersteling")
+  content         String
+  published       Boolean?  @default(true)
+  createdAt       DateTime? @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt       DateTime? @default(now()) @updatedAt @db.Timestamptz(6) @map("updated_at")
+
+  @@map("articles")
+}
+
+model NewsletterSubscriber {
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  firstName            String?   @map("first_name")
+  consentGiven         Boolean   @default(true) @map("consent_given")
+  consentDate          DateTime  @default(now()) @map("consent_date")
+  consentSource        String    @default("website") @map("consent_source")
+  privacyPolicyVersion String    @default("v2026.3") @map("privacy_policy_version")
+  subscribed           Boolean   @default(true)
+  unsubscribeToken     String?   @unique @map("unsubscribe_token")
+  unsubscribedAt       DateTime? @map("unsubscribed_at")
+  status               String    @default("subscribed")
+  source               String?   @default("Website Footer")
+  ghlContactId         String?
+  firstIssueSent       Boolean   @default(false)
+  firstIssueSentAt     DateTime?
+  subscribedAt         DateTime  @default(now())
+  createdAt            DateTime? @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt
+
+  campaignRecipients   NewsletterCampaignRecipient[]
+
+  @@map("newsletter_subscribers")
+}
+
+model NewsletterCampaign {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignKey      String    @unique @map("campaign_key")
+  campaignMonth    String    @map("campaign_month")
+  title            String
+  subject          String
+  pdfPath          String?   @map("pdf_path")
+  status           String    @default("draft")
+  approvalStatus   String    @default("pending") @map("approval_status")
+  scheduledAt      DateTime? @map("scheduled_at")
+  approvedAt       DateTime? @map("approved_at")
+  sendStartedAt    DateTime? @map("send_started_at")
+  sendCompletedAt  DateTime? @map("send_completed_at")
+  totalRecipients  Int       @default(0) @map("total_recipients")
+  totalSent        Int       @default(0) @map("total_sent")
+  totalFailed      Int       @default(0) @map("total_failed")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  recipients       NewsletterCampaignRecipient[]
+
+  @@map("newsletter_campaigns")
+}
+
+model NewsletterCampaignRecipient {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId        String    @map("campaign_id") @db.Uuid
+  subscriberId      String    @map("subscriber_id")
+  email             String
+  status            String    @default("pending")
+  sentAt            DateTime? @map("sent_at")
+  failedAt          DateTime? @map("failed_at")
+  providerMessageId String?   @map("provider_message_id")
+  errorMessage      String?   @map("error_message")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  campaign          NewsletterCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  subscriber        NewsletterSubscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, subscriberId], map: "uq_campaign_subscriber")
+  @@map("newsletter_campaign_recipients")
+}
+
+model MasterclassEnrollment {
+  id                    String    @id @default(uuid())
+  email                 String
+  fullName              String    @map("full_name")
+  company               String
+  role                  String?
+  phone                 String?
+  marketingConsent      Boolean   @default(false) @map("marketing_consent")
+  privacyConsent        Boolean   @default(true) @map("privacy_consent")
+  amount                Int       @default(75000)
+  currency              String    @default("usd")
+  paymentStatus         String    @default("pending") @map("payment_status")
+  stripeSessionId       String?   @unique @map("stripe_session_id")
+  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
+  accessGranted         Boolean   @default(false) @map("access_granted")
+  sessionToken          String?   @unique @map("session_token")
+  courseProgress        Int       @default(0) @map("course_progress")
+  currentStage          Int       @default(1) @map("current_stage")
+  source                String?
+  metadata              String?
+  referralCodeId        String?   @map("referral_code_id")
+  referralCode          MasterclassReferralCode? @relation(fields: [referralCodeId], references: [id])
+  paidAt                DateTime? @map("paid_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  submissions           MasterclassWorkbookSubmission[]
+  bookings              MasterclassBooking[]
+
+  @@index([email])
+  @@index([referralCodeId])
+  @@map("masterclass_enrollments")
+}
+
+model MasterclassReferralCode {
+  id              String      @id @default(uuid())
+  code            String      @unique // e.g. "0XQZ6IN", "DIVALOS"
+  referrerName    String      @map("referrer_name") // "Danielle", "Divalos"
+  referrerEmail   String?     @map("referrer_email")
+  discountPercent Float       @default(33.33) @map("discount_percent") // 33.33%
+  stripeCouponId  String?     @map("stripe_coupon_id")
+  startDate       DateTime    @default(now()) @map("start_date")
+  endDate         DateTime    @map("end_date")
+  isActive        Boolean     @default(true) @map("is_active")
+  maxUses         Int?        @map("max_uses")
+  usedCount       Int         @default(0) @map("used_count")
+  notes           String?
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  enrollments     MasterclassEnrollment[]
+
+  @@index([code])
+  @@map("masterclass_referral_codes")
+}
+
+model MasterclassWorkbookSubmission {
+  id            String    @id @default(uuid())
+  submissionRef String    @unique @map("submission_ref")
+  enrollmentId  String?   @map("enrollment_id")
+  email         String
+  fullName      String    @map("full_name")
+  company       String
+  role          String?
+  phone         String?
+  status        String    @default("draft")
+  currentStage  Int       @default(1) @map("current_stage")
+  formData      String
+  personalNotes String?   @map("personal_notes")
+  submittedAt   DateTime? @map("submitted_at")
+  lastSavedAt   DateTime  @default(now()) @map("last_saved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  enrollment    MasterclassEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  bookings      MasterclassBooking[]
+
+  @@index([email])
+  @@index([submissionRef])
+  @@map("masterclass_workbook_submissions")
+}
+
+model MasterclassBooking {
+  id               String    @id @default(uuid())
+  bookingRef       String    @unique @map("booking_ref")
+  enrollmentId     String?   @map("enrollment_id")
+  submissionId     String?   @map("submission_id")
+  email            String
+  fullName         String    @map("full_name")
+  company          String
+  slotTime         String    @map("slot_time")
+  scheduledAt      DateTime? @map("scheduled_at")
+  timezone         String    @default("GST (UTC+4)")
+  status           String    @default("confirmed")
+  meetingLink      String?   @map("meeting_link")
+  ghlAppointmentId String?   @map("ghl_appointment_id")
+  notes            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  enrollment       MasterclassEnrollment?         @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  submission       MasterclassWorkbookSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@map("masterclass_bookings")
+}
+model AttributionVisit {
+  id            String    @id @default(uuid())
+  anonymousId   String?   @map("anonymous_id")
+  module        String?   // e.g. 'masterclass', 'unmasked-private', 'diagnostics', 'roundtable', 'contact', 'home'
+  landingPage   String    @map("landing_page")
+  referrer      String?
+  utmSource     String?   @map("utm_source")
+  utmMedium     String?   @map("utm_medium")
+  utmCampaign   String?   @map("utm_campaign")
+  utmTerm       String?   @map("utm_term")
+  utmContent    String?   @map("utm_content")
+  ipAddress     String?   @map("ip_address")
+  country       String?
+  city          String?
+  region        String?
+  timezone      String?
+  userAgent     String?   @map("user_agent")
+  device        String?
+  email         String?   // Populated when visitor converts on any lead form
+  leadName      String?   @map("lead_name")
+  leadForm      String?   @map("lead_form") // e.g. 'contact', 'unmasked_private', 'scan', 'masterclass'
+  howDidYouHear String?   @map("how_did_you_hear")
+  ghlContactId  String?   @map("ghl_contact_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([anonymousId])
+  @@index([email])
+  @@index([utmSource])
+  @@index([createdAt])
+  @@map("attribution_visits")
+}
+
+model AudiobookPurchase {
+  id                    String    @id @default(uuid())
+  bookId                String    @default("reset-by-discipline") @map("book_id")
+  version               String    @default("en")
+  customerEmail         String?   @map("customer_email")
+  customerName          String?   @map("customer_name")
+  amount                Int?
+  currency              String    @default("usd")
+  paymentStatus         String    @default("pending") @map("payment_status")
+  stripeSessionId       String    @unique @map("stripe_session_id")
+  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
+  accessGranted         Boolean   @default(false) @map("access_granted")
+  accessToken           String    @unique @map("access_token")
+  expiresAt             DateTime? @map("expires_at")
+  paidAt                DateTime? @map("paid_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([bookId])
+  @@index([accessToken])
+  @@index([stripeSessionId])
+  @@index([customerEmail])
+  @@map("audiobook_purchases")
+}
+
+model PressureScanSubmission {
+  id                      String    @id @default(uuid())
+  referenceNumber         String    @unique @map("reference_number")
+  methodologyVersion      String    @default("1.0") @map("methodology_version")
+  questionSetVersion      String    @default("1.0") @map("question_set_version")
+  fullName                String    @map("full_name")
+  email                   String
+  companyName             String    @map("company_name")
+  phone                   String?
+  submittedContext        Json?     @map("submitted_context")
+  answers                 Json
+  overallRawMean          Float     @map("overall_raw_mean")
+  overallNormalised       Float     @map("overall_normalised")
+  domainScores            Json      @map("domain_scores")
+  primarySignalAreas      String[]  @map("primary_signal_areas")
+  signalClassification    String    @map("signal_classification")
+  methodologyAcknowledged Boolean   @map("methodology_acknowledged")
+  privacyAcknowledged     Boolean   @map("privacy_acknowledged")
+  marketingConsent        Boolean   @default(false) @map("marketing_consent")
+  reviewStatus            String    @default("AWAITING_REVIEW") @map("review_status")
+  reviewerNotes           String?   @db.Text @map("reviewer_notes")
+  reviewerDecision        String?   @map("reviewer_decision")
+  reviewedAt              DateTime? @map("reviewed_at")
+  reviewedBy              String?   @map("reviewed_by")
+  zoomMeetingUrl          String?   @map("zoom_meeting_url")
+  scheduledReviewAt       DateTime? @map("scheduled_review_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@index([referenceNumber])
+  @@index([email])
+  @@index([reviewStatus])
+  @@index([createdAt])
+  @@map("pressure_scan_submissions")
+}
+
+model ScheduledEmail {
+  id              String    @id @default(uuid())
+  contactId       String    @map("contact_id")
+  contactEmail    String    @map("contact_email")
+  emailType       String    @map("email_type")
+  subject         String
+  htmlBody        String    @db.Text @map("html_body")
+  sendAt          DateTime  @map("send_at")
+  status          String    @default("pending") @map("status")
+  scanType        String    @default("founder_pressure_scan") @map("scan_type")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  sentAt          DateTime? @map("sent_at")
+  errorMessage    String?   @db.Text @map("error_message")
+
+  appointmentId   String?   @map("appointment_id")
+  referenceNumber String?   @map("reference_number")
+  retryCount      Int       @default(0) @map("retry_count")
+  maxRetries      Int       @default(3) @map("max_retries")
+  idempotencyKey  String?   @unique @map("idempotency_key")
+
+  @@index([status, sendAt])
+  @@index([contactEmail])
+  @@index([referenceNumber])
+  @@index([appointmentId])
+  @@map("scheduled_emails")
+}
+
+
+// ============================================================================
+// ANALYTICS & PERFORMANCE MODULE
+// ============================================================================
+
+model AnalyticsDailyMetric {
+  id                String   @id @default(uuid())
+  date              DateTime @unique
+  totalVisitors     Int      @default(0) @map("total_visitors")
+  totalPageviews    Int      @default(0) @map("total_pageviews")
+  uniqueSessions    Int      @default(0) @map("unique_sessions")
+  highIntentLeads   Int      @default(0) @map("high_intent_leads")
+  pipelineValueEur  Float    @default(0.0) @map("pipeline_value_eur")
+  avgConversionRate Float    @default(0.0) @map("avg_conversion_rate")
+  sourceBreakdown   Json?    @map("source_breakdown")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([date])
+  @@map("analytics_daily_metrics")
+}
+
+model SearchConsoleKeyword {
+  id           String   @id @default(uuid())
+  query        String
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+  ctr          Float    @default(0.0)
+  position     Float    @default(0.0)
+  targetPage   String?  @map("target_page")
+  country      String   @default("GLOBAL")
+  snapshotDate DateTime @default(now()) @map("snapshot_date")
+
+  @@unique([query, snapshotDate, country], map: "uq_gsc_keyword_date_country")
+  @@index([query])
+  @@index([snapshotDate])
+  @@map("search_console_keywords")
+}
+
+model ClarityTelemetrySnapshot {
+  id              String   @id @default(uuid())
+  websiteKey      String   @default("leaders_performance") @map("website_key")
+  timestamp       DateTime @default(now())
+  totalSessions   Int      @default(0) @map("total_sessions")
+  avgDwellSeconds Int      @default(0) @map("avg_dwell_seconds")
+  rageClickCount  Int      @default(0) @map("rage_click_count")
+  rageClickRate   Float    @default(0.0) @map("rage_click_rate")
+  deadClickCount  Int      @default(0) @map("dead_click_count")
+  deadClickRate   Float    @default(0.0) @map("dead_click_rate")
+  quickBackRate   Float    @default(0.0) @map("quick_back_rate")
+  deviceBreakdown Json?    @map("device_breakdown")
+  rawInsights     Json?    @map("raw_insights")
+
+  @@index([websiteKey])
+  @@index([timestamp])
+  @@map("clarity_telemetry_snapshots")
+}
+
+model CampaignUtmYield {
+  id                    String   @id @default(uuid())
+  campaign              String
+  source                String
+  medium                String?
+  impressions           Int      @default(0)
+  clicks                Int      @default(0)
+  leadsCaptured         Int      @default(0) @map("leads_captured")
+  convRate              Float    @default(0.0) @map("conv_rate")
+  attributedPipelineEur Float    @default(0.0) @map("attributed_pipeline_eur")
+  dateRange             String   @default("30d") @map("date_range")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([campaign, source, dateRange], map: "uq_campaign_source_range")
+  @@index([campaign])
+  @@index([source])
+  @@map("campaign_utm_yields")
+}
+
+// ============================================================================
+// SOCIAL CRM & CONTENT AUTOMATION MODULE
+// ============================================================================
+
+model SocialPost {
+  id                 String    @id @default(uuid())
+  workspace          String    @default("leaders_performance")
+  title              String
+  hook               String?   @db.Text
+  body               String?   @db.Text
+  platform           String    @default("LINKEDIN") // LINKEDIN, YOUTUBE, INSTAGRAM, TIKTOK, X
+  status             String    @default("DRAFT") // DRAFT, PENDING_REVIEW, APPROVED, SCHEDULED, PUBLISHED, REJECTED, FAILED
+  author             String    @default("Lieke (Marketing Ops)")
+  scheduledFor       DateTime? @map("scheduled_for")
+  publishedAt        DateTime? @map("published_at")
+  mediaUrl           String?   @map("media_url")
+  mediaType          String?   @default("article") @map("media_type") // image, video, article
+  tags               String[]  @default([])
+  approvalSignature  String?   @map("approval_signature") // e.g. SIG-LIONEL-2026-9812-VERIFIED
+  approvedBy         String?   @map("approved_by") // Lionel Eersteling
+  approvedAt         DateTime? @map("approved_at")
+  rejectionReason    String?   @db.Text @map("rejection_reason")
+  rejectedAt         DateTime? @map("rejected_at")
+  platformPostId     String?   @map("platform_post_id") // LinkedIn URN: urn:li:share:... or urn:li:ugcPost:...
+  platformPostUrl    String?   @map("platform_post_url")
+  metrics            Json?
+  metadata           Json?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspace])
+  @@index([status])
+  @@index([platform])
+  @@index([scheduledFor])
+  @@index([createdAt])
+  @@map("social_posts")
+}
+
+model SocialAccountConnection {
+  id                    String    @id @default(uuid())
+  platform              String    @unique // LINKEDIN, LINKEDIN_PAGE
+  accountType           String    @default("BUSINESS") @map("account_type")
+  accountName           String?   @map("account_name")
+  accountUrn           String?   @map("account_urn") // urn:li:person:...
+  accountEmail          String?   @map("account_email")
+  profilePictureUrl     String?   @map("profile_picture_url")
+  accessToken           String    @db.Text @map("access_token")
+  refreshToken          String?   @db.Text @map("refresh_token")
+  tokenExpiresAt        DateTime? @map("token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scopes                String[]  @default([])
+  status                String    @default("HEALTHY") // HEALTHY, EXPIRED, DISCONNECTED
+  lastSyncAt            DateTime? @map("last_sync_at")
+  followersCount        Int?      @default(0) @map("followers_count")
+  metadata              Json?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([platform, accountType])
+  @@map("social_account_connections")
+}
+
+model SocialAuditLog {
+  id         String   @id @default(uuid())
+  actor      String   // "Lionel Eersteling (Owner)", "Lieke (Marketing Ops)", "System Scheduler"
+  action     String   // DRAFT_CREATED, PENDING_REVIEW_REQUESTED, CRYPTOGRAPHIC_APPROVAL_GRANTED, POST_REJECTED, LINKEDIN_BROADCAST_DISPATCHED, LINKEDIN_BROADCAST_FAILED
+  entity     String   // ContentPost #post-103
+  details    String   @db.Text
+  ipAddress  String?  @map("ip_address")
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([action])
+  @@map("social_audit_logs")
+}
+
+// ============================================================================
+// INSTAGRAM SOCIAL CRM MODELS
+// ============================================================================
+
+model InstagramAnalyticsSnapshot {
+  id              String   @id @default(uuid())
+  followersCount  Int      @map("followers_count")
+  followsCount    Int      @map("follows_count")
+  mediaCount      Int      @map("media_count")
+  impressions     Int?
+  reach           Int?
+  profileViews    Int?     @map("profile_views")
+  engagementRate  Float?   @map("engagement_rate")
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+  dateRange       String   @default("7d") @map("date_range")
+  rawMetrics      Json?    @map("raw_metrics")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([recordedAt])
+  @@index([dateRange])
+  @@map("instagram_analytics_snapshots")
+}
+
+model InstagramMediaSnapshot {
+  id             String   @id @default(uuid())
+  mediaId        String   @unique @map("media_id") // Meta IG Media ID
+  mediaType      String   @map("media_type") // IMAGE, VIDEO, CAROUSEL_ALBUM, REELS
+  caption        String?  @db.Text
+  permalink      String?
+  mediaUrl       String?  @db.Text @map("media_url")
+  thumbnailUrl   String?  @db.Text @map("thumbnail_url")
+  likeCount      Int      @default(0) @map("like_count")
+  commentsCount  Int      @default(0) @map("comments_count")
+  reach          Int?
+  impressions    Int?
+  saved          Int?
+  shares         Int?
+  publishedAt    DateTime @map("published_at")
+  lastSyncedAt   DateTime @default(now()) @map("last_synced_at")
+
+  @@index([publishedAt])
+  @@index([mediaType])
+  @@map("instagram_media_snapshots")
+}
+
+model InstagramPublishingLog {
+  id                String    @id @default(uuid())
+  postId            String?   @map("post_id")
+  containerId       String?   @map("container_id")
+  publishedMediaId  String?   @map("published_media_id")
+  mediaType         String    @map("media_type") // IMAGE, VIDEO, REELS, CAROUSEL
+  caption           String?   @db.Text
+  status            String    // IN_PROGRESS, FINISHED, FAILED
+  approvalSignature String    @map("approval_signature")
+  approvedBy        String    @map("approved_by")
+  errorDetails      String?   @db.Text @map("error_details")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  publishedAt       DateTime? @map("published_at")
+
+  @@index([status])
+  @@index([postId])
+  @@map("instagram_publishing_logs")
+}
+
+
+
+
+
+
+// ============================================================================
+// CMS SYSTEM: PAGES & DYNAMIC CONTENT BLOCKS
+// ============================================================================
+
+enum CmsPageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model CmsPage {
+  id              String         @id @default(uuid())
+  slug            String         @unique // e.g. "home", "meetlionel", "roundtables", "unmasked"
+  title           String
+  description     String?
+  status          CmsPageStatus  @default(DRAFT)
+  version         Int            @default(1)
+  
+  // SEO Metadata
+  seoTitle        String?        @map("seo_title")
+  metaDescription String?        @map("meta_description")
+  keywords        String[]       @default([])
+  ogImage         String?        @map("og_image")
+  ogType          String         @default("website") @map("og_type")
+  canonicalUrl    String?        @map("canonical_url")
+  schemaJson      Json?          @map("schema_json")
+
+  // Content Sections (Ordered)
+  sections        CmsPageSection[]
+  
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  publishedAt     DateTime?      @map("published_at")
+
+  @@index([slug, status])
+  @@map("cms_pages")
+}
+
+model CmsPageSection {
+  id              String      @id @default(uuid())
+  pageId          String      @map("page_id")
+  sectionKey      String      @map("section_key") // e.g. "hero", "the_next_level", "reset_blueprint"
+  sectionType     String      @map("section_type") // HERO, FEATURE_GRID, TESTIMONIALS, FAQ, CTA, MARKDOWN
+  order           Int         @default(0)
+  isEnabled       Boolean     @default(true) @map("is_enabled")
+  
+  content         Json
+  
+  page            CmsPage     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, sectionKey])
+  @@index([pageId, order])
+  @@map("cms_page_sections")
+}
+
+// ============================================================================
+// CMS SYSTEM: REUSABLE ENTITIES
+// ============================================================================
+
+model CmsTestimonial {
+  id              String      @id @default(uuid())
+  name            String
+  role            String
+  company         String?
+  avatarUrl       String      @map("avatar_url")
+  shortText       String      @db.Text @map("short_text")
+  fullText        String[]    @map("full_text")
+  category        String      @default("general") // e.g. "homepage", "unmasked", "masterclass"
+  order           Int         @default(0)
+  isFeatured      Boolean     @default(false) @map("is_featured")
+  published       Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@index([category, published])
+  @@map("cms_testimonials")
+}
+
+model CmsFaq {
+  id              String      @id @default(uuid())
+  question        String
+  answer          String      @db.Text
+  category        String      // "masterclass", "unmasked", "general"
+  order           Int         @default(0)
+  published       Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@index([category, published])
+  @@map("cms_faqs")
+}
+
+model CmsNavigationMenu {
+  id              String      @id @default(uuid())
+  location        String      @unique // "header_main", "footer_engage", "footer_company", "footer_legal"
+  title           String
+  items           Json        // [{ label, href, isExternal, order, target }]
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@map("cms_navigation_menus")
+}
+
+model CmsSiteSetting {
+  key             String      @id // e.g. "social_links", "contact_details", "branding"
+  value           Json
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  @@map("cms_site_settings")
+}
+
+model CmsMediaAsset {
+  id              String      @id @default(uuid())
+  filename        String
+  originalName    String      @map("original_name")
+  mimeType        String      @map("mime_type")
+  sizeBytes       Int         @map("size_bytes")
+  width           Int?
+  height          Int?
+  publicUrl       String      @map("public_url")
+  altText         String?     @map("alt_text")
+  folder          String      @default("general")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([folder])
+  @@map("cms_media_assets")
+}
+
+
+// ============================================================================
+// CMS SYSTEM: LOCALIZED INLINE TEXT DICTIONARY & REVISIONS
+// ============================================================================
+
+model CmsText {
+  id             String    @id @default(uuid())
+  key            String
+  locale         String    @default("en")
+  hasDraft       Boolean   @default(false) @map("has_draft")
+  draftValue     String?   @db.Text @map("draft_value")
+  publishedValue String?   @db.Text @map("published_value")
+  updatedBy      String?   @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  publishedBy    String?   @map("published_by")
+  publishedAt    DateTime? @map("published_at")
+
+  @@unique([key, locale])
+  @@index([locale])
+  @@index([locale, hasDraft])
+  @@map("cms_texts")
+}
+
+model CmsTextRevision {
+  id         String   @id @default(uuid())
+  key        String
+  locale     String   @default("en")
+  value      String?  @db.Text
+  action     String   // SAVE_DRAFT | DISCARD | PUBLISH
+  actorEmail String   @map("actor_email")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([key, locale])
+  @@index([locale])
+  @@index([createdAt])
+  @@map("cms_text_revisions")
+}
+
+// ============================================================================
+// SOCIAL CRM CONTENT AUTOMATION (PLAN SECTION 5)
+// ============================================================================
+
+enum Platform {
+  LINKEDIN
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+  X
+  MEDIUM
+  LINKEDIN_NEWSLETTER
+  INSPO
+  WEBSITE
+}
+
+enum PublishMode {
+  AUTO
+  MANUAL
+}
+
+enum PostStatus {
+  BLOCKED            // missing/ambiguous file, invalid spec, unknown channel
+  PENDING_REVIEW     // waiting for Lionel
+  CHANGES_REQUESTED  // Lionel asked for edits
+  APPROVED           // ready; publisher picks it up at scheduledAt
+  PUBLISHING         // locked by publisher
+  PROCESSING         // platform still processing (IG container, TikTok, YouTube)
+  PUBLISHED
+  FAILED             // retries exhausted or non-retryable error
+  MISSED             // approved too late (past grace window)
+  REJECTED           // Lionel: do not publish
+  SKIPPED            // calendar says "No video posted" etc.
+  CANCELLED          // row removed/changed before publish
+  MANUAL_DONE        // manual channel confirmed done in CRM
+}
+
+enum MediaStatus {
+  PENDING_UPLOAD
+  READY
+  INVALID
+}
+
+enum ReviewAction {
+  SUBMITTED
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+  COMMENT
+  RESUBMITTED
+}
+
+model FolderRule {
+  id                 String      @id @default(uuid())
+  drivePath          String      @unique @map("drive_path") // e.g. "01_Linkedin/01_Quotes"
+  platform           Platform
+  postKind           String      @map("post_kind")          // Image, Video, Reel, Carousel, Article
+  contentTypeAliases String[]    @default([]) @map("content_type_aliases") // e.g. ["quote", "quotes"]
+  mode               PublishMode @default(AUTO)
+  expectedFiles      String      @map("expected_files")
+  isActive           Boolean     @default(true) @map("is_active")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  @@index([platform])
+  @@map("crm_folder_rules")
+}
+
+model SocialAccount {
+  id               String    @id @default(uuid())
+  platform         Platform
+  accountType      String    @default("BUSINESS") @map("account_type")
+  label            String    // "LinkedIn Lionel personal", "TikTok NL"
+  externalId       String    @map("external_id") // person URN, org URN, IG user id, channel id, open_id
+  tokenEncrypted   String?   @db.Text @map("token_encrypted") // AES-GCM with key from env
+  refreshEncrypted String?   @db.Text @map("refresh_encrypted")
+  tokenExpiresAt   DateTime? @map("token_expires_at")
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  posts            Post[]
+
+  @@index([platform, isActive])
+  @@index([platform, accountType])
+  @@map("crm_social_accounts")
+}
+
+model ChannelAlias {
+  id        String      @id @default(uuid())
+  alias     String      @unique // normalised, e.g. "tiktok nl", "linkedin"
+  platform  Platform
+  accountId String?     @map("account_id") // null for MANUAL channels
+  mode      PublishMode
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  @@map("crm_channel_aliases")
+}
+
+model ContentItem {
+  id           String   @id @default(uuid())
+  workspace    String   @default("leaders_performance")
+  sheetId      String   @map("sheet_id")
+  sheetTab     String   @map("sheet_tab")
+  rowNumber    Int      @map("row_number")
+  rowKey       String   @unique @map("row_key") // sha256(sheetId|date|time|channelRaw|subjectNormalised)
+  rowHash      String   @map("row_hash")        // sha256 of all cell values; detects edits
+  scheduledAt  DateTime @map("scheduled_at")    // UTC, from calendar date+time in CALENDAR_TZ
+  channelRaw   String   @map("channel_raw")
+  contentType  String?  @map("content_type")
+  subject      String?
+  fileLocation String?  @map("file_location")
+  rawRow       Json     @map("raw_row")
+  category     String?  // Founder Pressure, Leadership, ...
+  lastSeenAt   DateTime @map("last_seen_at")
+  unseenRuns   Int      @default(0) @map("unseen_runs")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  posts        Post[]
+
+  @@index([workspace])
+  @@index([scheduledAt])
+  @@index([lastSeenAt])
+  @@map("crm_content_items")
+}
+
+model Post {
+  id             String      @id @default(uuid())
+  workspace      String      @default("leaders_performance")
+  contentItemId  String      @map("content_item_id")
+  accountId      String?     @map("account_id")
+  platform       Platform
+  mode           PublishMode
+  status         PostStatus
+  blockedReason  String?     @db.Text @map("blocked_reason")
+  scheduledAt    DateTime    @map("scheduled_at")
+  title          String?     // YouTube title
+  caption        String?     @db.Text
+  hashtags       String[]    @default([])
+  options        Json        @default("{}") // playlistId, privacy, tiktok flags, IG mediaType (REELS/CAROUSEL/IMAGE)
+  captionSource  String?     @map("caption_source") // DRIVE_FILE | CALENDAR | GEMINI
+  revision       Int         @default(1)
+  approvedById   String?     @map("approved_by_id")
+  approvedAt     DateTime?   @map("approved_at")
+  attemptCount   Int         @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?   @map("next_attempt_at")
+  lockedAt       DateTime?   @map("locked_at")
+  lockedBy       String?     @map("locked_by")
+  platformPostId String?     @map("platform_post_id")
+  platformUrl    String?     @map("platform_url")
+  processingRef  String?     @map("processing_ref") // IG container id / TikTok publish_id
+  publishedAt    DateTime?   @map("published_at")
+  lastError      String?     @db.Text @map("last_error")
+  idempotencyKey String      @unique @map("idempotency_key") // contentItemId|platform|accountId
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  contentItem    ContentItem        @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  account        SocialAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  media          PostMedia[]
+  revisions      PostRevision[]
+  reviewEvents   ReviewEvent[]
+  attempts       PublishAttempt[]
+  metricSnapshots PostMetricSnapshot[]
+
+  @@index([workspace])
+  @@index([status, scheduledAt])
+  @@index([platform, status])
+  @@index([contentItemId])
+  @@map("crm_posts")
+}
+
+model MediaAsset {
+  id              String      @id @default(uuid())
+  driveFileId     String      @map("drive_file_id")
+  checksumMd5     String      @map("checksum_md5")
+  fileName        String      @map("file_name")
+  mimeType        String      @map("mime_type")
+  sizeBytes       BigInt      @map("size_bytes")
+  durationSec     Float?      @map("duration_sec")
+  width           Int?
+  height          Int?
+  storageProvider String      @default("supabase") @map("storage_provider")
+  bucket          String
+  objectKey       String?     @map("object_key")
+  status          MediaStatus
+  invalidReason   String?     @db.Text @map("invalid_reason")
+  deleteAfter     DateTime?   @map("delete_after")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  postMedia       PostMedia[]
+
+  @@unique([driveFileId, checksumMd5])
+  @@index([checksumMd5])
+  @@index([deleteAfter])
+  @@map("crm_media_assets")
+}
+
+model PostMedia {
+  postId   String @map("post_id")
+  assetId  String @map("asset_id")
+  position Int    @default(0)
+  role     String // MAIN | THUMBNAIL | COVER | CAPTION_SOURCE
+  revision Int    @default(1)
+
+  post     Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  asset    MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@id([postId, assetId, role, revision])
+  @@index([postId, revision])
+  @@map("crm_post_media")
+}
+
+model PostRevision {
+  id            String   @id @default(uuid())
+  postId        String   @map("post_id")
+  revision      Int
+  caption       String?  @db.Text
+  title         String?
+  mediaSnapshot Json     @map("media_snapshot")
+  createdById   String?  @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  post          Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, revision])
+  @@map("crm_post_revisions")
+}
+
+model ReviewEvent {
+  id        String       @id @default(uuid())
+  postId    String       @map("post_id")
+  revision  Int
+  action    ReviewAction
+  comment   String?      @db.Text
+  actorId   String       @map("actor_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  post      Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@map("crm_review_events")
+}
+
+model PublishAttempt {
+  id         String    @id @default(uuid())
+  postId     String    @map("post_id")
+  attemptNo  Int       @map("attempt_no")
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  httpStatus Int?      @map("http_status")
+  errorCode  String?   @map("error_code")
+  response   Json?
+
+  post       Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, attemptNo])
+  @@map("crm_publish_attempts")
+}
+
+model Notification {
+  id           String    @id @default(uuid())
+  type         String
+  postId       String?   @map("post_id")
+  recipients   String[]
+  cc           String[]  @default([])
+  subject      String
+  body         String    @db.Text
+  dedupeKey    String    @unique @map("dedupe_key")
+  status       String    @default("PENDING") // PENDING | SENT | FAILED
+  attemptCount Int       @default(0) @map("attempt_count")
+  sentAt       DateTime? @map("sent_at")
+  error        String?   @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([status, createdAt])
+  @@index([postId])
+  @@map("crm_notifications")
+}
+
+model JobRun {
+  id         String    @id @default(uuid())
+  workflow   String
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  stats      Json?
+  error      String?   @db.Text
+
+  @@index([workflow, startedAt])
+  @@map("crm_job_runs")
+}
+
+model PostMetricSnapshot {
+  id          String   @id @default(uuid())
+  postId      String   @map("post_id")
+  capturedAt  DateTime @map("captured_at")
+  views       Int?
+  reach       Int?
+  impressions Int?
+  likes       Int?
+  comments    Int?
+  shares      Int?
+  saves       Int?
+  accountType String?  @default("BUSINESS") @map("account_type")
+  raw         Json?
+
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, capturedAt])
+  @@map("crm_post_metric_snapshots")
+}
+
+model CrmSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("crm_settings")
+}
+
+model NotificationReminder {
+  id             String    @id @default(uuid())
+  notificationId String    @map("notification_id")
+  type           String
+  relatedItemId  String?   @map("related_item_id")
+  sentAt         DateTime? @map("sent_at")
+  reminderCount  Int       @default(0) @map("reminder_count")
+  nextReminderAt DateTime? @map("next_reminder_at")
+  resolvedAt     DateTime? @map("resolved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([notificationId])
+  @@index([relatedItemId])
+  @@index([resolvedAt, nextReminderAt])
+  @@map("crm_notification_reminders")
+}
+
+model CrmInboxNotification {
+  id        String    @id @default(uuid())
+  recipient String    // The CRM user's id or email from the session (developer login included)
+  category  String    // LEAD, APPROVAL or SYSTEM (the CRM's tabs)
+  type      String    // Event code, e.g. REVIEW_REQUEST, PRESSURE_SCAN_SUBMITTED
+  title     String
+  message   String    @db.Text
+  link      String?
+  workspace String?
+  entityId  String?   @map("entity_id")
+  dedupeKey String    @map("dedupe_key")
+  createdAt DateTime  @default(now()) @map("created_at")
+  readAt    DateTime? @map("read_at")
+
+  @@unique([recipient, dedupeKey])
+  @@index([recipient, readAt, createdAt])
+  @@map("crm_inbox_notifications")
+}

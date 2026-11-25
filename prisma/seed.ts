@@ -1,36 +1,45 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
+declare const process: any;
+
 const prisma = new PrismaClient();
 
 const defaultQuestions = [
-  { domain: "Founder Pressure", text: "The business still requires my direct involvement to maintain momentum." },
-  { domain: "Decision Load", text: "Too many operational decisions still escalate to me before the team can move forward." },
-  { domain: "Execution Cadence", text: "Execution slows down when I am not actively involved." },
-  { domain: "Leadership Alignment", text: "The leadership team needs my constant direction to stay aligned." },
-  { domain: "Operational Resilience", text: "My current operating rhythm is difficult to sustain at the next stage of growth." },
-  { domain: "Decision Load", text: "Key decisions often wait for my approval before progress continues." },
-  { domain: "Execution Cadence", text: "The team's execution rhythm becomes inconsistent when I step back." },
-  { domain: "Leadership Alignment", text: "Operational pressure increases when multiple teams depend on my direction at the same time." },
-  { domain: "Operational Resilience", text: "Decision quality declines when operational pressure accumulates over time." },
-  { domain: "Founder Pressure", text: "Sustaining current momentum requires more of my personal capacity than the business should demand." },
+  // 1. Founder Involvement (2 questions)
+  { domain: "Founder Involvement", text: "How often does day-to-day progress depend directly on your personal involvement?" },
+  { domain: "Founder Involvement", text: "How often does operational momentum pause when you are unavailable or focused elsewhere?" },
+  // 2. Decision Load (2 questions)
+  { domain: "Decision Load", text: "How often do important operational or strategic decisions wait for your review before work can proceed?" },
+  { domain: "Decision Load", text: "How often do decisions that belong at team level get escalated back to you?" },
+  // 3. Execution Rhythm (2 questions)
+  { domain: "Execution Rhythm", text: "How often do strategic priorities or commitments slip without your repeated follow-up?" },
+  { domain: "Execution Rhythm", text: "How often does delivery consistency require founder-level intervention to stay on schedule?" },
+  // 4. Leadership Ownership (2 questions)
+  { domain: "Leadership Ownership", text: "How often do leaders wait for your explicit direction before taking action on ambiguous challenges?" },
+  { domain: "Leadership Ownership", text: "How often do leaders defer consequential accountability back to you instead of resolving outcomes?" },
+  // 5. Operational Resilience (2 questions)
+  { domain: "Operational Resilience", text: "How often does unexpected operational friction disrupt your organisation's core rhythm?" },
+  { domain: "Operational Resilience", text: "How sensitive is current performance when you or key team members are under sustained demand?" },
 ];
 
 const defaultPressureOptions = [
-  { key: "decisions", title: "Decisions keep returning to me", hint: "Founder approval loop" },
-  { key: "execution", title: "Execution is inconsistent", hint: "Cadence or follow-through issue" },
-  { key: "leadership", title: "Leadership ownership is unclear", hint: "Role and decision boundaries" },
-  { key: "growth", title: "Growth is creating operational pressure", hint: "Scale is stressing the system" },
-  { key: "unsure", title: "I'm not sure yet", hint: "Start broadly. The scan will narrow from your answers." },
+  { key: "founder_involvement", title: "Progress still depends heavily on my personal involvement", hint: "Execution and decisions slow whenever I am not directly driving them." },
+  { key: "decision_load", title: "Too many decisions continue to concentrate around me", hint: "Important operational and strategic approvals create bottlenecks." },
+  { key: "execution_rhythm", title: "Execution and commitments slip without repeated intervention", hint: "Priorities lack self-sustaining consistency and momentum." },
+  { key: "leadership_ownership", title: "Leaders hesitate to make decisions or take full ownership", hint: "Responsibilities exist, but accountability repeatedly returns to me." },
+  { key: "operational_resilience", title: "The organisation struggles when I am unavailable or focused elsewhere", hint: "Operating rhythm experiences strain as complexity increases." },
+  { key: "unsure", title: "I am not sure yet", hint: "The scan questions will help clarify where directional pressure is concentrating." },
 ];
 
 const revenueBands = ["Under €1M", "€1M–€5M", "€5M–€15M", "€15M–€50M", "€50M+"];
 const stages = ["Early-stage", "Growth-stage", "Scale-stage", "Mature"];
 const scaleOptions = [
-  { key: "sd", label: "Strongly Disagree", value: 1 },
-  { key: "d", label: "Disagree", value: 2 },
-  { key: "a", label: "Agree", value: 3 },
-  { key: "sa", label: "Strongly Agree", value: 4 },
+  { key: "never", label: "Never", value: 1 },
+  { key: "rarely", label: "Rarely", value: 2 },
+  { key: "sometimes", label: "Sometimes", value: 3 },
+  { key: "often", label: "Often", value: 4 },
+  { key: "consistently", label: "Consistently", value: 5 },
 ];
 
 async function main() {
@@ -61,7 +70,7 @@ async function main() {
     });
   }
 
-  // System Config (Revenue, Stages, Scale Options)
+  // System Config (Revenue, Stages, Scale Options, Unmasked Questionnaire)
   await prisma.systemConfig.deleteMany({});
   await prisma.systemConfig.create({
     data: { key: 'revenueBands', value: JSON.stringify(revenueBands) },
@@ -71,6 +80,41 @@ async function main() {
   });
   await prisma.systemConfig.create({
     data: { key: 'scaleOptions', value: JSON.stringify(scaleOptions) },
+  });
+  await prisma.systemConfig.create({
+    data: {
+      key: 'unmasked_questionnaire',
+      value: JSON.stringify({
+        step2: {
+          step: 2,
+          title: 'Your Result',
+          questions: [
+            { id: 'businessResult', text: 'What is the one business result, consequential decision or strategic challenge you want to address?', required: true },
+            { id: 'attentionNow', text: 'Why does this require attention now?', required: true },
+            { id: 'outcome90Days', text: 'What would a successful outcome make possible during the next 90 days?', required: true },
+            { id: 'attemptedAlready', text: 'What have you already attempted, and what happened?(optional)', required: false }
+          ]
+        },
+        step3: {
+          step: 3,
+          title: 'Your Readiness',
+          notice: 'UNMASKED PRIVATE engagements start at AED 10,000 excluding VAT.',
+          questions: [
+            { id: 'decisionInfluence', text: 'Where may your own decisions, standards or behaviour be influencing the current result?', required: true },
+            { id: 'challengeView', text: 'Describe a recent situation in which someone challenged your view and you changed your decision or approach.\nWhat did you initially believe, what changed your view and what did you do differently?', required: true },
+            { id: 'authorityToAct', text: 'Do you have the authority and practical ability to act on the decisions that may emerge?', options: ['Yes', 'Partly', 'No'], required: true },
+            { id: 'investmentReadiness', text: 'If there is a genuine fit, what level of investment are you currently prepared to make in accelerating this result?', options: [
+              { label: 'Up to AED 5,000', value: 'UP_TO_5K' },
+              { label: 'AED 5,001–9,999', value: 'FROM_5K_TO_10K' },
+              { label: 'AED 10,000–14,999', value: 'FROM_10K_TO_15K' },
+              { label: 'AED 15,000–19,999', value: 'FROM_15K_TO_20K' },
+              { label: 'AED 20,000 or more', value: 'OVER_20K' },
+            ], required: true },
+            { id: 'availableForCall', text: 'Are you available for a confidential 30-minute conversation if Lionel determines there is a genuine fit?', options: ['Yes', 'No'], required: true }
+          ]
+        }
+      })
+    }
   });
 
   console.log('Seeding complete!');

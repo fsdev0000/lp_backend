@@ -1,0 +1,275 @@
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSecret } from './secrets';
+import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+
+import { randomUUID } from 'crypto';
+
+export const UNMASKED_BUCKET = 'unmasked-private';
+export const UNMASKED_VIDEO_OBJECT = 'unmasked-private.mp4';
+export const MASTERCLASS_BUCKET = 'masterclass';
+export const CONTENT_MEDIA_BUCKET = 'content-media';
+// Effectively permanent / long-lived (10 years)
+export const DEFAULT_EXPIRES_IN_SECONDS = 315360000;
+
+let cachedClient: SupabaseClient | null = null;
+let mockClient: any = null;
+
+export function setMockSupabaseStorageClient(mock: any) {
+  mockClient = mock;
+}
+
+export function resetSupabaseStorageClient() {
+  mockClient = null;
+  cachedClient = null;
+}
+
+export function getSupabaseUrl(): string {
+  if (process.env.SUPABASE_URL) return process.env.SUPABASE_URL;
+  if (process.env.VITE_SUPABASE_URL) return process.env.VITE_SUPABASE_URL;
+  // Dynamically extract project ref from DATABASE_URL or DIRECT_URL if available
+  const dbUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
+  if (dbUrl) {
+    const match = dbUrl.match(/postgres\.([^:]+):/);
+    if (match && match[1]) {
+      return `https://${match[1]}.supabase.co`;
+    }
+  }
+  throw new Error('SUPABASE_URL is not configured in .env');
+}
+
+export async function getSupabaseServiceKey(): Promise<string | undefined> {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
+
+  // Attempt to parse directly from .env files
+  const candidatePaths = [
+    path.resolve(__dirname, '../../.env'),
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), 'lp_backend/.env'),
+    path.resolve(__dirname, '../../../lp_backend/.env'),
+  ];
+
+  for (const envPath of candidatePaths) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const match = content.match(/SUPABASE_SERVICE_ROLE_KEY\s*=\s*["']?([^"'\r\n]+)["']?/);
+        if (match && match[1]) {
+          process.env.SUPABASE_SERVICE_ROLE_KEY = match[1].trim();
+          return process.env.SUPABASE_SERVICE_ROLE_KEY;
+        }
+      }
+    } catch {
+      // Continue to next candidate
+    }
+  }
+
+  if (process.env.SUPABASE_KEY) {
+    return process.env.SUPABASE_KEY;
+  }
+  if (process.env.SUPABASE_SECRET_KEY) {
+    return process.env.SUPABASE_SECRET_KEY;
+  }
+  if (process.env.SUPABASE_API_KEY) {
+    return process.env.SUPABASE_API_KEY;
+  }
+  if (process.env.SUPABASE_ANON_KEY) {
+    return process.env.SUPABASE_ANON_KEY;
+  }
+
+  const fromVault =
+    (await getSecret('SUPABASE_SERVICE_ROLE_KEY')) ||
+    (await getSecret('SUPABASE_KEY')) ||
+    (await getSecret('SUPABASE_ANON_KEY')) ||
+    (await getSecret('email_queue_service_role_key'));
+
+  if (fromVault) {
+    return fromVault;
+  }
+
+  return undefined;
+}
+
+export async function getSupabaseClient(): Promise<SupabaseClient> {
+  if (mockClient) {
+    return mockClient as SupabaseClient;
+  }
+
+  if (cachedClient) {
+    return cachedClient;
+  }
+
+  const supabaseUrl = getSupabaseUrl();
+  const serviceKey = await getSupabaseServiceKey();
+
+  if (!serviceKey) {
+    if (process.env.NODE_ENV === 'test') {
+      return createClient(supabaseUrl, 'mock-service-key-for-test-env', {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing in lp_backend/.env. Please add SUPABASE_SERVICE_ROLE_KEY="eyJ..." from your Supabase Dashboard (Settings > API > service_role).');
+  }
+
+  cachedClient = createClient(supabaseUrl, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  return cachedClient;
+}
+
+/**
+ * Generates a secure signed URL for the private unmasked-private.mp4 video file.
+ * Returns a long-lived signed URL so frontend can simply call the API and play the video.
+ */
+export async function generateUnmaskedVideoSignedUrl(
+  expiresInSeconds: number = DEFAULT_EXPIRES_IN_SECONDS
+): Promise<{ videoUrl: string }> {
+  const supabase = await getSupabaseClient();
+
+  const { data, error } = await supabase.storage
+    .from(UNMASKED_BUCKET)
+    .createSignedUrl(UNMASKED_VIDEO_OBJECT, expiresInSeconds);
+
+  if (error) {
+    const errorMsg = error.message || String(error);
+    console.error('[SupabaseStorage] Signed URL generation error:', errorMsg);
+
+    if (
+      errorMsg.toLowerCase().includes('not found') ||
+      (error as any).statusCode === '404' ||
+      (error as any).status === 404
+    ) {
+      const notFoundErr: any = new Error('The requested video file does not exist in storage.');
+      notFoundErr.code = 'VIDEO_NOT_FOUND';
+      notFoundErr.status = 404;
+      throw notFoundErr;
+    }
+
+    const storageErr: any = new Error('Failed to generate signed video URL.');
+    storageErr.code = 'STORAGE_ERROR';
+    storageErr.status = 502;
+    throw storageErr;
+  }
+
+  if (!data?.signedUrl) {
+    const emptyErr: any = new Error('Storage service returned an empty URL response.');
+    emptyErr.code = 'STORAGE_EMPTY_URL';
+    emptyErr.status = 502;
+    throw emptyErr;
+  }
+
+  return {
+    videoUrl: data.signedUrl,
+  };
+}
+
+/**
+ * Lists all files inside the private 'masterclass' Supabase storage bucket.
+ */
+export async function getMasterclassBucketFiles(): Promise<any[]> {
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage.from(MASTERCLASS_BUCKET).list('', { limit: 100 });
+    if (error) {
+      console.error('[SupabaseStorage] Error listing masterclass bucket files:', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err: any) {
+    console.error('[SupabaseStorage] Exception listing masterclass bucket files:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Creates a signed URL for a file in the 'masterclass' Supabase storage bucket.
+ */
+export async function createMasterclassSignedUrl(
+  fileName: string,
+  expiresInSeconds: number = DEFAULT_EXPIRES_IN_SECONDS
+): Promise<string | null> {
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from(MASTERCLASS_BUCKET)
+      .createSignedUrl(fileName, expiresInSeconds);
+
+    if (error || !data?.signedUrl) {
+      console.warn(`[SupabaseStorage] Could not create signed url for ${fileName}:`, error?.message);
+      return null;
+    }
+    return data.signedUrl;
+  } catch (err: any) {
+    console.warn(`[SupabaseStorage] Exception generating signed url for ${fileName}:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Uploads media file (image or video) for Social CRM Content Studio.
+ * Tries Supabase public bucket 'content-media' first; falls back to local static disk storage.
+ */
+export async function uploadContentMedia(
+  file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+  mediaType: 'image' | 'video'
+): Promise<{ mediaUrl: string; fileName: string; size: number }> {
+  const ext = path.extname(file.originalname).toLowerCase() || (mediaType === 'video' ? '.mp4' : '.jpg');
+  const safeBaseName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const uniqueKey = `${mediaType}s/${Date.now()}-${randomUUID().slice(0, 8)}-${safeBaseName}${ext}`;
+
+  // 1. Attempt Supabase Storage upload
+  try {
+    const supabase = await getSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from(CONTENT_MEDIA_BUCKET)
+      .upload(uniqueKey, file.buffer, {
+        contentType: file.mimetype,
+        upsert: true,
+      });
+
+    if (!error && data?.path) {
+      const { data: publicData } = supabase.storage
+        .from(CONTENT_MEDIA_BUCKET)
+        .getPublicUrl(data.path);
+
+      if (publicData?.publicUrl) {
+        return {
+          mediaUrl: publicData.publicUrl,
+          fileName: file.originalname,
+          size: file.size,
+        };
+      }
+    } else if (error) {
+      console.warn(`[SupabaseStorage] Upload to '${CONTENT_MEDIA_BUCKET}' failed:`, error.message);
+    }
+  } catch (err: any) {
+    console.warn(`[SupabaseStorage] Exception uploading to Supabase:`, err?.message);
+  }
+
+  // 2. Fallback: Local persistent static storage
+  const uploadDir = path.resolve(process.cwd(), 'uploads', 'content', mediaType + 's');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const localFileName = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeBaseName}${ext}`;
+  const localFilePath = path.join(uploadDir, localFileName);
+  fs.writeFileSync(localFilePath, file.buffer);
+
+  const baseUrl = process.env.BACKEND_PUBLIC_URL || process.env.API_BASE_URL || '';
+  const mediaUrl = `${baseUrl}/uploads/content/${mediaType}s/${localFileName}`;
+
+  return {
+    mediaUrl,
+    fileName: file.originalname,
+    size: file.size,
+  };
+}
+

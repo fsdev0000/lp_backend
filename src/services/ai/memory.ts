@@ -2,6 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
 import { getSecret } from '../secrets';
 import { getDaisySystemPrompt, DaisyContext } from '../../config/daisyPrompt';
+import { runtimeManager } from './daisy/RuntimeManager';
+import { ContextBuilder } from './daisy/ContextBuilder';
 
 const prisma = new PrismaClient();
 
@@ -24,7 +26,24 @@ export type Message = {
 };
 
 export async function handleConversationTurn(sessionId: string, userMessage: string): Promise<any> {
-    const openai = await getOpenAI();
+    if (!sessionId || sessionId === 'default-session') {
+        throw new Error("FATAL: Attempted to process conversation turn with invalid or default session ID");
+    }
+
+    // Upstream noise & silence filter: discard empty turns without calling LLM or writing to database
+    if (runtimeManager.shouldDropTurn(userMessage)) {
+        console.log(`[RUNTIME GUARD] Dropping silence or ambient noise turn in handleConversationTurn: "${userMessage}"`);
+        return { reply: "", read: "", question: "", cta: false };
+    }
+
+    // Turn Concurrency Lock: Ensure exactly one response is generated per speaker turn
+    if (!runtimeManager.acquireTurnLock(sessionId)) {
+        console.warn(`[RUNTIME GUARD] Turn in progress for ${sessionId}. Dropping duplicate/concurrent request.`);
+        return { reply: "", read: "", question: "", cta: false };
+    }
+
+    try {
+      const openai = await getOpenAI();
     if (!openai) {
         throw new Error("OpenAI not configured");
     }
@@ -97,26 +116,90 @@ export async function handleConversationTurn(sessionId: string, userMessage: str
         ];
     }
 
-    // Generate AI response
-    const completion = await openai.chat.completions.create({
-        model: "gemini-flash-latest", 
-        messages: messages,
-        response_format: { type: "json_object" }
+    const turnCount = messages.filter(m => m.role === 'user').length;
+    const contextPackage = ContextBuilder.buildContextPackage({
+        founderName: transcript.founder?.name || "Founder",
+        companyName: transcript.founder?.companyName || "your company",
+        assessment: assessment ? { ...assessment } : {},
+        turnNumber: turnCount,
+        userMessage: userMessage,
+        history: messages.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }))
     });
 
-    const aiResponseText = completion.choices[0].message.content || "{}";
-    
-    let parsedResponse = {
+    const llmMessages = [...messages];
+    llmMessages[llmMessages.length - 1] = {
+        role: 'user',
+        content: `${userMessage}\n\n${contextPackage}`
+    };
+
+    // Generate AI response with automatic retry loop & silent fallback regeneration (Zero Error Exposure)
+    let aiResponseText = "{}";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const completion = await openai.chat.completions.create({
+                model: "gemini-flash-latest", 
+                messages: llmMessages,
+                response_format: { type: "json_object" }
+            });
+            aiResponseText = completion.choices[0].message.content || "{}";
+            break;
+        } catch (apiError) {
+            console.error(`LLM completion attempt ${attempt} failed:`, apiError);
+            if (attempt === 3) {
+                // Silent fallback regeneration from report data - NEVER expose connection/API errors to the founder
+                const focus = assessment?.primaryFocus || assessment?.focusArea || "Decision Load";
+                aiResponseText = JSON.stringify({
+                    reply: `Your Founder Pressure Scan identified ${focus} as your most critical structural bottleneck. This indicates that major operational decisions continually route through you, creating delays at pivotal moments. Exploring the root cause behind this dynamic is what we examine during a Strategic Review with Lionel Eersteling.`,
+                    chips: ["Why is this important?", "Explain bottlenecks", "Give me the big picture"],
+                    cta: false
+                });
+            } else {
+                await new Promise(r => setTimeout(r, 600 * attempt)); // Backoff wait before retry
+            }
+        }
+    }
+
+    let parsedResponse: any = {
         reply: "I understand.",
-        read: "System analyzing.",
-        question: "Shall we continue?",
+        read: "",
+        question: "",
+        chips: ["Why is this important?", "Explain bottlenecks", "Give me the big picture"],
         cta: false
     };
 
     try {
-        parsedResponse = JSON.parse(aiResponseText);
+        const jsonOutput = JSON.parse(aiResponseText);
+        parsedResponse = {
+            reply: runtimeManager.sanitizeOutput(jsonOutput.reply || parsedResponse.reply),
+            read: "",
+            question: "",
+            chips: Array.isArray(jsonOutput.chips) ? jsonOutput.chips : (!jsonOutput.cta ? ["Why is this important?", "Explain bottlenecks", "Give me the big picture"] : undefined),
+            cta: Boolean(jsonOutput.cta)
+        };
     } catch (e) {
         console.error("Failed to parse Daisy JSON:", e);
+    }
+    
+    // STRICT CTA LOGIC: The CTA must ONLY appear if Daisy explicitly recommends it.
+    // We derive 'cta' directly from the AI's response text to prevent the UI from showing it prematurely.
+    const isExplicitBooking = /book|schedule|available times|review with lionel|calendar/i.test(userMessage.trim());
+    const aiRecommendsBooking = /recommend.*strategic review|show available times|review these findings during a complimentary/i.test(parsedResponse.reply || "");
+
+    if (aiRecommendsBooking || isExplicitBooking) {
+        parsedResponse.cta = true;
+    } else {
+        parsedResponse.cta = false;
+        // Strip out any hallucinated booking instructions just in case
+        parsedResponse.reply = parsedResponse.reply.replace(/The ['"]?Show Available Times['"]? button is now visible on your screen\.? Click it to open the calendar and choose your preferred time\.?/gi, "").trim();
+        parsedResponse.reply = parsedResponse.reply.replace(/Please click ['"]?Show Available Times['"]? below to choose a time that works best for you\.?/gi, "").trim();
+    }
+
+    // Ensure chips never contain calendar booking strings unless CTA is active
+    if (!parsedResponse.cta && Array.isArray(parsedResponse.chips)) {
+        parsedResponse.chips = parsedResponse.chips.filter((c: string) => !c.toLowerCase().includes("available times") && !c.toLowerCase().includes("book"));
+        if (parsedResponse.chips.length === 0) {
+            parsedResponse.chips = ["Why is this important?", "Explain bottlenecks", "Give me the big picture"];
+        }
     }
 
     // Append AI response
@@ -129,4 +212,7 @@ export async function handleConversationTurn(sessionId: string, userMessage: str
     });
 
     return parsedResponse;
+    } finally {
+      runtimeManager.releaseTurnLock(sessionId);
+    }
 }

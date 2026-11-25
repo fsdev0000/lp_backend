@@ -17,9 +17,48 @@ async function ghlHeaders() {
   };
 }
 
-export async function upsertContact(payload: { email: string; firstName?: string; lastName?: string; phone?: string; source?: string; tags?: string[] }) {
+export async function upsertContact(payload: {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  companyName?: string;
+  source?: string;
+  tags?: string[];
+  howDidYouHear?: string;
+  attribution?: Record<string, any>;
+  customFields?: { id?: string; key?: string; name?: string; value: any }[];
+}) {
   const locationId = await getSecret('GHL_LOCATION_ID');
   if (!locationId) throw new Error('GHL_LOCATION_ID not configured in Vault or env');
+
+  const formattedCustomFields: any[] = payload.customFields ? [...payload.customFields] : [];
+
+  if (payload.howDidYouHear) {
+    formattedCustomFields.push({ name: 'Lead Source — User', value: payload.howDidYouHear });
+  }
+
+  if (payload.attribution) {
+    const attr = payload.attribution;
+    const ft = attr.first_touch || {};
+    const lt = attr.latest_touch || {};
+
+    if (attr.utm_source) formattedCustomFields.push({ name: 'UTM Source', value: attr.utm_source });
+    if (attr.utm_medium) formattedCustomFields.push({ name: 'UTM Medium', value: attr.utm_medium });
+    if (attr.utm_campaign) formattedCustomFields.push({ name: 'UTM Campaign', value: attr.utm_campaign });
+    if (attr.utm_content) formattedCustomFields.push({ name: 'UTM Content', value: attr.utm_content });
+    if (attr.referrer) formattedCustomFields.push({ name: 'Referrer', value: attr.referrer });
+
+    const ftSource = ft.utm_source || ft.referrer || attr.utm_source || payload.source || '';
+    const ltSource = lt.utm_source || lt.referrer || attr.utm_source || payload.source || '';
+    const ftLanding = ft.landing_page || attr.landing_page || '';
+    const ltLanding = lt.landing_page || attr.landing_page || '';
+
+    if (ftSource) formattedCustomFields.push({ name: 'Lead Source — First Touch', value: ftSource });
+    if (ltSource) formattedCustomFields.push({ name: 'Lead Source — Latest Touch', value: ltSource });
+    if (ftLanding) formattedCustomFields.push({ name: 'First Landing Page', value: ftLanding });
+    if (ltLanding) formattedCustomFields.push({ name: 'Latest Landing Page', value: ltLanding });
+  }
 
   const body: any = {
     locationId,
@@ -27,9 +66,14 @@ export async function upsertContact(payload: { email: string; firstName?: string
     firstName: payload.firstName,
     lastName: payload.lastName,
     phone: payload.phone,
+    companyName: payload.companyName,
     source: payload.source || 'Leaders Performance Website',
     tags: payload.tags || ['Scan Lead'],
   };
+
+  if (formattedCustomFields.length > 0) {
+    body.customFields = formattedCustomFields;
+  }
 
   const headers = await ghlHeaders();
   const res = await fetch(`${GHL_BASE}/contacts/upsert`, {
@@ -47,17 +91,47 @@ export async function upsertContact(payload: { email: string; firstName?: string
   return data.contact?.id;
 }
 
-export async function sendEmail(contactId: string, subject: string, html: string) {
+export async function sendEmail(
+  contactId: string,
+  subject: string,
+  html: string,
+  emailHeaders?: Record<string, string>,
+  attachments?: string[]
+) {
+  // ─── IRONCLAD DEV/TEST SAFEGUARD ───────────────────────────────────────────
+  // Strictly prevent automated test emails from spamming Lionel or real inboxes
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowOutbound = process.env.ENABLE_OUTBOUND_EMAILS === 'true';
+  const isManualTest = emailHeaders?.['X-Manual-Test'] === 'true';
+
+  if (!isProduction && !allowOutbound && !isManualTest) {
+    console.log(`[SAFEGUARD - AUTO EMAIL SUPPRESSED IN DEV/TEST]
+  Contact ID:  ${contactId}
+  Subject:     "${subject}"
+  Attachments: ${attachments?.length || 0}
+  Status:      Blocked safely to prevent spamming staff inboxes during development.
+  (Set ENABLE_OUTBOUND_EMAILS=true in .env only when doing deliberate manual test)`);
+    return { success: true, mocked: true, message: 'Email suppressed in development/test environment' };
+  }
+
   const headers = await ghlHeaders();
+  const payload: any = {
+    type: 'Email',
+    contactId,
+    subject,
+    html,
+  };
+  if (emailHeaders) {
+    payload.emailHeaders = emailHeaders;
+    payload.headers = emailHeaders;
+  }
+  if (attachments && attachments.length > 0) {
+    payload.attachments = attachments;
+  }
   const res = await fetch(`${GHL_BASE}/conversations/messages`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      type: 'Email',
-      contactId,
-      subject,
-      html,
-    }),
+    body: JSON.stringify(payload),
   });
   
   if (!res.ok) {
@@ -66,6 +140,23 @@ export async function sendEmail(contactId: string, subject: string, html: string
     throw new Error(`Email send failed: ${errorData}`);
   }
   return await res.json();
+}
+
+export async function getCalendarInfo(): Promise<{ name: string; duration: number }> {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  if (!calendarId) throw new Error('GHL_CALENDAR_ID not configured in Vault or env');
+
+  const headers = await ghlHeaders();
+  const res = await fetch(`${GHL_BASE}/calendars/${calendarId}`, { headers });
+  if (!res.ok) throw new Error(`GHL Calendar fetch failed: ${res.status}`);
+
+  const data: any = await res.json();
+  const cal = data.calendar || data;
+
+  return {
+    name: cal.name || 'Strategic Review',
+    duration: cal.slotDuration || cal.appointmentPerSlot || 45,
+  };
 }
 
 export async function getFreeSlots(date: string) {
@@ -102,7 +193,10 @@ export async function getFreeSlots(date: string) {
     for (const slot of slots) {
       try {
         let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
-        freeSlotTimes.add(timeStr);
+        // Limit available slots to Masterclass 45-min slot windows (13:30 - 18:00 Dubai time)
+        if (timeStr >= '13:30' && timeStr <= '18:00') {
+          freeSlotTimes.add(timeStr);
+        }
       } catch (e) {}
     }
   }
@@ -146,7 +240,10 @@ export async function getMonthAvailability(year: number, month: number) {
          for (const slot of slots) {
            try {
              let timeStr = slot.includes('T') ? slot.split('T')[1].substring(0, 5) : slot.substring(0, 5);
-             freeSlotTimes.add(timeStr);
+             // Limit available slots to Masterclass 45-min slot windows (13:30 - 18:00 Dubai time)
+             if (timeStr >= '13:30' && timeStr <= '18:00') {
+               freeSlotTimes.add(timeStr);
+             }
            } catch (e) {}
          }
          availabilityMap[dateKey] = Array.from(freeSlotTimes);
@@ -157,14 +254,31 @@ export async function getMonthAvailability(year: number, month: number) {
   return availabilityMap;
 }
 
-export async function bookAppointment(contactId: string, dateTime: string, title: string) {
+export async function bookAppointment(
+  contactId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes?: number
+) {
   const calendarId = await getSecret('GHL_CALENDAR_ID');
   const locationId = await getSecret('GHL_LOCATION_ID');
   
-  const startTime = `${dateTime}+04:00`;
+  let duration = durationMinutes || 30;
+  if (!durationMinutes) {
+    try {
+      const calInfo = await getCalendarInfo();
+      if (calInfo.duration) duration = calInfo.duration;
+    } catch (e) {
+      console.warn('Could not fetch calendar duration, defaulting to 30 min');
+    }
+  }
+
+  const startTime = dateTime.includes('+') ? dateTime : `${dateTime}+04:00`;
   const startDate = new Date(startTime);
-  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-  const endTime = endDate.toISOString();
+  const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+
+  const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+  const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
 
   const headers = await ghlHeaders();
   const res = await fetch(`${GHL_BASE}/calendars/events/appointments`, {
@@ -204,6 +318,100 @@ export async function bookAppointment(contactId: string, dateTime: string, title
   }
 
   return data;
+}
+
+export async function updateAppointment(
+  appointmentId: string,
+  dateTime: string,
+  title: string,
+  durationMinutes: number = 45
+) {
+  const calendarId = await getSecret('GHL_CALENDAR_ID');
+  const startTime = dateTime.includes('+') ? dateTime : `${dateTime}+04:00`;
+  const startDate = new Date(startTime);
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+
+  const dubaiEnd = new Date(endDate.getTime() + (4 * 60 * 60 * 1000));
+  const endTime = `${dubaiEnd.toISOString().replace('.000Z', '').substring(0, 19)}+04:00`;
+
+  const headers = await ghlHeaders();
+  const res = await fetch(`${GHL_BASE}/calendars/events/appointments/${appointmentId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      calendarId,
+      startTime,
+      endTime,
+      title,
+      appointmentStatus: 'confirmed',
+    }),
+  });
+
+  const data: any = await res.json();
+  if (!res.ok) throw new Error(`Appointment update failed: ${JSON.stringify(data)}`);
+  return data;
+}
+
+export async function getOpenOpportunitiesForContact(contactId: string): Promise<any[]> {
+    try {
+        const locationId = await getSecret('GHL_LOCATION_ID');
+        if (!locationId) return [];
+        const headers = await ghlHeaders();
+        const res = await fetch(`${GHL_BASE}/opportunities/search?contact_id=${encodeURIComponent(contactId)}&location_id=${encodeURIComponent(locationId || '')}&status=open`, {
+            method: 'GET',
+            headers,
+        });
+        if (!res.ok) return [];
+        const data: any = await res.json();
+        return data.opportunities || [];
+    } catch (err) {
+        console.error('Failed to search opportunities for contact:', err);
+        return [];
+    }
+}
+
+export async function addContactNote(contactId: string, noteBody: string): Promise<void> {
+    try {
+        const headers = await ghlHeaders();
+        await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/notes`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ body: noteBody }),
+        });
+    } catch (err) {
+        console.error('Failed to add note to contact:', err);
+    }
+}
+
+export async function createOpportunityWithDedup(contactId: string, title: string, referenceNumber: string) {
+    try {
+        const openOpps = await getOpenOpportunitiesForContact(contactId);
+        if (openOpps && openOpps.length > 0) {
+            console.log(`[GHL Dedup] Open opportunity exists for contact ${contactId}. Appending note instead of duplicate.`);
+            await addContactNote(contactId, `Repeat Founder Pressure Scan submitted: ${referenceNumber}`);
+            return { duplicated: false, existingId: openOpps[0]?.id };
+        }
+
+        const locationId = await getSecret('GHL_LOCATION_ID');
+        const headers = await ghlHeaders();
+        const res = await fetch(`${GHL_BASE}/opportunities/`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                pipelineId: PIPELINE_ID,
+                locationId,
+                pipelineStageId: STAGE_NEW_LEAD,
+                contactId,
+                name: title,
+                status: 'open',
+            }),
+        });
+        const oppData = await res.json().catch(() => ({}));
+        return { duplicated: false, createdId: (oppData as any)?.opportunity?.id };
+    } catch (e) {
+        console.error('Failed to create opportunity with dedup:', e);
+        return null;
+    }
 }
 
 export async function createOpportunity(contactId: string, title: string) {

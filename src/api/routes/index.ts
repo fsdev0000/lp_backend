@@ -1,12 +1,32 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
-import { upsertContact, createOpportunity, bookAppointment, getFreeSlots, getMonthAvailability } from '../../services/ghl';
-import { sendAssessmentEmail, sendAdminBriefing } from '../../services/email';
+import { upsertContact, createOpportunity, createOpportunityWithDedup, bookAppointment, getFreeSlots, getMonthAvailability, getCalendarInfo } from '../../services/ghl';
+import { sendAdminBriefing, sendParticipantScanResultsEmail, sendCalendarBookingEmails } from '../../services/email';
+import { syncLeadAttribution } from '../../services/attributionService';
 import { ElevenLabsClient } from 'elevenlabs';
 import { handleConversationTurn } from '../../services/ai/memory';
 import OpenAI from 'openai';
 import { getSecret } from '../../services/secrets';
+import { buildDaisySystemPrompt, getDaisyWelcomeMessageVoice, extractDaisyRuntimeVariables } from '../../services/ai/daisy/PromptBuilder';
+import { runtimeManager } from '../../services/ai/daisy/RuntimeManager';
+import { consentRoutes } from './consent';
+import { assessmentRateLimiter } from '../../middleware/rateLimiter';
+import { getMasterclassMonthAvailability } from '../../services/masterclassService';
+import { sendNewsletterWelcomeEmail } from './newsletter';
+import { validateEmailBasic } from '../../services/emailValidation';
+import { generatePressureScanPdf } from '../../services/pressureScanPdfService';
+import { scheduleScanFollowups, cancelPendingScanFollowups } from '../../services/scanFollowupService';
+import {
+  scheduleAppointmentReminders,
+  updateRescheduledAppointmentReminders,
+  cancelAppointmentReminders,
+  processScheduledEmails,
+  formatDubaiDateTime,
+} from '../../services/reminderService';
+import { inboxService } from '../../modules/automation/notifications/inbox.service';
+import { requireCrmAuth } from '../../middleware/crmRoleAuth';
 
 let elevenlabsClient: ElevenLabsClient | null = null;
 async function getElevenLabs() {
@@ -21,10 +41,10 @@ async function getOpenAI() {
   if (openaiClient) return openaiClient;
   const key = await getSecret('OPENAI_API_KEY') || await getSecret('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
   if (key) {
-      openaiClient = new OpenAI({ 
-          apiKey: key,
-          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
-      });
+    openaiClient = new OpenAI({
+      apiKey: key,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    });
   }
   return openaiClient;
 }
@@ -34,35 +54,41 @@ const upload = multer();
 const prisma = new PrismaClient();
 const apiRoutes = Router();
 
-/**
- * @openapi
- * /voice/transcribe:
- *   post:
- *     summary: Transcribe audio to text
- *     description: Accepts an audio file upload and returns the transcribed text.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               audio:
- *                 type: string
- *                 format: binary
- *     responses:
- *       200:
- *         description: Transcribed text
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 transcript:
- *                   type: string
- */
+apiRoutes.use('/consent', consentRoutes);
+
+// Ephemeral in-memory session store (Zero Database Retention)
+interface EphemeralSession {
+  answers: any[];
+  domainScores?: { domain: string; mean: number; normalised: number }[];
+  finalScore?: number;
+  overallMean?: number;
+  tier?: string;
+  methodologyVersion?: string;
+  founder: {
+    name: string;
+    company: string;
+    email: string;
+    phone: string;
+    revenue: string;
+    reference_number?: string;
+  };
+  expiresAt: number;
+}
+
+const ephemeralSessions = new Map<string, EphemeralSession>();
+
+// Periodically clean up expired ephemeral sessions every 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of ephemeralSessions.entries()) {
+    if (session.expiresAt < now) {
+      ephemeralSessions.delete(id);
+    }
+  }
+}, 15 * 60 * 1000);
+
+// Voice AI endpoint excluded from production release
+// POST /voice/transcribe
 apiRoutes.post('/voice/transcribe', upload.single('audio'), async (req, res) => {
   try {
     if (!req.file) {
@@ -94,7 +120,7 @@ apiRoutes.post('/voice/transcribe', upload.single('audio'), async (req, res) => 
     });
 
     const json = await response.json();
-    
+
     if (json.error) {
       console.error('Gemini API Error:', json.error);
       return res.status(500).json({ error: 'Transcription failed via Gemini' });
@@ -237,22 +263,35 @@ apiRoutes.get('/ping', (req, res) => {
  *                   items:
  *                     $ref: '#/components/schemas/ScaleOption'
  */
+let cachedConfig: any = null;
+let cacheTime = 0;
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
 apiRoutes.get('/scan/config', async (req, res) => {
   try {
-    const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
-    const pressureOptions = await prisma.pressureOption.findMany({ orderBy: { order: 'asc' } });
-    
-    const rawRevenue = await prisma.systemConfig.findUnique({ where: { key: 'revenueBands' } });
-    const rawStages = await prisma.systemConfig.findUnique({ where: { key: 'stages' } });
-    const rawScale = await prisma.systemConfig.findUnique({ where: { key: 'scaleOptions' } });
+    const now = Date.now();
+    if (cachedConfig && !req.query.refresh && now - cacheTime < CACHE_TTL) {
+      return res.json(cachedConfig);
+    }
 
-    res.json({
+    const [questions, pressureOptions, rawRevenue, rawStages, rawScale] = await Promise.all([
+      prisma.question.findMany({ orderBy: { order: 'asc' } }),
+      prisma.pressureOption.findMany({ orderBy: { order: 'asc' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'revenueBands' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'stages' } }),
+      prisma.systemConfig.findUnique({ where: { key: 'scaleOptions' } })
+    ]);
+
+    cachedConfig = {
       questions,
       pressureOptions,
       revenueBands: rawRevenue ? JSON.parse(rawRevenue.value) : [],
       stages: rawStages ? JSON.parse(rawStages.value) : [],
       scaleOptions: rawScale ? JSON.parse(rawScale.value) : []
-    });
+    };
+    cacheTime = now;
+
+    res.json(cachedConfig);
   } catch (error) {
     console.error('Error fetching scan config:', error);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -310,189 +349,523 @@ apiRoutes.get('/scan/config', async (req, res) => {
 apiRoutes.get('/assessments/session/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const transcript = await prisma.transcript.findUnique({
-      where: { id: sessionId },
-      include: { founder: true }
+
+    // 1. Search persistent PostgreSQL PressureScanSubmission first (by ID or referenceNumber)
+    const dbSub = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        OR: [
+          { id: sessionId },
+          { referenceNumber: sessionId },
+        ],
+      },
     });
-    
-    if (!transcript) {
-      return res.status(404).json({ error: 'Session not found' });
+
+    if (dbSub) {
+      return res.json({
+        id: dbSub.id,
+        sessionId: dbSub.id,
+        referenceNumber: dbSub.referenceNumber,
+        reference_number: dbSub.referenceNumber,
+        founder: {
+          name: dbSub.fullName,
+          email: dbSub.email,
+          company: dbSub.companyName,
+        },
+        scheduledReviewAt: dbSub.scheduledReviewAt,
+        zoomMeetingUrl: dbSub.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+      });
     }
 
-    const assessment = await prisma.assessment.findFirst({
-      where: { founderId: transcript.founderId },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (!assessment) {
-      return res.status(404).json({ error: 'Assessment not found' });
+    // 2. Fallback to in-memory ephemeral sessions for backward compatibility
+    const session = ephemeralSessions.get(sessionId);
+    if (session && session.expiresAt > Date.now()) {
+      return res.json({
+        id: sessionId,
+        sessionId,
+        referenceNumber: session.founder?.reference_number || sessionId,
+        reference_number: session.founder?.reference_number || sessionId,
+        founder: {
+          name: session.founder?.name || '',
+          email: session.founder?.email || '',
+          company: session.founder?.company || '',
+        },
+        scheduledReviewAt: null,
+        zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+      });
     }
 
-    res.json({
-      answers: JSON.parse(assessment.scores || '[]'),
-      founder: {
-        name: transcript.founder.name,
-        company: transcript.founder.companyName || '',
-        email: transcript.founder.email || '',
-        phone: transcript.founder.phone || '',
-        revenue: transcript.founder.revenueBand || '',
-      }
-    });
+    return res.status(404).json({ error: 'Session not found or expired' });
   } catch (error) {
     console.error('Error fetching session:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-apiRoutes.post('/assessments/submit', async (req, res) => {
+// Helper for deterministic domains
+const OFFICIAL_DOMAINS = [
+  { domain: 'Founder Involvement', qNums: [1, 2] },
+  { domain: 'Decision Load', qNums: [3, 4] },
+  { domain: 'Execution Rhythm', qNums: [5, 6] },
+  { domain: 'Leadership Ownership', qNums: [7, 8] },
+  { domain: 'Operational Resilience', qNums: [9, 10] },
+];
+
+function domainToSlug(d: string): string {
+  return d.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+async function generateUniqueScanRef(): Promise<string> {
+  const year = new Date().getFullYear();
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const seq = Math.floor(100000 + Math.random() * 900000);
+    const candidate = `LP-FPS-${year}-${seq}`;
+    const exists = await prisma.pressureScanSubmission.findUnique({
+      where: { referenceNumber: candidate },
+    });
+    if (!exists) {
+      return candidate;
+    }
+  }
+  return `LP-FPS-${year}-${Date.now().toString().slice(-6)}`;
+}
+
+apiRoutes.post('/assessments/submit', assessmentRateLimiter, async (req, res) => {
   try {
     const { founder, answers } = req.body;
-    
-    if (!founder || !answers || !Array.isArray(answers)) {
-      return res.status(400).json({ error: 'Invalid payload' });
+
+    if (!founder || typeof founder !== 'object') {
+      return res.status(400).json({ error: 'Founder information is required.' });
     }
 
-    // Calculate score
-    const totalScore = answers.reduce((a, b) => a + (b || 0), 0);
-    const overallScore = answers.length > 0 ? totalScore / answers.length : 0;
-    
-    let tier = 'Strong';
-    if (overallScore > 3) tier = 'Critical';
-    else if (overallScore > 2) tier = 'Moderate';
+    // ─── Sub-Task 2: Strict Validation Engine ────────────────────────────────
+    // 2.1 Exactly 10 answers, integers between 1 and 5 (never drop or filter invalid answers)
+    if (!answers || !Array.isArray(answers) || answers.length !== 10) {
+      return res.status(400).json({ error: 'Answers array length MUST equal exactly 10 complete answers.' });
+    }
 
-    // Figure out primary focus based on domain averages
-    const questions = await prisma.question.findMany({ orderBy: { order: 'asc' } });
-    
-    const domainScores: Record<string, { sum: number; n: number }> = {};
-    questions.forEach((q, i) => {
-      const val = answers[i] || 0;
-      domainScores[q.domain] ??= { sum: 0, n: 0 };
-      domainScores[q.domain].sum += val;
-      domainScores[q.domain].n += 1;
+    const validatedScores: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const item = answers[i];
+      let val: any = null;
+      if (typeof item === 'number') {
+        val = item;
+      } else if (item && typeof item === 'object') {
+        val = item.score ?? item.value ?? item.rating ?? item.answer ?? item.val;
+      }
+
+      if (
+        val === null ||
+        val === undefined ||
+        typeof val !== 'number' ||
+        isNaN(val) ||
+        !Number.isInteger(val) ||
+        val < 1 ||
+        val > 5
+      ) {
+        return res.status(400).json({
+          error: `Question ${i + 1} score must be an integer between 1 and 5. Received: ${JSON.stringify(item)}`,
+        });
+      }
+      validatedScores.push(val);
+    }
+
+    // 2.2 Mandatory Consent & Disclosures (supporting both backend and frontend property conventions)
+    const methodologyAcknowledged = Boolean(
+      req.body.methodologyAcknowledged ??
+      founder.methodologyAcknowledged ??
+      req.body.consent?.methodologyAcknowledged ??
+      req.body.consent?.acknowledgedHowItWorks ??
+      founder.understandsScan ??
+      founder.acknowledgedHowItWorks
+    );
+    const privacyAcknowledged = Boolean(
+      req.body.privacyAcknowledged ??
+      founder.privacyAcknowledged ??
+      req.body.consent?.privacyAcknowledged ??
+      req.body.consent?.privacyAccepted ??
+      founder.agreedToPolicy ??
+      founder.privacyAccepted
+    );
+
+    if (!methodologyAcknowledged) {
+      return res.status(400).json({ error: 'methodologyAcknowledged must be explicitly accepted.' });
+    }
+    if (!privacyAcknowledged) {
+      return res.status(400).json({ error: 'privacyAcknowledged must be explicitly accepted.' });
+    }
+
+    const marketingConsent = Boolean(
+      req.body.marketingConsent ??
+      req.body.consent?.marketingOptional ??
+      founder.marketingConsent ??
+      founder.marketingOptional
+    );
+
+    // 2.3 Email Validation
+    const cleanEmail = (founder.email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      return res.status(400).json({ error: 'Business email is required.' });
+    }
+    const emailCheck = validateEmailBasic(cleanEmail);
+    if (!emailCheck.valid) {
+      return res.status(400).json({ error: emailCheck.error || 'Please enter a valid business email.' });
+    }
+
+    // ─── Sub-Task 3: Deterministic Scoring & 5-Domain Engine ───────────────────
+    // Domain Means = (Q_a + Q_b) / 2
+    const domainScores: Array<{ domain: string; mean: number; normalised: number }> = [];
+    let maxDomainMean = -1;
+
+    OFFICIAL_DOMAINS.forEach((dGroup) => {
+      const s1 = validatedScores[dGroup.qNums[0] - 1];
+      const s2 = validatedScores[dGroup.qNums[1] - 1];
+      const mean = Number(((s1 + s2) / 2).toFixed(2));
+      const normalised = Number((((mean - 1) / 4) * 100).toFixed(2));
+      domainScores.push({ domain: dGroup.domain, mean, normalised });
+      if (mean > maxDomainMean) {
+        maxDomainMean = mean;
+      }
     });
 
-    let primaryFocus = 'General Operations';
-    let maxDomainScore = -1;
+    // Overall Raw Mean = Sum(10) / 10
+    const rawSum = validatedScores.reduce((sum, s) => sum + s, 0);
+    const overallRawMean = Number((rawSum / 10).toFixed(2));
 
-    for (const [domain, stats] of Object.entries(domainScores)) {
-      const avg = stats.sum / stats.n;
-      if (avg > maxDomainScore) {
-        maxDomainScore = avg;
-        primaryFocus = domain;
-      }
-    }
+    // Normalised Score = ((Mean - 1) / 4) * 100
+    const overallNormalised = Number((((overallRawMean - 1) / 4) * 100).toFixed(2));
 
-    // Map insights based on primary focus
-    const insights: Record<string, { opp: string, q: string }> = {
-      'Decisions': { opp: 'Delegation of Operational Decisions', q: 'Where are decisions bottlenecking at your level?' },
-      'Execution': { opp: 'Rhythm and Cadence of Execution', q: 'Are your teams executing smoothly without your direct intervention?' },
-      'Leadership': { opp: 'Leadership Autonomy', q: 'Does your leadership team own their outcomes fully?' },
-      'Growth': { opp: 'Scalable Growth Infrastructure', q: 'Is the business scaling efficiently with the current infrastructure?' }
+    // Classify signal
+    let signalClassification = 'Limited Signal';
+    if (overallNormalised >= 75) signalClassification = 'Priority Signal';
+    else if (overallNormalised >= 50) signalClassification = 'Active Signal';
+    else if (overallNormalised >= 25) signalClassification = 'Emerging Signal';
+
+    // Primary Signal Area(s) (supports joint ties)
+    const primarySignalAreas = domainScores
+      .filter((d) => Math.abs(d.mean - maxDomainMean) < 0.001)
+      .map((d) => d.domain);
+
+    const primaryJoined = primarySignalAreas.join(' & ');
+
+    // Qualitative Copy
+    const insights: Record<string, { opp: string; q: string; interp: string }> = {
+      'Founder Involvement': {
+        opp: 'Delegation of Operational Execution',
+        q: 'Where does progress slow down when you are not directly involved?',
+        interp: 'Your responses indicate that organizational momentum and daily progress remain concentrated around your personal oversight.',
+      },
+      'Decision Load': {
+        opp: 'Distribution of Strategic and Operational Decision Rights',
+        q: 'Which decisions continue to bottleneck around you?',
+        interp: 'Your responses indicate that a relatively high proportion of operational and strategic decisions may still require your direct involvement.',
+      },
+      'Execution Rhythm': {
+        opp: 'Operating Cadence and Delivery Consistency',
+        q: 'Are priorities holding their schedule without repeated founder intervention?',
+        interp: 'Your responses indicate that strategic delivery cadence and commitments require continuous founder intervention to stay on schedule.',
+      },
+      'Leadership Ownership': {
+        opp: 'Executive Mandates and Autonomous Ownership',
+        q: 'Do your leaders resolve ambiguous issues within clear boundaries?',
+        interp: 'Your responses indicate that leadership accountability repeatedly defers consequential decisions back to you instead of resolving outcomes autonomously.',
+      },
+      'Operational Resilience': {
+        opp: 'Scalable Operating Systems and Team Resilience',
+        q: 'How well does the organisation absorb pressure without losing cadence?',
+        interp: 'Your responses indicate that the organisation experiences operational friction and strain when key leaders are under sustained demand.',
+      },
     };
-    
-    const insight = insights[primaryFocus] || { opp: 'Overall Alignment', q: 'What is the biggest operational constraint today?' };
 
-    // Upsert Founder
-    let founderRecord;
-    if (founder.email) {
-      founderRecord = await prisma.founder.upsert({
-        where: { email: founder.email },
-        update: {
-          name: founder.founder || founder.name,
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
+    const firstPrimary = primarySignalAreas[0] || 'Founder Involvement';
+    const primaryInsight = insights[firstPrimary] || insights['Founder Involvement'];
+
+    // ─── Sub-Task 4: Reference Generation & PostgreSQL Persistence ───────────
+    const incomingRef = (
+      req.body.founder?.reference_number ||
+      req.body.founder?.reference ||
+      req.body.reference_number ||
+      req.body.referenceNumber
+    );
+    const referenceNumber = (incomingRef && typeof incomingRef === 'string' && incomingRef.startsWith('LP-FPS-'))
+      ? incomingRef
+      : await generateUniqueScanRef();
+
+    const structuredAnswers = validatedScores.map((score, i) => ({
+      questionNumber: i + 1,
+      domain: OFFICIAL_DOMAINS[Math.floor(i / 2)].domain,
+      score,
+    }));
+
+    const participantName = (founder.founder || founder.name || 'Anonymous Founder').trim();
+    const companyName = (founder.company || 'Confidential').trim();
+
+    const submission = await prisma.pressureScanSubmission.create({
+      data: {
+        referenceNumber,
+        methodologyVersion: '1.0',
+        questionSetVersion: '1.0',
+        fullName: participantName,
+        email: cleanEmail,
+        companyName,
+        phone: founder.phone || null,
+        submittedContext: {
+          revenue: founder.revenue || null,
+          companyStage: founder.companyStage || founder.stage || null,
+          role: founder.role || 'Founder / CEO',
+          industry: founder.industry || null,
+          initial_reason: founder.initial_reason || founder.reason || founder.pressure || null,
+          howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear || null,
         },
-        create: {
-          email: founder.email,
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    } else {
-      founderRecord = await prisma.founder.create({
-        // If no email provided, just create
-        data: {
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-        }
-      });
-    }
-
-    const assessment = await prisma.assessment.create({
-      data: {
-        founderId: founderRecord.id,
-        scores: JSON.stringify(answers),
-        overallScore,
-        tier,
-        primaryFocus,
-        focusArea: primaryFocus,
-        greatestOpportunity: insight.opp,
-        openingQuestion: insight.q
-      }
+        answers: structuredAnswers,
+        overallRawMean,
+        overallNormalised,
+        domainScores,
+        primarySignalAreas,
+        signalClassification,
+        methodologyAcknowledged: true,
+        privacyAcknowledged: true,
+        marketingConsent,
+        reviewStatus: 'AWAITING_REVIEW',
+        zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+      },
     });
 
-    const transcript = await prisma.transcript.create({
-      data: {
-        founderId: founderRecord.id
-      }
+    // Also cache in memory for backwards compatibility with legacy session polling
+    ephemeralSessions.set(submission.id, {
+      answers: validatedScores,
+      domainScores,
+      finalScore: Math.round(overallNormalised),
+      overallMean: overallRawMean,
+      tier: signalClassification,
+      methodologyVersion: '1.0',
+      founder: {
+        name: participantName,
+        company: companyName,
+        email: cleanEmail,
+        phone: founder.phone || '',
+        revenue: founder.revenue || '',
+        reference_number: referenceNumber,
+      },
+      expiresAt: Date.now() + 30 * 60 * 1000,
     });
 
-    // --- GHL & Email Integration ---
-    if (founder.email) {
-      try {
-        const contactId = await upsertContact({
-          email: founder.email,
-          firstName: founder.founder || founder.name,
+    // CRM in-app notification feed (Item 1 & 2 in Implementation Plan)
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'PRESSURE_SCAN_SUBMITTED',
+      title: 'New Founder Pressure Scan',
+      message: `${participantName} (${companyName || 'Founder'}) completed scan · Score ${Math.round(overallNormalised)}/100`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: submission.id,
+      dedupeKey: `PRESSURE_SCAN_SUBMITTED:${submission.id}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[PressureScan] Inbox notify warning:', err?.message));
+
+    // ─── Sub-Task 4 & 6: GHL Smart Deduplication & Secure Staff Alert ─────────
+    try {
+      const primarySlug = domainToSlug(primarySignalAreas[0] || 'founder-involvement');
+      const contactTags = [
+        'founder-pressure-scan',
+        'scan-v1.0',
+        `primary-${primarySlug}`,
+        ...(marketingConsent ? ['Newsletter'] : []),
+      ];
+
+      const contactId = await upsertContact({
+        email: cleanEmail,
+        firstName: participantName,
+        phone: founder.phone,
+        tags: contactTags,
+        customFields: [
+          { name: 'Last Scan Ref', value: referenceNumber },
+          { name: 'Primary Signal Area', value: primaryJoined },
+          { name: 'Normalised Score', value: `${overallNormalised}%` },
+        ],
+        howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear,
+        attribution: req.body.attribution,
+      });
+
+      // Persist lead attribution to PostgreSQL
+      syncLeadAttribution(
+        {
+          email: cleanEmail,
+          leadName: participantName,
+          leadForm: 'founder_pressure_scan',
+          howDidYouHear: founder.howDidYouHear || req.body.howDidYouHear,
+          attribution: req.body.attribution,
           phone: founder.phone,
-          tags: ['Founder Pressure Scan']
+          ghlContactId: contactId,
+          tags: contactTags,
+        },
+        req
+      ).catch((attrErr) => console.warn('[Pressure Scan] Attribution tracking notice:', attrErr));
+
+      // Enroll in newsletter if opted in
+      if (marketingConsent) {
+        try {
+          const existingSub = await prisma.newsletterSubscriber.findUnique({
+            where: { email: cleanEmail },
+          });
+          let token: string = randomUUID();
+          let shouldSendWelcome = false;
+          if (!existingSub) {
+            shouldSendWelcome = true;
+            await prisma.newsletterSubscriber.create({
+              data: {
+                email: cleanEmail,
+                firstName: participantName || null,
+                consentGiven: true,
+                consentDate: new Date(),
+                consentSource: 'founder_pressure_scan',
+                privacyPolicyVersion: 'v2026.3',
+                subscribed: true,
+                status: 'subscribed',
+                unsubscribeToken: token,
+                source: 'Founder Pressure Scan',
+                ghlContactId: contactId || null,
+                subscribedAt: new Date(),
+              },
+            });
+          } else if (!existingSub.subscribed) {
+            shouldSendWelcome = true;
+            token = existingSub.unsubscribeToken || token;
+            await prisma.newsletterSubscriber.update({
+              where: { email: cleanEmail },
+              data: {
+                subscribed: true,
+                status: 'subscribed',
+                unsubscribedAt: null,
+                subscribedAt: new Date(),
+                ghlContactId: contactId || existingSub.ghlContactId,
+              },
+            });
+          } else {
+            // Already an active subscriber (e.g. enrolled during calibrate step or prior) - do NOT re-send welcome email!
+            token = existingSub.unsubscribeToken || token;
+            shouldSendWelcome = false;
+          }
+
+          if (shouldSendWelcome) {
+            sendNewsletterWelcomeEmail(cleanEmail, contactId, token, participantName).catch((nlErr) =>
+              console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr)
+            );
+          }
+        } catch (nlErr) {
+          console.warn('[Pressure Scan] Newsletter subscriber record notice:', nlErr);
+        }
+      }
+
+      if (contactId) {
+        // GHL Opportunity Deduplication: Checks for existing open opportunities first
+        await createOpportunityWithDedup(
+          contactId,
+          `Founder Pressure Scan - ${companyName || participantName}`,
+          referenceNumber
+        );
+
+        // Send alert email to Lionel & Staff with secure frontend review link ONLY
+        const frontendUrl = process.env.FRONTEND_URL || 'https://staging.leadersperformance.ae';
+        const secureReviewUrl = `${frontendUrl}/diagnostics?id=${referenceNumber}`;
+
+        const lionelContactId = await upsertContact({
+          email: 'lionel@leadersperformance.ae',
+          firstName: 'Lionel',
+          lastName: 'Eersteling',
+          tags: ['lp-staff'],
+        });
+        const infoContactId = await upsertContact({
+          email: 'info@leadersperformance.ae',
+          firstName: 'Leaders',
+          lastName: 'Performance',
+          tags: ['lp-staff'],
         });
 
-        if (contactId) {
-          await createOpportunity(contactId, `Founder Pressure Scan - ${founder.founder || founder.name}`);
-          
-          await sendAssessmentEmail(contactId, {
-            tier,
-            firstName: founder.founder || founder.name,
-            score: Math.round((overallScore / 4) * 100),
-            sessionId: transcript.id,
-          });
+        const adminRecipients = [lionelContactId, infoContactId].filter(Boolean);
 
-          const admin1Id = await upsertContact({ email: 'info@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-          const admin2Id = await upsertContact({ email: 'lionel@leadersperformance.ae', firstName: 'Internal', tags: ['lp-staff'] });
-          
-          await sendAdminBriefing({
-            name: founder.founder || founder.name,
-            email: founder.email,
-            score: Math.round((overallScore / 4) * 100),
-            tier,
-            company: founder.company,
+        // 1. Send Internal Advisor Briefing (Executive Dossier PDF) to Lionel & Staff
+        await sendAdminBriefing(
+          {
+            name: participantName,
+            participant_name: participantName,
+            email: cleanEmail,
+            company: companyName,
+            company_name: companyName,
             phone: founder.phone,
-            primary_focus: primaryFocus,
-            focus_area: primaryFocus,
-            greatest_opportunity: insight.opp,
-            opening_question: insight.q
-          }, [admin1Id, admin2Id]);
-        }
-      } catch (ghlError) {
-        console.error('GHL integration failed (non-fatal):', ghlError);
+            revenue: founder.revenue,
+            stage: founder.companyStage || founder.stage,
+            signal_classification: signalClassification,
+            reference_number: referenceNumber,
+            initial_reason: founder.initial_reason || founder.reason || founder.pressure,
+            primary_focus: primaryJoined,
+            review_url: secureReviewUrl,
+          },
+          adminRecipients
+        );
+
+        // 2. Send Participant-Facing Results Report (Results PDF) to Founder
+        await sendParticipantScanResultsEmail({
+          participantName,
+          email: cleanEmail,
+          companyName,
+          referenceNumber,
+          primarySignalArea: primaryJoined,
+          signalClassification,
+          contactId,
+        });
+
+        // 3. Record Immediate Assessment Received Email in scheduled_emails ledger
+        const resultsSubject = `[Founder Pressure Scan] Next Steps: Schedule Your Executive Review (Ref: ${referenceNumber})`;
+        await prisma.scheduledEmail.upsert({
+          where: { idempotencyKey: `results:${referenceNumber}` },
+          create: {
+            contactId: contactId || '',
+            contactEmail: cleanEmail,
+            emailType: 'results',
+            subject: resultsSubject,
+            htmlBody: '',
+            sendAt: submission.createdAt || new Date(),
+            status: 'sent',
+            sentAt: new Date(),
+            scanType: 'founder_pressure_scan',
+            referenceNumber,
+            idempotencyKey: `results:${referenceNumber}`,
+          },
+          update: {
+            status: 'sent',
+            sentAt: new Date(),
+          },
+        }).catch((e: any) => console.warn('[Pressure Scan] Notice recording results email:', e.message || e));
+
+        // 4. Schedule First Follow-up (Day 2) and Final Follow-up (Day 5)
+        await scheduleScanFollowups({
+          contactId: contactId || '',
+          email: cleanEmail,
+          participantName,
+          companyName,
+          referenceNumber,
+          primarySignalArea: primaryJoined,
+          submittedAt: submission.createdAt || new Date(),
+        });
       }
+    } catch (ghlError) {
+      console.error('[Pressure Scan] GHL/Email integration non-fatal error:', ghlError);
     }
-    // ---------------------------------
 
-    await prisma.systemLog.create({
-      data: {
-        level: 'info',
-        action: 'ASSESSMENT_SCORED',
-        details: JSON.stringify({ assessmentId: assessment.id, email: founder.email, tier })
-      }
+    // ─── Sub-Task 5: Public API Response Sanitization ─────────────────────────
+    // Strictly ZERO numerical percentages, scores, or diagnostic signal details returned to founder
+    return res.status(201).json({
+      success: true,
+      referenceNumber,
+      humanReviewNotice:
+        "The automated outcome identifies directional signals based on your answers. Lionel Eersteling's Human Review will examine the context, interpretation, and deliberate control structures.",
+      nextSteps: {
+        title: 'Begin a Strategic Conversation',
+        actionUrl: '/connect',
+      },
+      id: submission.id,
+      sessionId: submission.id,
     });
-
-    res.status(201).json({ message: 'Assessment submitted successfully', id: assessment.id, sessionId: transcript.id });
   } catch (error) {
     console.error('Error submitting assessment:', error);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -501,116 +874,365 @@ apiRoutes.post('/assessments/submit', async (req, res) => {
 
 /**
  * @openapi
- * /voice/session:
- *   post:
- *     summary: Initialize AI Voice Session
- *     description: Creates a new conversation transcript record and prepares the AI context.
+ * /scan/lookup:
+ *   get:
+ *     summary: Lookup Previous Scan Submission
+ *     description: Checks if a business email has already completed a scan or booked a review session (Resumption logic).
  *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               founderId:
- *                 type: string
- *                 description: The founder's ID.
+ *       - Assessment
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Participant business email to lookup
  *     responses:
  *       200:
- *         description: Session initialized
+ *         description: Scan lookup result (ALREADY_SCHEDULED, AWAITING_SCHEDULE, or NOT_FOUND)
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 sessionId:
+ *                 found:
+ *                   type: boolean
+ *                   example: true
+ *                 status:
  *                   type: string
- *                 message:
+ *                   enum: [ALREADY_SCHEDULED, AWAITING_SCHEDULE, NOT_FOUND]
+ *                   example: ALREADY_SCHEDULED
+ *                 referenceNumber:
  *                   type: string
+ *                   example: LP-FPS-2026-1042
+ *                 fullName:
+ *                   type: string
+ *                   example: David Kim
+ *                 companyName:
+ *                   type: string
+ *                   example: Kim Logistics
+ *                 scheduledReviewAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                 zoomMeetingUrl:
+ *                   type: string
+ *                   nullable: true
+ *                 primarySignalArea:
+ *                   type: string
+ *                   example: Operational Resilience
+ *       400:
+ *         description: Valid business email is required
+ *       500:
+ *         description: Internal Server Error
  */
-apiRoutes.post('/chat/init', async (req, res) => {
+apiRoutes.get('/scan/lookup', async (req, res) => {
   try {
-    const { founder } = req.body;
-    
-    let founderRecord;
-    if (founder.email) {
-      founderRecord = await prisma.founder.upsert({
-        where: { email: founder.email },
-        update: {
-          name: founder.founder || founder.name,
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
+    const rawEmail = (typeof req.query.email === 'string' ? req.query.email : '').trim().toLowerCase();
+    const rawRef = (typeof req.query.ref === 'string' ? req.query.ref : typeof req.query.id === 'string' ? req.query.id : '').trim();
+
+    if (!rawEmail && !rawRef) {
+      return res.status(400).json({ error: 'Valid business email or reference number is required.' });
+    }
+
+    // Direct lookup by reference number or ID
+    if (rawRef) {
+      const submission = await prisma.pressureScanSubmission.findFirst({
+        where: {
+          OR: [{ referenceNumber: rawRef }, { id: rawRef }],
         },
-        create: {
-          email: founder.email,
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
-        }
       });
-    } else {
-      founderRecord = await prisma.founder.create({
-        data: {
-          name: founder.founder || founder.name || 'Unknown',
-          phone: founder.phone,
-          companyName: founder.company,
-          revenueBand: founder.revenue,
-          stage: founder.stage || founder.companyStage,
-        }
+
+      if (!submission) {
+        return res.json({ found: false, status: 'NOT_FOUND' });
+      }
+
+      const primarySignal = Array.isArray(submission.primarySignalAreas) && submission.primarySignalAreas.length > 0
+        ? submission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = submission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+      const isScheduled = Boolean(submission.scheduledReviewAt);
+
+      return res.json({
+        found: true,
+        status: isScheduled ? 'ALREADY_SCHEDULED' : 'AWAITING_SCHEDULE',
+        submission: {
+          id: submission.id,
+          referenceNumber: submission.referenceNumber,
+          fullName: submission.fullName,
+          companyName: submission.companyName,
+          email: submission.email,
+          primarySignal,
+          scheduledReviewAt: submission.scheduledReviewAt,
+          zoomJoinUrl: isScheduled ? zoomUrl : null,
+          submittedAt: submission.createdAt,
+        },
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        companyName: submission.companyName,
+        scheduledReviewAt: submission.scheduledReviewAt,
+        zoomMeetingUrl: isScheduled ? zoomUrl : null,
+        primarySignalArea: primarySignal,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
       });
     }
 
-    const session = await prisma.transcript.create({
-      data: {
-        founderId: founderRecord.id
-      }
+    // 1. Check if there is an active confirmed scheduled review for this email first
+    const scheduledSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        email: rawEmail,
+        scheduledReviewAt: { not: null },
+      },
+      orderBy: { scheduledReviewAt: 'desc' },
     });
-    res.status(200).json({ message: 'Session initialized', sessionId: session.id });
+
+    if (scheduledSubmission && scheduledSubmission.scheduledReviewAt) {
+      const primarySignal = Array.isArray(scheduledSubmission.primarySignalAreas) && scheduledSubmission.primarySignalAreas.length > 0
+        ? scheduledSubmission.primarySignalAreas[0]
+        : 'Operational Resilience';
+      const zoomUrl = scheduledSubmission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance';
+
+      return res.json({
+        found: true,
+        status: 'ALREADY_SCHEDULED',
+        submission: {
+          id: scheduledSubmission.id,
+          referenceNumber: scheduledSubmission.referenceNumber,
+          fullName: scheduledSubmission.fullName,
+          companyName: scheduledSubmission.companyName,
+          email: scheduledSubmission.email,
+          primarySignal,
+          scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+          zoomJoinUrl: zoomUrl,
+          submittedAt: scheduledSubmission.createdAt,
+        },
+        referenceNumber: scheduledSubmission.referenceNumber,
+        fullName: scheduledSubmission.fullName,
+        companyName: scheduledSubmission.companyName,
+        scheduledReviewAt: scheduledSubmission.scheduledReviewAt,
+        zoomMeetingUrl: zoomUrl,
+        primarySignalArea: primarySignal,
+        signalClassification: scheduledSubmission.signalClassification,
+        submittedAt: scheduledSubmission.createdAt,
+      });
+    }
+
+    // 2. Otherwise find the latest scan submission awaiting review scheduling
+    const latestSubmission = await prisma.pressureScanSubmission.findFirst({
+      where: { email: rawEmail },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestSubmission) {
+      return res.json({ found: false, status: 'NOT_FOUND' });
+    }
+
+    const primarySignalLatest = Array.isArray(latestSubmission.primarySignalAreas) && latestSubmission.primarySignalAreas.length > 0
+      ? latestSubmission.primarySignalAreas[0]
+      : 'Operational Resilience';
+
+    return res.json({
+      found: true,
+      status: 'AWAITING_SCHEDULE',
+      submission: {
+        id: latestSubmission.id,
+        referenceNumber: latestSubmission.referenceNumber,
+        fullName: latestSubmission.fullName,
+        companyName: latestSubmission.companyName,
+        email: latestSubmission.email,
+        primarySignal: primarySignalLatest,
+        submittedAt: latestSubmission.createdAt,
+        scheduledReviewAt: null,
+        zoomJoinUrl: null,
+      },
+      referenceNumber: latestSubmission.referenceNumber,
+      fullName: latestSubmission.fullName,
+      companyName: latestSubmission.companyName,
+      primarySignalArea: primarySignalLatest,
+      signalClassification: latestSubmission.signalClassification,
+      submittedAt: latestSubmission.createdAt,
+      overallNormalised: latestSubmission.overallNormalised,
+    });
+  } catch (error) {
+    console.error('[Scan Lookup] Error checking email status:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ─── Sub-Task 6: Secure Human Review Dossier APIs ─────────────────────────────
+
+/**
+ * GET /api/v1/scan/review/:referenceNumber
+ * Protected dossier view for Mr. Lionel (Requires CRM Auth)
+ */
+apiRoutes.get('/scan/review/:referenceNumber', requireCrmAuth, async (req, res) => {
+  try {
+    const referenceNumber = String(req.params.referenceNumber);
+    const submission = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        OR: [{ referenceNumber }, { id: referenceNumber }],
+      },
+    });
+
+    if (!submission) {
+      return res.status(404).json({ error: 'Review dossier not found for given reference.' });
+    }
+
+    return res.json({
+      success: true,
+      referenceNumber: submission.referenceNumber,
+      fullName: submission.fullName,
+      email: submission.email,
+      companyName: submission.companyName,
+      phone: submission.phone,
+      submittedContext: submission.submittedContext,
+      answers: submission.answers,
+      overallRawMean: submission.overallRawMean,
+      overallNormalised: submission.overallNormalised,
+      domainScores: submission.domainScores,
+      primarySignalAreas: submission.primarySignalAreas,
+      signalClassification: submission.signalClassification,
+      reviewStatus: submission.reviewStatus,
+      reviewerNotes: submission.reviewerNotes,
+      reviewerDecision: submission.reviewerDecision,
+      reviewedAt: submission.reviewedAt,
+      reviewedBy: submission.reviewedBy,
+      zoomMeetingUrl: submission.zoomMeetingUrl || process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+      scheduledReviewAt: submission.scheduledReviewAt,
+      submittedAt: submission.createdAt,
+    });
+  } catch (error) {
+    console.error('Error fetching review dossier:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * PATCH /api/v1/scan/review/:referenceNumber
+ * Allows Lionel to save reviewer notes, decision, and update reviewStatus (Requires CRM Auth)
+ */
+apiRoutes.patch('/scan/review/:referenceNumber', requireCrmAuth, async (req, res) => {
+  try {
+    const referenceNumber = String(req.params.referenceNumber);
+    const { reviewerNotes, reviewerDecision, reviewStatus, zoomMeetingUrl, scheduledReviewAt, reviewedBy } = req.body;
+
+    const existing = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        OR: [{ referenceNumber }, { id: referenceNumber }],
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Submission not found to update.' });
+    }
+
+    const updated = await prisma.pressureScanSubmission.update({
+      where: { id: existing.id },
+      data: {
+        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : existing.reviewerNotes,
+        reviewerDecision: reviewerDecision !== undefined ? reviewerDecision : existing.reviewerDecision,
+        reviewStatus: reviewStatus !== undefined ? reviewStatus : existing.reviewStatus,
+        zoomMeetingUrl: zoomMeetingUrl !== undefined ? zoomMeetingUrl : existing.zoomMeetingUrl,
+        scheduledReviewAt: scheduledReviewAt ? new Date(scheduledReviewAt) : existing.scheduledReviewAt,
+        reviewedAt: new Date(),
+        reviewedBy: reviewedBy || existing.reviewedBy || 'Lionel Eersteling',
+      },
+    });
+
+    return res.json({ success: true, submission: updated });
+  } catch (error) {
+    console.error('Error updating review dossier:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * GET /api/v1/scan/review/:referenceNumber/pdf
+ * Downloads standard PDF 1.4 Dossier (Requires CRM Auth)
+ */
+apiRoutes.get('/scan/review/:referenceNumber/pdf', requireCrmAuth, async (req, res) => {
+  try {
+    const referenceNumber = String(req.params.referenceNumber);
+    const submission = await prisma.pressureScanSubmission.findFirst({
+      where: {
+        OR: [{ referenceNumber }, { id: referenceNumber }],
+      },
+    });
+
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found for PDF export' });
+    }
+
+    const answersList = Array.isArray(submission.answers) ? (submission.answers as any[]) : [];
+    const domainScoresList = Array.isArray(submission.domainScores) ? (submission.domainScores as any[]) : [];
+
+    const audience = (req.query.audience === 'participant' ? 'participant' : 'internal') as 'internal' | 'participant';
+
+    const pdfBuffer = generatePressureScanPdf(
+      {
+        referenceNumber: submission.referenceNumber,
+        fullName: submission.fullName,
+        email: submission.email,
+        companyName: submission.companyName,
+        phone: submission.phone,
+        submittedContext: submission.submittedContext as any,
+        answers: answersList,
+        overallRawMean: submission.overallRawMean,
+        overallNormalised: submission.overallNormalised,
+        domainScores: domainScoresList,
+        primarySignalAreas: submission.primarySignalAreas,
+        signalClassification: submission.signalClassification,
+        submittedAt: submission.createdAt,
+        reviewStatus: submission.reviewStatus,
+        reviewerNotes: submission.reviewerNotes,
+        reviewerDecision: submission.reviewerDecision,
+        reviewedAt: submission.reviewedAt,
+        reviewedBy: submission.reviewedBy,
+        zoomMeetingUrl: submission.zoomMeetingUrl,
+        scheduledReviewAt: submission.scheduledReviewAt,
+      },
+      audience
+    );
+
+    const suffix = audience === 'participant' ? '_Results' : '_Executive_Dossier';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Founder_Pressure_Scan_${submission.referenceNumber}${suffix}.pdf"`
+    );
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.end(pdfBuffer);
+  } catch (error) {
+    console.error('Error generating PDF dossier:', error);
+    res.status(500).json({ error: 'Failed to generate PDF dossier' });
+  }
+});
+
+// Voice AI endpoint excluded from production release
+// POST /voice/session
+apiRoutes.post('/chat/init', async (req, res) => {
+  try {
+    const sessionId = randomUUID();
+    res.status(200).json({ message: 'Session initialized', sessionId });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to init session' });
   }
 });
 
-/**
- * @openapi
- * /chat/message:
- *   post:
- *     summary: Send text message to Daisy
- *     description: Accepts text and returns a mocked AI text response.
- *     tags:
- *       - AI Chat
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *               message:
- *                 type: string
- *     responses:
- *       200:
- *         description: AI Text Response
- */
+// AI Chat endpoint excluded from production Swagger docs
+// POST /chat/message
 apiRoutes.post('/chat/message', async (req, res) => {
   const { sessionId, message } = req.body;
-  
+
   if (!sessionId) {
     return res.status(400).json({ error: 'sessionId is required' });
   }
 
   try {
     const aiResponse = await handleConversationTurn(sessionId, message || req.body.text);
-    
+
     return res.json(aiResponse);
   } catch (e) {
     console.error('Chat Error:', e);
@@ -618,37 +1240,146 @@ apiRoutes.post('/chat/message', async (req, res) => {
   }
 });
 
-/**
- * @openapi
- * /voice/transcribe:
- *   post:
- *     summary: Process Audio and Get AI Response
- *     description: Accepts an audio blob, returns mocked audio.
- *     tags:
- *       - Voice AI
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               sessionId:
- *                 type: string
- *               audio:
- *                 type: string
- *                 format: binary
- *     responses:
- *       200:
- *         description: Audio stream response from AI
- */
+apiRoutes.get('/voice/state', (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  if (!sessionId) {
+    return res.status(400).json({ error: 'sessionId required' });
+  }
+
+  const sessionState = runtimeManager.getOrCreateSession(sessionId);
+  if (!sessionState) {
+    return res.status(404).json({ error: 'Session state not found' });
+  }
+
+  const ctaVisible = sessionState.memoryFlags.bookingRecommended || sessionState.memoryFlags.calendarOpened;
+  res.json({ ctaVisible });
+});
+
+// Voice AI endpoint excluded from production release
+// POST /voice/token
+apiRoutes.post('/voice/token', async (req, res) => {
+  try {
+    const apiKey = await getSecret('ELEVENLABS_API_KEY');
+    const agentId = process.env.ELEVENLABS_AGENT_ID || (await getSecret('ELEVENLABS_AGENT_ID')) || 'agent_0501kz5sjfqbfyevzt7kqkmd9gz4';
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'ElevenLabs API key not configured' });
+    }
+    if (!agentId) {
+      return res.status(500).json({ error: 'ElevenLabs Agent ID not configured' });
+    }
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
+      method: 'GET',
+      headers: {
+        'xi-api-key': apiKey
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('ElevenLabs token error:', errorText);
+      return res.status(500).json({ error: `Failed to get signed URL from ElevenLabs: ${errorText}` });
+    }
+
+    const data = await response.json();
+
+    // Generate prompt and runtime variables if sessionId is provided
+    let systemPrompt = "";
+    let firstMessage = "";
+    let dynamicVariables: any = {};
+    if (req.body && req.body.sessionId) {
+      try {
+        const transcript = await prisma.transcript.findUnique({
+          where: { id: req.body.sessionId },
+          include: {
+            founder: {
+              include: {
+                assessments: {
+                  orderBy: { createdAt: 'desc' },
+                  take: 1
+                }
+              }
+            }
+          }
+        });
+
+        if (transcript) {
+          const latestAssessment = (transcript.founder as any)?.assessments?.[0];
+          const primaryArea = latestAssessment?.primaryFocus || latestAssessment?.focusArea || 'Founder Dependency';
+          const scoreTier = latestAssessment?.tier || 'Critical';
+          const overallScore = latestAssessment?.overallScore !== null && latestAssessment?.overallScore !== undefined ? latestAssessment.overallScore : 78;
+
+          const context = {
+            lead_name: transcript.founder?.name || 'Founder',
+            founder: transcript.founder?.name || 'Founder',
+            company_name: transcript.founder?.companyName || 'your company',
+            company: transcript.founder?.companyName || 'your company',
+            revenue: transcript.founder?.revenueBand || undefined,
+            stage: (transcript.founder as any)?.companyStage || 'Growth Stage',
+            primaryPressureArea: primaryArea,
+            primary_pressure_area: primaryArea,
+            score_tier: scoreTier,
+            overallScore: overallScore
+          };
+          systemPrompt = buildDaisySystemPrompt(context, 'voice');
+          const baseVars = extractDaisyRuntimeVariables(context);
+          dynamicVariables = {
+            ...baseVars,
+            primary_pressure_area: primaryArea,
+            primaryPressureArea: primaryArea,
+            score_tier: String(scoreTier),
+            overall_score: String(overallScore),
+            founder_name: transcript.founder?.name || 'Founder',
+            company_name: transcript.founder?.companyName || 'your company'
+          };
+          firstMessage = getDaisyWelcomeMessageVoice(transcript.founder?.name, primaryArea, scoreTier);
+        }
+      } catch (err) {
+        console.error("Failed to generate custom prompt:", err);
+      }
+    }
+
+    // If no sessionId or error, fallback to un-guessed greeting and default variables
+    if (!systemPrompt) {
+      const fallbackCtx = {
+        lead_name: 'Founder',
+        company: 'your company',
+        primaryPressureArea: 'Founder Dependency',
+        primary_pressure_area: 'Founder Dependency',
+        score_tier: 'Critical',
+        overallScore: 78
+      };
+      systemPrompt = buildDaisySystemPrompt(fallbackCtx, 'voice');
+      const baseVars = extractDaisyRuntimeVariables(fallbackCtx);
+      dynamicVariables = {
+        ...baseVars,
+        primary_pressure_area: 'Founder Dependency',
+        primaryPressureArea: 'Founder Dependency',
+        score_tier: 'Critical',
+        overall_score: '78',
+        founder_name: 'Founder',
+        company_name: 'your company'
+      };
+      firstMessage = getDaisyWelcomeMessageVoice('Founder', dynamicVariables.primary_pressure_area, dynamicVariables.score_tier);
+    }
+
+    return res.json({ signedUrl: data.signed_url, prompt: systemPrompt, firstMessage, dynamicVariables });
+  } catch (e: any) {
+    console.error('Token Error:', e);
+    res.status(500).json({ error: 'Failed to generate token', details: e.message });
+  }
+});
+
+// Voice AI endpoint excluded from production release
+// POST /voice/tts
 apiRoutes.post('/voice/tts', async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'text is required' });
 
     // Use voice ID from vault if available, otherwise default to a standard voice
-    const voiceId = await getSecret('ELEVENLABS_VOICE_ID') || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; 
+    const voiceId = await getSecret('ELEVENLABS_VOICE_ID') || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
 
     const elevenlabs = await getElevenLabs();
     if (!elevenlabs) {
@@ -660,7 +1391,7 @@ apiRoutes.post('/voice/tts', async (req, res) => {
       model_id: "eleven_turbo_v2",
       output_format: "mp3_44100_128"
     });
-    
+
     // Write the audio stream to the response
     res.setHeader('Content-Type', 'audio/mpeg');
     for await (const chunk of audioStream) {
@@ -701,19 +1432,13 @@ apiRoutes.post('/voice/tts', async (req, res) => {
  *         description: Booking scheduled
  */
 apiRoutes.post('/booking/schedule', async (req, res) => {
-  const { email, date, time, timezone, name, phone } = req.body;
-  
+  const { email, date, time, timezone, name, phone, reference } = req.body;
+
   if (!email || !date || !time) {
     return res.status(400).json({ error: 'Missing required booking fields' });
   }
 
   try {
-    const founderRecord = await prisma.founder.upsert({
-      where: { email },
-      update: {}, 
-      create: { email, name: name || 'Unknown', phone: phone || '' }
-    });
-
     const contactId = await upsertContact({
       email,
       firstName: name,
@@ -733,16 +1458,121 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
     }
 
-    const dateTimeStr = `${date}T${formattedTime}:00`;
-    await bookAppointment(contactId, dateTimeStr, `Strategy Session - ${name || email}`);
+    if (formattedTime < '13:30' || formattedTime > '18:00') {
+      return res.status(400).json({ error: 'Bookings are limited to 1:30 PM - 7:00 PM (Dubai time).' });
+    }
 
-    await prisma.systemLog.create({
-      data: {
-        level: 'info',
-        action: 'SESSION_BOOKED',
-        details: JSON.stringify({ founderId: founderRecord.id, email, date, time, timezone })
-      }
+    const rawDateTimeStr = `${date}T${formattedTime}:00`;
+    const dateTimeWithTz = `${rawDateTimeStr}+04:00`;
+    const appointmentDate = new Date(dateTimeWithTz);
+    const appointmentTitle = `Personal Review Conversation - ${name || email}${reference ? ` (${reference})` : ''}`;
+    const appointmentData: any = await bookAppointment(contactId, dateTimeWithTz, appointmentTitle);
+    const appointmentId = appointmentData?.id || appointmentData?.calendarEvent?.id || undefined;
+
+    console.log(`[Booking Scheduled] Successfully booked for ${email} (${name || 'Founder'}) at ${dateTimeWithTz} [Ref: ${reference || 'N/A'}]`);
+
+    if (reference) {
+      await prisma.pressureScanSubmission.updateMany({
+        where: {
+          OR: [
+            { referenceNumber: reference },
+            { id: reference },
+          ],
+        },
+        data: {
+          scheduledReviewAt: appointmentDate,
+          zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+        },
+      }).catch((e: unknown) => console.warn('[Pressure Scan] Could not link booking to scan ref:', e));
+    }
+
+    // Resolve founder name/company from scan submission if not directly provided in booking body
+    let finalName = name;
+    let finalCompany = req.body.company;
+    let finalPhone = phone;
+
+    if (reference && (!finalName || !finalCompany || !finalPhone)) {
+      try {
+        const existingSub = await prisma.pressureScanSubmission.findFirst({
+          where: {
+            OR: [{ referenceNumber: reference }, { id: reference }],
+          },
+          select: { fullName: true, companyName: true, phone: true },
+        });
+        if (existingSub) {
+          if (!finalName && existingSub.fullName) finalName = existingSub.fullName;
+          if (!finalCompany && existingSub.companyName) finalCompany = existingSub.companyName;
+          if (!finalPhone && existingSub.phone) finalPhone = existingSub.phone;
+        }
+      } catch (_) { }
+    }
+
+    // Cancel pending follow-ups (Day 2 & Day 5) because participant booked a call
+    await cancelPendingScanFollowups(email, reference);
+
+    // Record Immediate Booking Confirmation Email in scheduled_emails
+    const bookingConfSubject = `[Confirmed] 1-on-1 Strategic Review with Lionel Eersteling (Ref: ${reference || 'FPS-2026-N/A'})`;
+    const bookingConfKey = `booking_confirmation:${reference || email}:${appointmentDate.getTime()}`;
+    await prisma.scheduledEmail.upsert({
+      where: { idempotencyKey: bookingConfKey },
+      create: {
+        contactId,
+        contactEmail: email.toLowerCase().trim(),
+        emailType: 'booking_confirmation',
+        subject: bookingConfSubject,
+        htmlBody: '',
+        sendAt: new Date(),
+        status: 'sent',
+        sentAt: new Date(),
+        scanType: 'founder_pressure_scan',
+        appointmentId: appointmentId || undefined,
+        referenceNumber: reference || undefined,
+        idempotencyKey: bookingConfKey,
+      },
+      update: {
+        status: 'sent',
+        sentAt: new Date(),
+      },
+    }).catch((e: any) => console.warn('[Pressure Scan] Notice recording booking confirmation:', e.message || e));
+
+    // Schedule 24-hour and 1-hour appointment reminders
+    await scheduleAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      contactId,
+      email: email.toLowerCase().trim(),
+      participantName: finalName || 'Founder',
+      companyName: finalCompany,
+      phone: finalPhone,
+      appointmentDate: appointmentDate,
+      zoomUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
     });
+
+    // Dispatch Calendar Booking Emails:
+    // 1) Founder receives calendar confirmation with confirmed time & Zoom meeting link
+    // 2) Lionel's side receives notification alert with founder details and link to review
+    sendCalendarBookingEmails({
+      participantName: finalName || 'Founder',
+      email: email,
+      phone: finalPhone || undefined,
+      companyName: finalCompany || 'Enterprise',
+      dateTimeStr: dateTimeWithTz,
+      referenceNumber: reference || 'FPS-2026-N/A',
+      zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    }).catch((e) => console.error('[Pressure Scan] Error sending calendar booking emails:', e));
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_SCHEDULED',
+      title: 'Strategy Call Booked',
+      message: `${finalName || email} booked consultation for ${date} at ${time}`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_SCHEDULED:${email}:${date}:${time}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Booking] Inbox notify warning:', err?.message));
 
     // Emit event to connected clients for real-time update
     const io = req.app.get('io');
@@ -750,10 +1580,198 @@ apiRoutes.post('/booking/schedule', async (req, res) => {
       io.emit('booking_updated', { date });
     }
 
-    res.json({ success: true, message: 'Session successfully booked' });
-  } catch (error) {
-    console.error('Booking error:', error);
+    res.json({
+      success: true,
+      message: 'Session successfully booked',
+      scheduledReviewAt: appointmentDate.toISOString(),
+      zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    });
+  } catch (error: any) {
+    console.error('Error scheduling booking:', error);
+    const msg = (error?.message || String(error)).toLowerCase();
+    if (
+      msg.includes('already taken') ||
+      msg.includes('conflict') ||
+      msg.includes('busy') ||
+      msg.includes('unavailable') ||
+      msg.includes('slot') ||
+      error?.status === 409
+    ) {
+      return res.status(409).json({ error: 'This time slot is no longer available. Please select another time.' });
+    }
     res.status(500).json({ error: 'Failed to schedule booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /booking/reschedule:
+ *   post:
+ *     summary: Reschedule Consultation Slot
+ *     description: Reschedules an existing consultation, updates reminder schedule, and sends notification.
+ *     tags:
+ *       - Booking
+ */
+apiRoutes.post('/booking/reschedule', async (req, res) => {
+  const { email, reference, appointmentId, date, time, reason } = req.body;
+  if (!email || !date || !time) {
+    return res.status(400).json({ error: 'Missing required fields (email, date, time)' });
+  }
+
+  try {
+    let formattedTime = time;
+    const timeMatch = time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1], 10);
+      const minutes = timeMatch[2];
+      const modifier = timeMatch[3].toUpperCase();
+      if (modifier === 'PM' && hours < 12) hours += 12;
+      if (modifier === 'AM' && hours === 12) hours = 0;
+      formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+
+    const rawDateTimeStr = `${date}T${formattedTime}:00`;
+    const dateTimeWithTz = `${rawDateTimeStr}+04:00`;
+    const newAppointmentDate = new Date(dateTimeWithTz);
+
+    // Update PressureScanSubmission
+    if (reference || email) {
+      await prisma.pressureScanSubmission.updateMany({
+        where: {
+          OR: [
+            ...(reference ? [{ referenceNumber: reference }, { id: reference }] : []),
+            { email: email.toLowerCase().trim() },
+          ],
+        },
+        data: {
+          scheduledReviewAt: newAppointmentDate,
+        },
+      });
+    }
+
+    // Update pending reminders in scheduled_emails
+    const reminderUpdate = await updateRescheduledAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      email: email.toLowerCase().trim(),
+      newAppointmentDate,
+    });
+
+    // Send rescheduled booking confirmation
+    sendCalendarBookingEmails({
+      participantName: req.body.name || 'Founder',
+      email: email.toLowerCase().trim(),
+      phone: req.body.phone,
+      companyName: req.body.company,
+      dateTimeStr: dateTimeWithTz,
+      referenceNumber: reference || 'FPS-2026-N/A',
+      zoomMeetingUrl: process.env.REVIEW_MEETING_URL || 'https://zoom.us/j/7114427991?pwd=leadersperformance',
+    }).catch((e) => console.error('[Booking Reschedule] Error sending confirmation:', e));
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_RESCHEDULED',
+      title: 'Strategy Call Rescheduled',
+      message: `${email} rescheduled consultation to ${date} at ${time}`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_RESCHEDULED:${email}:${date}:${time}`,
+      roles: ['Approver', 'Advisor'],
+      }).catch((err) => console.warn('[Booking Reschedule] Inbox notify warning:', err?.message));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Appointment successfully rescheduled',
+      scheduledReviewAt: newAppointmentDate.toISOString(),
+      reminderUpdate,
+    });
+  } catch (err: any) {
+    console.error('Error rescheduling booking:', err);
+    return res.status(500).json({ error: 'Failed to reschedule booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /booking/cancel:
+ *   post:
+ *     summary: Cancel Consultation Slot
+ *     description: Cancels an existing consultation and cancels all pending appointment reminders.
+ *     tags:
+ *       - Booking
+ */
+apiRoutes.post('/booking/cancel', async (req, res) => {
+  const { email, reference, appointmentId, reason } = req.body;
+  if (!email && !reference && !appointmentId) {
+    return res.status(400).json({ error: 'Missing identifying field (email, reference, or appointmentId)' });
+  }
+
+  try {
+    if (reference || email) {
+      await prisma.pressureScanSubmission.updateMany({
+        where: {
+          OR: [
+            ...(reference ? [{ referenceNumber: reference }, { id: reference }] : []),
+            ...(email ? [{ email: email.toLowerCase().trim() }] : []),
+          ],
+        },
+        data: {
+          scheduledReviewAt: null,
+        },
+      });
+    }
+
+    const cancelledCount = await cancelAppointmentReminders({
+      appointmentId,
+      referenceNumber: reference,
+      email: email?.toLowerCase().trim(),
+      reason: reason || 'Appointment cancelled by user request.',
+    });
+
+    // CRM in-app notification feed
+    inboxService.notify({
+      category: 'LEAD',
+      type: 'BOOKING_CANCELLED',
+      title: 'Strategy Call Cancelled',
+      message: `${email || reference} cancelled consultation session`,
+      link: '/analytics',
+      workspace: 'leaders_performance',
+      entityId: reference || appointmentId || email,
+      dedupeKey: `BOOKING_CANCELLED:${email || reference}:${Date.now()}`,
+      roles: ['Approver', 'Advisor'],
+    }).catch((err) => console.warn('[Booking Cancel] Inbox notify warning:', err?.message));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Appointment successfully cancelled',
+      cancelledReminders: cancelledCount,
+    });
+  } catch (err: any) {
+    console.error('Error cancelling booking:', err);
+    return res.status(500).json({ error: 'Failed to cancel booking' });
+  }
+});
+
+/**
+ * @openapi
+ * /cron/process-scheduled-emails:
+ *   post:
+ *     summary: Process Scheduled Email Queue
+ *     description: Triggers on-demand processing of due emails in scheduled_emails ledger.
+ *     tags:
+ *       - Email
+ */
+apiRoutes.post('/cron/process-scheduled-emails', async (_req, res) => {
+  try {
+    const result = await processScheduledEmails();
+    return res.status(200).json({
+      success: true,
+      result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Processing failed' });
   }
 });
 
@@ -815,12 +1833,56 @@ apiRoutes.get('/bookings/availability/month', async (req, res) => {
     const year = parseInt(req.query.year as string);
     const month = parseInt(req.query.month as string); // 1-12
     if (!year || !month) return res.status(400).json({ error: 'Year and month required' });
-    
-    const availability = await getMonthAvailability(year, month);
+
+    const availability = await getMasterclassMonthAvailability(year, month);
     res.status(200).json(availability);
   } catch (error) {
     console.error('Failed to get month availability:', error);
     res.status(500).json({ error: 'Failed to fetch month availability' });
+  }
+});
+
+/**
+ * @openapi
+ * /bookings/calendar-info:
+ *   get:
+ *     summary: Get Calendar Info
+ *     description: Returns the GHL calendar name and slot duration for dynamic session label display.
+ *     tags:
+ *       - Booking
+ *     responses:
+ *       200:
+ *         description: Calendar name and duration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 name:
+ *                   type: string
+ *                 duration:
+ *                   type: number
+ *                 sessionLabel:
+ *                   type: string
+ */
+apiRoutes.get('/bookings/calendar-info', async (_req, res) => {
+  try {
+    const info = await getCalendarInfo();
+    const duration = process.env.REVIEW_SESSION_DURATION ? parseInt(process.env.REVIEW_SESSION_DURATION, 10) : info.duration;
+    res.status(200).json({
+      name: info.name,
+      duration,
+      sessionLabel: `Personal Review Conversation · ${duration} min`,
+    });
+  } catch (error) {
+    console.error('Failed to get calendar info:', error);
+    // Fallback so the UI always has something to show
+    const fallbackDuration = process.env.REVIEW_SESSION_DURATION ? parseInt(process.env.REVIEW_SESSION_DURATION, 10) : 30;
+    res.status(200).json({
+      name: 'Personal Review Conversation',
+      duration: fallbackDuration,
+      sessionLabel: `Personal Review Conversation · ${fallbackDuration} min`,
+    });
   }
 });
 
