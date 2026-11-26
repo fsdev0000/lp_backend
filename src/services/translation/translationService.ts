@@ -80,9 +80,9 @@ export class TranslationService {
   private timeoutMs: number;
 
   constructor() {
-    this.apiUrl = (process.env.TRANSLATION_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+    this.apiUrl = (process.env.TRANSLATION_API_URL || 'http://127.0.0.1:5000').replace(/\/$/, '');
     this.apiKey = process.env.TRANSLATION_API_KEY;
-    this.timeoutMs = Number(process.env.TRANSLATION_TIMEOUT_MS) || 30000;
+    this.timeoutMs = Number(process.env.TRANSLATION_TIMEOUT_MS) || 60000;
   }
 
   /**
