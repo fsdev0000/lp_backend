@@ -12,7 +12,8 @@
     "test:summary": "node scripts/printTestSummary.js",
     "prisma:resolve": "prisma migrate resolve --applied 20261106_add_cms_texts",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "articles:translate-backfill": "ts-node scripts/backfill_dutch_translations.ts"
   },
   "keywords": [],
   "author": "",

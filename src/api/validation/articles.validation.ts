@@ -13,6 +13,8 @@ export interface Article {
   author?: string;
   content: string;
   published?: boolean;
+  locale?: string;
+  translations?: Record<string, any>;
   created_at?: string;
   updated_at?: string;
 }
@@ -31,6 +33,8 @@ export interface ArticleSummary {
   reading_time?: number;
   author?: string;
   published: boolean;
+  locale?: string;
+  translations?: Record<string, any>;
   created_at: string;
 }
 
