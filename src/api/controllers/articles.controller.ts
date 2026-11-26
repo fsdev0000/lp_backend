@@ -57,6 +57,7 @@ export class ArticlesController {
       console.log(`[articles] GET /articles locale=${locale} IP=${req.ip}`);
       const articles = await this.service.listPublishedArticles(locale);
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+      res.setHeader('Vary', 'Referer, Accept-Language, Origin');
       return res.status(200).json({ articles, locale });
     } catch (error) {
       console.error('[articles] GET list error:', error instanceof Error ? error.message : String(error));
@@ -85,6 +86,7 @@ export class ArticlesController {
       }
 
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+      res.setHeader('Vary', 'Referer, Accept-Language, Origin');
       return res.status(200).json({ article, locale: article.locale || locale });
     } catch (error) {
       console.error(`[articles] GET /articles/${req.params?.slug} error:`, error instanceof Error ? error.message : String(error));
