@@ -93,6 +93,7 @@ router.get('/:slug', articlesController.getArticleBySlug);
 // Management endpoints (Authenticated via x-api-key)
 router.get('/:slug/translation', articlesController.authenticate, articlesController.getTranslationStatus);
 router.post('/:slug/translation/retry', articlesController.authenticate, articlesController.retryTranslation);
+router.post('/:slug/translation/approve', articlesController.authenticate, articlesController.approveTranslation);
 router.post('/', articlesController.authenticate, articlesController.upsertArticle);
 router.delete('/:slug', articlesController.authenticate, articlesController.deleteArticle);
 router.delete('/', articlesController.authenticate, articlesController.deleteArticle);

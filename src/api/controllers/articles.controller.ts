@@ -2,28 +2,21 @@ import { Request, Response } from 'express';
 import { articlesService, ArticlesService } from '../services/articles.service';
 
 /**
- * Resolves requested locale with priority:
- * 1. Query parameter (?locale=nl)
- * 2. Header (x-locale: nl)
- * 3. Referer header (browser visiting /nl/...)
- * 4. Accept-Language header
- * 5. Default 'en'
+ * Resolves requested locale strictly with priority:
+ * 1. Query parameter (?locale=nl or ?locale=en)
+ * 2. Header (x-locale: nl or x-locale: en)
+ * 3. Default 'en'
+ * (Never guesses from Referer or Accept-Language)
  */
 function resolveLocale(req: Request): string {
   if (req.query.locale && typeof req.query.locale === 'string') {
-    return req.query.locale.trim().toLowerCase();
+    const loc = req.query.locale.trim().toLowerCase();
+    if (loc === 'nl' || loc === 'en') return loc;
   }
   const xLocale = req.headers['x-locale'];
-  if (typeof xLocale === 'string' && xLocale.trim()) {
-    return xLocale.trim().toLowerCase();
-  }
-  const referer = req.headers.referer || req.headers.referrer;
-  if (typeof referer === 'string' && referer.includes('/nl')) {
-    return 'nl';
-  }
-  const acceptLang = req.headers['accept-language'];
-  if (typeof acceptLang === 'string' && acceptLang.toLowerCase().startsWith('nl')) {
-    return 'nl';
+  if (typeof xLocale === 'string') {
+    const loc = xLocale.trim().toLowerCase();
+    if (loc === 'nl' || loc === 'en') return loc;
   }
   return 'en';
 }
@@ -57,7 +50,7 @@ export class ArticlesController {
       console.log(`[articles] GET /articles locale=${locale} IP=${req.ip}`);
       const articles = await this.service.listPublishedArticles(locale);
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-      res.setHeader('Vary', 'Referer, Accept-Language, Origin');
+      res.setHeader('Vary', 'Origin');
       return res.status(200).json({ articles, locale });
     } catch (error) {
       console.error('[articles] GET list error:', error instanceof Error ? error.message : String(error));
@@ -86,7 +79,7 @@ export class ArticlesController {
       }
 
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-      res.setHeader('Vary', 'Referer, Accept-Language, Origin');
+      res.setHeader('Vary', 'Origin');
       return res.status(200).json({ article, locale: article.locale || locale });
     } catch (error) {
       console.error(`[articles] GET /articles/${req.params?.slug} error:`, error instanceof Error ? error.message : String(error));
@@ -157,6 +150,30 @@ export class ArticlesController {
   };
 
   /**
+   * POST /api/articles/:slug/translation/approve
+   * Management endpoint to approve a pending_review translation, marking it completed and live.
+   */
+  approveTranslation = async (req: Request, res: Response) => {
+    try {
+      const rawSlug = req.params.slug;
+      const slug = Array.isArray(rawSlug) ? rawSlug[0] : String(rawSlug || '');
+      if (!slug) {
+        return res.status(400).json({ error: 'Missing slug parameter' });
+      }
+
+      const success = await this.service.approveTranslation(slug, 'nl');
+      if (!success) {
+        return res.status(404).json({ error: 'Article or Dutch translation not found' });
+      }
+
+      return res.status(200).json({ success: true, message: 'Translation approved and marked live', slug });
+    } catch (error) {
+      console.error('[articles] POST translation approve error:', error instanceof Error ? error.message : String(error));
+      return res.status(500).json({ error: 'An internal error occurred.' });
+    }
+  };
+
+  /**
    * POST /api/articles or /api/v1/articles
    * Create or update an article using slug as unique identifier.
    */
@@ -202,7 +219,7 @@ export class ArticlesController {
         return res.status(404).json({ error: 'Article not found' });
       }
 
-      return res.status(200).json({ message: 'Deleted successfully', slug });
+      return res.status(200).json({ message: `Deleted ${slug}`, slug });
     } catch (error) {
       console.error('[articles] DELETE error:', error instanceof Error ? error.message : String(error));
       return res.status(500).json({ error: 'An internal error occurred.' });

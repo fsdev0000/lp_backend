@@ -7,7 +7,7 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 async function ensureTranslationEngine(): Promise<ChildProcess | null> {
-  const targetUrl = process.env.TRANSLATION_API_URL || 'http://127.0.0.1:5000';
+  const targetUrl = process.env.TRANSLATION_API_URL || 'http://127.0.0.1:5005';
   try {
     const res = await fetch(`${targetUrl.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
@@ -20,7 +20,8 @@ async function ensureTranslationEngine(): Promise<ChildProcess | null> {
 
   console.log(`[TranslationEngine] Spawning local Argos Translate engine (scripts/argos_server.py)...`);
   const pythonScript = path.resolve(__dirname, 'argos_server.py');
-  const serverProc = spawn('python', [pythonScript, '5000'], { stdio: 'pipe' });
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const serverProc = spawn(pythonCmd, [pythonScript, '5005'], { stdio: 'pipe' });
 
   serverProc.stderr?.on('data', (d) => {
     const msg = d.toString();
@@ -30,7 +31,7 @@ async function ensureTranslationEngine(): Promise<ChildProcess | null> {
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 500));
     try {
-      const res = await fetch('http://127.0.0.1:5000/health', { signal: AbortSignal.timeout(1000) });
+      const res = await fetch('http://127.0.0.1:5005/health', { signal: AbortSignal.timeout(1000) });
       if (res.ok) {
         console.log(`[TranslationEngine] Local Argos Translate engine is ready and healthy.`);
         return serverProc;
@@ -85,11 +86,10 @@ async function runBackfill() {
       console.log(`${progress} Translating "${slug}" ("${article.title}")...`);
 
       try {
-        // Mark processing in DB
+        // Mark background processing in DB
         await articlesRepository.updateArticleTranslation(slug, 'nl', {
-          status: 'processing',
+          background_status: 'processing',
           source_hash: currentHash,
-          updated_at: new Date().toISOString(),
         });
 
         // Execute translation
@@ -98,6 +98,8 @@ async function runBackfill() {
         // Save completed translation
         await articlesRepository.updateArticleTranslation(slug, 'nl', {
           status: 'completed',
+          approved: true,
+          background_status: 'completed',
           title: result.title,
           excerpt: result.excerpt,
           content: result.content,
@@ -114,10 +116,10 @@ async function runBackfill() {
         translatedCount++;
       } catch (err: any) {
         console.error(`${progress} ✗ Failed to translate "${slug}":`, err.message);
+        // Do not wipe existing translation on failure
         await articlesRepository.updateArticleTranslation(slug, 'nl', {
-          status: 'failed',
+          background_status: 'failed',
           error: err.message,
-          updated_at: new Date().toISOString(),
         });
         failedCount++;
       }

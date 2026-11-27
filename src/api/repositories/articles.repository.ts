@@ -37,7 +37,7 @@ export class ArticlesRepository {
     return rows.map((r) => {
       const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
       const nl = translations.nl;
-      const useDutch = isDutch && nl && nl.status === 'completed';
+      const useDutch = isDutch && nl && (nl.status === 'completed' || nl.approved === true);
 
       return {
         id: r.id,
@@ -102,7 +102,7 @@ export class ArticlesRepository {
     const r = rows[0];
     const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
     const nl = translations.nl;
-    const useDutch = isDutch && nl && nl.status === 'completed';
+    const useDutch = isDutch && nl && (nl.status === 'completed' || nl.approved === true);
 
     return {
       id: r.id,
@@ -120,7 +120,6 @@ export class ArticlesRepository {
       content: useDutch && nl.content ? nl.content : r.content,
       published: r.published,
       locale: useDutch ? 'nl' : 'en',
-      translations: translations,
       created_at: r.created_at,
       updated_at: r.updated_at,
     };
@@ -148,6 +147,8 @@ export class ArticlesRepository {
 
   /**
    * Updates an article's specific locale translation in the JSONB column.
+   * Merges fields into existing translation so background status/error updates never wipe content.
+   * Does NOT touch updated_at (preserves original article publishing and modification timestamp).
    */
   async updateArticleTranslation(
     slug: string,
@@ -161,10 +162,9 @@ export class ArticlesRepository {
       SET translations = jsonb_set(
         COALESCE(translations, '{}'::jsonb),
         ARRAY[$1],
-        $2::jsonb,
+        COALESCE(translations->$1, '{}'::jsonb) || $2::jsonb,
         true
-      ),
-      updated_at = NOW()
+      )
       WHERE LOWER(slug) = LOWER($3);
       `,
       locale,

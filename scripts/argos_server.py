@@ -1,6 +1,12 @@
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Set custom Argos data directory if not already set, avoiding permission errors on ~/.local/share
+if 'ARGOS_DATA_DIR' not in os.environ:
+    os.environ['ARGOS_DATA_DIR'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.argos_data')
+
 import argostranslate.translate
 
 class TranslateHandler(BaseHTTPRequestHandler):
@@ -54,7 +60,7 @@ class TranslateHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-def run(port=5000):
+def run(port=5005):
     server_address = ('127.0.0.1', port)
     httpd = HTTPServer(server_address, TranslateHandler)
     print(f"Argos Translate HTTP Server listening on http://127.0.0.1:{port}")
@@ -66,5 +72,5 @@ def run(port=5000):
         httpd.server_close()
 
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5005
     run(port)

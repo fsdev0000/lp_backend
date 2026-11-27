@@ -129,11 +129,10 @@ export class ArticlesService {
 
       console.log(`[Translation] Starting automatic background translation for "${slug}"...`);
 
-      // 2. Mark translation as processing
+      // 2. Mark background translation as processing (does not wipe existing translations or status)
       await this.repo.updateArticleTranslation(slug, 'nl', {
-        status: 'processing',
-        source_hash: currentHash,
-        updated_at: new Date().toISOString(),
+        background_status: 'processing',
+        translation_started_at: new Date().toISOString(),
       });
 
       // 3. Execute translation
@@ -149,6 +148,8 @@ export class ArticlesService {
       // 4. Save completed Dutch translation
       await this.repo.updateArticleTranslation(slug, 'nl', {
         status: 'completed',
+        approved: true,
+        background_status: 'completed',
         title: result.title,
         excerpt: result.excerpt,
         content: result.content,
@@ -166,15 +167,35 @@ export class ArticlesService {
     } catch (err: any) {
       console.error(`[Translation] Failed to translate article "${slug}":`, err.message);
       try {
+        // Record failure state without deleting existing good translation
         await this.repo.updateArticleTranslation(slug, 'nl', {
-          status: 'failed',
+          background_status: 'failed',
           error: err.message,
-          updated_at: new Date().toISOString(),
+          translation_failed_at: new Date().toISOString(),
         });
       } catch (dbErr: any) {
         console.error(`[Translation] Failed to record error state in DB for "${slug}":`, dbErr.message);
       }
     }
+  }
+
+  /**
+   * Approves a translation, marking it completed and approved for public serving.
+   */
+  async approveTranslation(slug: string, locale: string = 'nl'): Promise<boolean> {
+    const raw = await this.repo.getArticleRaw(slug);
+    if (!raw || !raw.translations || !raw.translations[locale]) {
+      return false;
+    }
+
+    await this.repo.updateArticleTranslation(slug, locale, {
+      status: 'completed',
+      approved: true,
+      approved_at: new Date().toISOString(),
+    });
+
+    this.clearCache(slug);
+    return true;
   }
 
   /**
