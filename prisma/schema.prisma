@@ -125,6 +125,7 @@ model Article {
   author          String?   @default("Lionel Eersteling")
   content         String
   published       Boolean?  @default(true)
+  translations    Json?     @default("{}") @db.JsonB
   createdAt       DateTime? @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt       DateTime? @default(now()) @updatedAt @db.Timestamptz(6) @map("updated_at")
 

@@ -6,8 +6,11 @@ const prisma = new PrismaClient();
 export class ArticlesRepository {
   /**
    * Retrieves all published articles ordered by created_at descending.
+   * If locale is 'nl' and a completed Dutch translation exists, returns localized content.
    */
-  async findPublishedArticles(): Promise<ArticleSummary[]> {
+  async findPublishedArticles(locale: string = 'en'): Promise<ArticleSummary[]> {
+    const isDutch = locale.toLowerCase().startsWith('nl');
+
     const rows = await prisma.$queryRawUnsafe<any[]>(`
       SELECT 
         id, 
@@ -23,6 +26,7 @@ export class ArticlesRepository {
         reading_time, 
         author, 
         published, 
+        COALESCE(translations, '{}'::jsonb) AS translations,
         created_at, 
         updated_at
       FROM public.articles
@@ -30,30 +34,40 @@ export class ArticlesRepository {
       ORDER BY created_at DESC;
     `);
 
-    return rows.map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      excerpt: r.excerpt,
-      pillar: r.pillar,
-      pillar_color: r.pillar_color,
-      keywords: Array.isArray(r.keywords) ? r.keywords : [],
-      meta_title: r.meta_title,
-      meta_description: r.meta_description,
-      publish_date: r.publish_date,
-      reading_time: r.reading_time,
-      author: r.author,
-      published: r.published,
-      created_at: r.created_at,
-    }));
+    return rows.map((r) => {
+      const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
+      const nl = translations.nl;
+      const useDutch = isDutch && nl && nl.status === 'completed';
+
+      return {
+        id: r.id,
+        slug: r.slug,
+        title: useDutch && nl.title ? nl.title : r.title,
+        excerpt: useDutch && nl.excerpt ? nl.excerpt : r.excerpt,
+        pillar: r.pillar,
+        pillar_color: r.pillar_color,
+        keywords: useDutch && Array.isArray(nl.keywords) && nl.keywords.length > 0 ? nl.keywords : (Array.isArray(r.keywords) ? r.keywords : []),
+        meta_title: useDutch && nl.meta_title ? nl.meta_title : r.meta_title,
+        meta_description: useDutch && nl.meta_description ? nl.meta_description : r.meta_description,
+        publish_date: r.publish_date,
+        reading_time: r.reading_time,
+        author: r.author,
+        published: r.published,
+        locale: useDutch ? 'nl' : 'en',
+        created_at: r.created_at,
+      };
+    });
   }
 
   /**
    * Retrieves a single article by slug.
    * If onlyPublished is true, unpublished articles will not be returned.
+   * If locale is 'nl' and a completed Dutch translation exists, returns localized content.
    */
-  async findArticleBySlug(slug: string, onlyPublished = true): Promise<Article | null> {
+  async findArticleBySlug(slug: string, onlyPublished = true, locale: string = 'en'): Promise<Article | null> {
     const condition = onlyPublished ? 'AND published = true' : '';
+    const isDutch = locale.toLowerCase().startsWith('nl');
+
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `
       SELECT 
@@ -71,6 +85,7 @@ export class ArticlesRepository {
         author, 
         content, 
         published, 
+        COALESCE(translations, '{}'::jsonb) AS translations,
         created_at, 
         updated_at
       FROM public.articles
@@ -85,24 +100,78 @@ export class ArticlesRepository {
     }
 
     const r = rows[0];
+    const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
+    const nl = translations.nl;
+    const useDutch = isDutch && nl && nl.status === 'completed';
+
     return {
       id: r.id,
       slug: r.slug,
-      title: r.title,
-      excerpt: r.excerpt,
+      title: useDutch && nl.title ? nl.title : r.title,
+      excerpt: useDutch && nl.excerpt ? nl.excerpt : r.excerpt,
       pillar: r.pillar,
       pillar_color: r.pillar_color,
-      keywords: Array.isArray(r.keywords) ? r.keywords : [],
-      meta_title: r.meta_title,
-      meta_description: r.meta_description,
+      keywords: useDutch && Array.isArray(nl.keywords) && nl.keywords.length > 0 ? nl.keywords : (Array.isArray(r.keywords) ? r.keywords : []),
+      meta_title: useDutch && nl.meta_title ? nl.meta_title : r.meta_title,
+      meta_description: useDutch && nl.meta_description ? nl.meta_description : r.meta_description,
       publish_date: r.publish_date,
       reading_time: r.reading_time,
       author: r.author,
-      content: r.content,
+      content: useDutch && nl.content ? nl.content : r.content,
       published: r.published,
+      locale: useDutch ? 'nl' : 'en',
+      translations: translations,
       created_at: r.created_at,
       updated_at: r.updated_at,
     };
+  }
+
+  /**
+   * Retrieves an article strictly in raw format with its translations JSON.
+   */
+  async getArticleRaw(slug: string): Promise<any | null> {
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT *, COALESCE(translations, '{}'::jsonb) AS translations FROM public.articles WHERE LOWER(slug) = LOWER($1) LIMIT 1;`,
+      slug
+    );
+    return rows && rows.length > 0 ? rows[0] : null;
+  }
+
+  /**
+   * Retrieves all published articles with their raw fields and translations (for backfill).
+   */
+  async findAllPublishedForTranslation(): Promise<any[]> {
+    return prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, slug, title, excerpt, content, meta_title, meta_description, keywords, COALESCE(translations, '{}'::jsonb) AS translations FROM public.articles WHERE published = true ORDER BY created_at ASC;`
+    );
+  }
+
+  /**
+   * Updates an article's specific locale translation in the JSONB column.
+   */
+  async updateArticleTranslation(
+    slug: string,
+    locale: string,
+    translationData: Record<string, any>
+  ): Promise<boolean> {
+    const jsonStr = JSON.stringify(translationData);
+    const result = await prisma.$executeRawUnsafe(
+      `
+      UPDATE public.articles
+      SET translations = jsonb_set(
+        COALESCE(translations, '{}'::jsonb),
+        ARRAY[$1],
+        $2::jsonb,
+        true
+      ),
+      updated_at = NOW()
+      WHERE LOWER(slug) = LOWER($3);
+      `,
+      locale,
+      jsonStr,
+      slug
+    );
+    return result > 0;
   }
 
   /**
