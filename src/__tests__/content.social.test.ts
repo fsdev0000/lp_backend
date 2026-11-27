@@ -22,7 +22,9 @@ app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/social/linkedin', linkedinRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 
-const TEST_API_KEY = process.env.ARTICLES_API_KEY || 'b8f9c1a2d4e7465b90a3f8c2e1d5b';
+const TEST_API_KEY = process.env.ADMIN_API_KEY || 'test-crm-admin-key-super-admin';
+const ARTICLES_TEST_KEY = 'test-articles-service-key';
+const NEWSLETTER_TEST_KEY = 'test-newsletter-service-key';
 
 describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () => {
   const linkedinAdapter = new LinkedInAdapter();
@@ -31,6 +33,11 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
   const mockAuditLogs: any[] = [];
 
   beforeEach(() => {
+    process.env.ADMIN_API_KEY = TEST_API_KEY;
+    process.env.CRM_API_KEY = TEST_API_KEY;
+    process.env.ARTICLES_API_KEY = ARTICLES_TEST_KEY;
+    process.env.NEWSLETTER_SEND_API_KEY = NEWSLETTER_TEST_KEY;
+    process.env.NEWSLETTER_API_KEY = NEWSLETTER_TEST_KEY;
     process.env.LINKEDIN_PUBLISHING_ENABLED = 'false';
     LinkedInAnalyticsAdapter.clearCache();
     LinkedInSchedulerJob.resetState();
@@ -716,6 +723,57 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       expect(postsRes.body.posts[0].metrics.comments).toBe(6);
 
       fetchSpy.mockRestore();
+    });
+  });
+
+  describe('Service API Key Scoping & Route Boundary Security', () => {
+    it('blocks ARTICLES_API_KEY with 403 on /api/v1/content/posts (service key cannot access CRM)', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts')
+        .set('x-api-key', ARTICLES_TEST_KEY);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks ARTICLES_API_KEY with 403 on /api/v1/social/linkedin/share', async () => {
+      const res = await request(app)
+        .post('/api/v1/social/linkedin/share')
+        .set('x-api-key', ARTICLES_TEST_KEY)
+        .send({ text: 'Unauthorized post attempt' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks NEWSLETTER keys with 403 on /api/v1/content/posts', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts')
+        .set('x-api-key', NEWSLETTER_TEST_KEY);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks invalid/unknown API keys with 401 Unauthorized', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts')
+        .set('x-api-key', 'completely-invalid-key');
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('permits ADMIN_API_KEY as super_admin on /api/v1/content/posts', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts')
+        .set('x-api-key', TEST_API_KEY);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
     });
   });
 });

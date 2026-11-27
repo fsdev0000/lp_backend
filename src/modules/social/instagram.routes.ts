@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { InstagramController } from './controllers/instagram.controller';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
+import { requireCrmRoles } from '../../middleware/crmRoleAuth';
 
 const router = Router();
 const controller = new InstagramController();
@@ -12,6 +13,6 @@ router.get('/callback', controller.handleCallback);
 router.get('/auth-url', requireApiKey, controller.getAuthUrl);
 router.get('/status', requireApiKey, controller.getStatus);
 router.get('/ping', requireApiKey, controller.ping);
-router.post('/disconnect', requireApiKey, controller.disconnect);
+router.post('/disconnect', requireApiKey, requireCrmRoles('super_admin', 'admin'), controller.disconnect);
 
 export default router;

@@ -40,31 +40,95 @@ async function attachSignedInUser(req: Request, token: string | undefined, valid
   }
 }
 
+function isArticlesRoute(url: string): boolean {
+  return /(?:^|\/)(?:api\/)?(?:v1\/)?articles(?:\/|$)/i.test(url);
+}
+
+function isNewsletterRoute(url: string): boolean {
+  return /(?:^|\/)(?:api\/)?(?:v1\/)?newsletter(?:\/|$)/i.test(url);
+}
+
 /**
  * Validates x-api-key, Authorization: Bearer <key|jwt>, or Basic Auth
  * for protected CRM, content, and social endpoints.
+ *
+ * Scoping rules:
+ * - ADMIN_API_KEY and CRM_API_KEY: CRM Super Admin access across all endpoints.
+ * - ARTICLES_API_KEY: Scoped exclusively to articles routes (403 on Social CRM / Content).
+ * - NEWSLETTER_API_KEY & NEWSLETTER_SEND_API_KEY: Scoped exclusively to newsletter routes (403 on Social CRM / Content).
  */
 export async function requireApiKey(req: Request, res: Response, next: NextFunction) {
-  const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
+  const apiKeyHeader = (req.headers['x-api-key'] || req.headers['x-api-token']) as string | undefined;
   const authHeader = req.headers.authorization as string | undefined;
 
-  const validKeys = [
+  const crmAdminKeys = [
     process.env.ADMIN_API_KEY,
     process.env.CRM_API_KEY,
-    process.env.ARTICLES_API_KEY,
+  ]
+    .map((k) => k?.trim())
+    .filter(Boolean) as string[];
+
+  const articlesKeys = [process.env.ARTICLES_API_KEY]
+    .map((k) => k?.trim())
+    .filter(Boolean) as string[];
+
+  const newsletterKeys = [
     process.env.NEWSLETTER_SEND_API_KEY,
     process.env.NEWSLETTER_API_KEY,
   ]
     .map((k) => k?.trim())
     .filter(Boolean) as string[];
 
-  // 1. Check x-api-key header (disallow in URL query string to prevent leak in server/proxy access logs)
-  if (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) {
-    await attachSignedInUser(req, bearerOf(authHeader), validKeys);
+  const serviceKeys = [...articlesKeys, ...newsletterKeys];
+  const allValidKeys = [...crmAdminKeys, ...serviceKeys];
+
+  const fullUrl = req.originalUrl || (req.baseUrl ? `${req.baseUrl}${req.path}` : req.path) || '';
+
+  // Extract raw candidate key from x-api-key, Bearer, or Basic
+  let candidateKey: string | undefined;
+  if (apiKeyHeader) {
+    candidateKey = apiKeyHeader.trim();
+  } else if (authHeader) {
+    if (authHeader.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8');
+        const [user, pass] = decoded.split(':');
+        const expectedUser = process.env.SWAGGER_USER || 'admin';
+        const expectedPass = process.env.SWAGGER_PASSWORD;
+        if (expectedPass && user === expectedUser && pass === expectedPass) {
+          req.crmUser = {
+            id: 'api-key-admin',
+            email: 'admin@leadersperformance.ae',
+            name: 'API Key Admin',
+            role: 'super_admin',
+            workspaces: ['leaders_performance', 'lionel_eersteling'],
+            roleVersion: 2,
+          };
+          return next();
+        }
+        candidateKey = pass?.trim();
+      } catch {
+        // Ignore malformed basic auth
+      }
+    } else {
+      const token = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : authHeader.trim();
+      candidateKey = token;
+    }
+  }
+
+  // 1. Check if candidateKey matches a master CRM Admin key (ADMIN_API_KEY, CRM_API_KEY)
+  if (candidateKey && crmAdminKeys.includes(candidateKey)) {
+    // If request also carries a signed-in staff token (CRM proxy attaches key to every call), attach that user
+    const bearerToken = bearerOf(authHeader);
+    if (bearerToken && !crmAdminKeys.includes(bearerToken)) {
+      await attachSignedInUser(req, bearerToken, allValidKeys);
+    }
     if (!req.crmUser) {
       req.crmUser = {
         id: 'api-key-admin',
-        email: 'admin@leadersperformance.ae',
+        email: process.env.CRM_ADMIN_EMAIL || 'admin@leadersperformance.ae',
         name: 'API Key Admin',
         role: 'super_admin',
         workspaces: ['leaders_performance', 'lionel_eersteling'],
@@ -74,81 +138,65 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     return next();
   }
 
-  // 2. Check Authorization header (Bearer or Basic)
-  if (authHeader) {
-    if (authHeader.startsWith('Basic ')) {
-      try {
-        const decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8');
-        const [user, pass] = decoded.split(':');
-        const expectedUser = process.env.SWAGGER_USER || 'admin';
-        const expectedPass = process.env.SWAGGER_PASSWORD;
-        if (
-          (expectedPass && user === expectedUser && pass === expectedPass) ||
-          (pass && validKeys.includes(pass))
-        ) {
-          return next();
-        }
-      } catch {
-        // Ignore malformed basic auth
-      }
-    }
+  // 2. Check if candidateKey matches a Service Key (ARTICLES_API_KEY, NEWSLETTER_SEND_API_KEY, NEWSLETTER_API_KEY)
+  if (candidateKey && serviceKeys.includes(candidateKey)) {
+    const isArticlesKey = articlesKeys.includes(candidateKey);
+    const isNewsletterKey = newsletterKeys.includes(candidateKey);
 
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice(7).trim()
-      : authHeader.trim();
-
-    if (token && validKeys.includes(token)) {
-      if (!req.crmUser) {
-        req.crmUser = {
-          id: 'api-key-admin',
-          email: 'admin@leadersperformance.ae',
-          name: 'API Key Admin',
-          role: 'super_admin',
-          workspaces: ['leaders_performance', 'lionel_eersteling'],
-          roleVersion: 2,
-        };
-      }
+    // ARTICLES_API_KEY only works on articles routes
+    if (isArticlesKey && isArticlesRoute(fullUrl)) {
       return next();
     }
 
-    // 2. Check signed expiring CRM session token
-    if (token && token.startsWith('lp_sess.')) {
-      const sessionUser = verifyCrmSessionToken(token);
-      if (sessionUser) {
-        const crmUser = crmUserFromSessionPayload(sessionUser);
-        if (!crmUser) {
-          return res.status(401).json({
-            success: false,
-            error: 'Unauthorized: Account has been deactivated.',
-          });
-        }
-        (req as any).user = crmUser;
-        (req as any).crmUser = crmUser;
-        return next();
-      }
+    // NEWSLETTER keys only work on newsletter routes
+    if (isNewsletterKey && isNewsletterRoute(fullUrl)) {
+      return next();
     }
 
-    // 3. If token looks like a Supabase JWT, verify via Supabase Auth
-    if (token) {
-      const user = await verifySupabaseToken(token);
-      if (user) {
-        if (isSupabaseUserDeactivated(user)) {
-          return res.status(401).json({
-            success: false,
-            error: 'Unauthorized: Account has been deactivated.',
-          });
-        }
-        if (!isStaffSupabaseUser(user)) {
-          return res.status(403).json({
-            success: false,
-            error: 'Forbidden: User is not authorized to access Social CRM resources.',
-          });
-        }
-        const crmUser = crmUserFromSupabase(user);
-        (req as any).user = crmUser;
-        (req as any).crmUser = crmUser;
-        return next();
+    // Service keys get 403 Forbidden on LinkedIn, Instagram, TikTok, /content, and any other CRM route
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Service API key is not authorized for Social CRM or content management routes.',
+    });
+  }
+
+  // 3. Check signed expiring CRM session token (lp_sess.*)
+  if (candidateKey && candidateKey.startsWith('lp_sess.')) {
+    const sessionUser = verifyCrmSessionToken(candidateKey);
+    if (sessionUser) {
+      const crmUser = crmUserFromSessionPayload(sessionUser);
+      if (!crmUser) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Account has been deactivated.',
+        });
       }
+      (req as any).user = crmUser;
+      (req as any).crmUser = crmUser;
+      return next();
+    }
+  }
+
+  // 4. Check Supabase JWT
+  if (candidateKey) {
+    const user = await verifySupabaseToken(candidateKey);
+    if (user) {
+      if (isSupabaseUserDeactivated(user)) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Account has been deactivated.',
+        });
+      }
+      if (!isStaffSupabaseUser(user)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: User is not authorized to access Social CRM resources.',
+        });
+      }
+      const crmUser = crmUserFromSupabase(user);
+      (req as any).user = crmUser;
+      (req as any).crmUser = crmUser;
+      return next();
     }
   }
 
