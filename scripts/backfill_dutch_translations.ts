@@ -66,6 +66,7 @@ async function runBackfill() {
       const progress = `[${i + 1}/${articles.length}]`;
 
       const translatableFields = {
+        slug: article.slug,
         title: article.title,
         excerpt: article.excerpt,
         content: article.content,
@@ -95,10 +96,10 @@ async function runBackfill() {
         // Execute translation
         const result = await translationService.translateArticle(translatableFields);
 
-        // Save completed translation
+        // Save translation as pending_review (requires review/approval before going live)
         await articlesRepository.updateArticleTranslation(slug, 'nl', {
-          status: 'completed',
-          approved: true,
+          status: 'pending_review',
+          approved: false,
           background_status: 'completed',
           title: result.title,
           excerpt: result.excerpt,

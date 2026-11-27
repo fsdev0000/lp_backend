@@ -37,7 +37,8 @@ export class ArticlesRepository {
     return rows.map((r) => {
       const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
       const nl = translations.nl;
-      const useDutch = isDutch && nl && (nl.status === 'completed' || nl.approved === true);
+      // Per Review Gate: Dutch is served publicly ONLY when explicitly approved by reviewer
+      const useDutch = isDutch && nl && nl.approved === true;
 
       return {
         id: r.id,
@@ -102,7 +103,8 @@ export class ArticlesRepository {
     const r = rows[0];
     const translations = typeof r.translations === 'object' && r.translations !== null ? r.translations : {};
     const nl = translations.nl;
-    const useDutch = isDutch && nl && (nl.status === 'completed' || nl.approved === true);
+    // Per Review Gate: Dutch is served publicly ONLY when explicitly approved by reviewer
+    const useDutch = isDutch && nl && nl.approved === true;
 
     return {
       id: r.id,

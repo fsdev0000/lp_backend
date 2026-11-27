@@ -137,6 +137,7 @@ export class ArticlesService {
 
       // 3. Execute translation
       const result = await translationService.translateArticle({
+        slug: input.slug,
         title: input.title,
         excerpt: input.excerpt,
         content: input.content,
@@ -145,10 +146,10 @@ export class ArticlesService {
         keywords: input.keywords,
       });
 
-      // 4. Save completed Dutch translation
+      // 4. Save Dutch translation as pending_review (requires explicit human approval before going live)
       await this.repo.updateArticleTranslation(slug, 'nl', {
-        status: 'completed',
-        approved: true,
+        status: 'pending_review',
+        approved: false,
         background_status: 'completed',
         title: result.title,
         excerpt: result.excerpt,

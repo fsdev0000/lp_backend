@@ -141,25 +141,41 @@ Inline code \`x-api-key\` should remain untouched.
     expect(detectedHeadings).toEqual(['#', '##', '###', '##']);
   });
 
-  it('applies Dutch style guide rules correctly', () => {
+  it('applies Dutch style guide rules correctly and standardizes on founder everywhere', () => {
     // Style guide substitutions:
     // uw -> je, u -> je
-    // stichter -> founder, stichters -> founders
+    // stichter / oprichter -> founder, stichters / oprichters -> founders
     // executie -> uitvoering
     // oudere huur -> senior hire
-    // half rechts en half fout -> half goed en half fout
-    let text = 'Als stichter moet u uw executie aanscherpen voor elke oudere huur die half rechts en half fout werkt.';
+    // half rechts en half fout -> half gelijk en half ongelijk
+    // ontmoeting eindigde -> meeting eindigde
+    let text = 'Als oprichter of stichter moet u uw executie aanscherpen voor elke oudere huur. De ontmoeting eindigde omdat Paul Graham half rechts en half fout was.';
     
     // Tone
     text = text.replace(/\buw\b/gi, (m) => (m[0] === 'U' ? 'Je' : 'je'));
     text = text.replace(/\b([Uu])\b/g, (m) => (m === 'U' ? 'Je' : 'je'));
-    // Terminology
-    text = text.replace(/\bstichters\b/g, 'founders').replace(/\bstichter\b/g, 'founder');
+    // Terminology: standardize on founder/founders
+    text = text.replace(/\b(Stichters|Oprichters)\b/g, 'Founders');
+    text = text.replace(/\b(stichters|oprichters)\b/g, 'founders');
+    text = text.replace(/\b(Stichter|Oprichter)\b/g, 'Founder');
+    text = text.replace(/\b(stichter|oprichter)\b/g, 'founder');
+
     text = text.replace(/\bexecutie\b/g, 'uitvoering');
     text = text.replace(/\boudere huur\b/gi, 'senior hire');
-    text = text.replace(/\bhalf rechts en half fout\b/gi, 'half goed en half fout');
+    text = text.replace(/\bhalf rechts en half fout\b/gi, 'half gelijk en half ongelijk');
+    text = text.replace(/\bDe ontmoeting eindigde\b/gi, 'De meeting eindigde');
 
-    expect(text).toBe('Als founder moet je je uitvoering aanscherpen voor elke senior hire die half goed en half fout werkt.');
+    expect(text).toBe('Als founder of founder moet je je uitvoering aanscherpen voor elke senior hire. De meeting eindigde omdat Paul Graham half gelijk en half ongelijk was.');
+  });
+
+  it('maps core article slugs to canonical executive Dutch titles', () => {
+    const { CANONICAL_DUTCH_TITLES } = require('../services/translation/translationService');
+    expect(CANONICAL_DUTCH_TITLES['the-meeting-ended-nothing-changed']).toBe('De meeting eindigde. Er veranderde niets.');
+    expect(CANONICAL_DUTCH_TITLES['you-dont-need-more-people-better-execution']).toBe('Je hebt geen extra mensen nodig. Je hebt betere uitvoering nodig.');
+    expect(CANONICAL_DUTCH_TITLES['your-revenue-is-growing-why-isnt-your-profit']).toBe('Je omzet groeit. Waarom groeit je winst niet?');
+    expect(CANONICAL_DUTCH_TITLES['i-built-the-company-but-now-i-am-trapped-inside-it']).toBe('Ik bouwde het bedrijf, maar nu zit ik erin vast: Wat er werkelijk gebeurt');
+    expect(CANONICAL_DUTCH_TITLES['scaling-without-chaos-the-structural-work-founders-skip-and-pay-for-later']).toBe('Schalen zonder chaos: Het structurele werk dat founders overslaan en waar ze later voor betalen');
+    expect(CANONICAL_DUTCH_TITLES['what-if-your-ambition-is-bigger-than-the-ambition-of-the-people-around-you']).toBe('Wat als jouw ambitie groter is dan de ambitie van de mensen om je heen?');
   });
 
   it('preserves markdown headers and bullet lists during translation mapping', () => {

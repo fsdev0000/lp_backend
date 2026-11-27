@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 
 export interface TranslatableArticleFields {
+  slug?: string;
   title: string;
   excerpt: string;
   content: string;
@@ -22,6 +23,33 @@ export interface TranslatedArticleResult {
 }
 
 /**
+ * Verified canonical Dutch titles for Lionel's core articles.
+ * Prevents literal translation artifacts (e.g. "De ontmoeting eindigde", "Waarom is je winst niet?").
+ */
+export const CANONICAL_DUTCH_TITLES: Record<string, string> = {
+  'the-meeting-ended-nothing-changed': 'De meeting eindigde. Er veranderde niets.',
+  'you-dont-need-more-people-better-execution': 'Je hebt geen extra mensen nodig. Je hebt betere uitvoering nodig.',
+  'the-company-you-built-cannot-run-the-company-youre-becoming': 'Het bedrijf dat je hebt gebouwd kan het bedrijf dat je aan het worden bent niet leiden',
+  'why-your-management-team-keeps-bringing-problems-back-to-you': 'Waarom je managementteam problemen steeds bij jou teruglegt',
+  'your-best-clients-may-be-costing-you-money': 'Je beste klanten kosten je wellicht geld',
+  'your-revenue-is-growing-why-isnt-your-profit': 'Je omzet groeit. Waarom groeit je winst niet?',
+  'i-built-the-company-but-now-i-am-trapped-inside-it': 'Ik bouwde het bedrijf, maar nu zit ik erin vast: Wat er werkelijk gebeurt',
+  'why-senior-hires-fail-founder-led-companies-structural-issues': 'Waarom je senior hire blijft falen: Het is niet de persoon, het is de structuur',
+  'founder-mode-vs-manager-mode-paul-graham-right-wrong': 'Founder Mode vs Manager Mode: Waarom Paul Graham half gelijk en half ongelijk heeft',
+  'scaling-without-chaos-the-structural-work-founders-skip-and-pay-for-later': 'Schalen zonder chaos: Het structurele werk dat founders overslaan en waar ze later voor betalen',
+  'what-is-a-founder-intervention-and-why-it-is-not-coaching': 'Wat is een founder-interventie en waarom het geen coaching is',
+  'why-success-never-feels-like-enough-for-long': 'Waarom succes nooit lang als genoeg voelt',
+  'my-company-growing-less-freedom': 'Mijn bedrijf groeit. Waarom heb ik dan minder vrijheid?',
+  'what-if-your-ambition-is-bigger-than-the-ambition-of-the-people-around-you': 'Wat als jouw ambitie groter is dan de ambitie van de mensen om je heen?',
+  'founder-ambition-team-alignment': 'Wat als jouw ambitie groter is dan de ambitie van de mensen om je heen?',
+  'why-do-i-still-have-to-chase-everything': 'Waarom moet ik nog steeds overal achteraan gaan?',
+  'revenue-growing-where-is-the-profit': 'De omzet groeit. Waar blijft de winst?',
+  'what-is-founder-dependency-why-not-delegation-problem': 'Wat is founder-afhankelijkheid en waarom het geen delegatieprobleem is',
+  'founder-burnout-not-lifestyle-problem-structural-warning-signal': 'Founder burnout is geen lifestyle-probleem, maar een structureel waarschuwingssignaal',
+  'founder-bottleneck-what-it-is-causes-fixes': 'De founder bottleneck: Wat het is, waardoor het ontstaat en wat het écht oplost',
+};
+
+/**
  * Calculates a deterministic SHA-256 hash of the translatable source fields.
  * Used to detect changes and avoid redundant re-translations.
  */
@@ -40,16 +68,22 @@ export function calculateSourceHash(fields: TranslatableArticleFields): string {
 
 /**
  * Protected terms that must never be translated.
+ * Includes author, brand names, and individual RESET framework pillars.
  */
 const PROTECTED_TERMS = [
+  'Rhythm, Energy, Systems, Execution',
+  'RESET Blueprint®',
+  'RESET Blueprint',
+  'RESET',
+  'Rhythm',
+  'Energy',
+  'Systems',
+  'Execution',
   'Lionel Eersteling',
   'Leaders Performance',
   'Founder Pressure Scan',
   'UNMASKED PRIVATE',
   'The Round Table',
-  'RESET Blueprint®',
-  'RESET Blueprint',
-  'Rhythm, Energy, Systems, Execution',
 ];
 
 /**
@@ -60,7 +94,6 @@ function protectNonTranslatables(text: string): { protectedText: string; tokens:
   let counter = 0;
 
   const replaceWithToken = (match: string): string => {
-    // Use format that is less likely to be mangled, but handle mangling in restore
     const placeholder = `[[LPTOKEN${counter++}]]`;
     tokens.set(placeholder, match);
     return placeholder;
@@ -70,10 +103,12 @@ function protectNonTranslatables(text: string): { protectedText: string; tokens:
   let protectedText = text.replace(/```[\s\S]*?```/g, replaceWithToken);
   protectedText = protectedText.replace(/`[^`\n]+`/g, replaceWithToken);
 
-  // 2. Protect brand names and author names
+  // 2. Protect brand names, author names, and individual framework labels
   for (const term of PROTECTED_TERMS) {
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    protectedText = protectedText.replace(new RegExp(escaped, 'g'), replaceWithToken);
+    // For single-word labels, enforce word boundaries so substrings aren't matched
+    const pattern = /^\w+$/.test(term) ? new RegExp(`\\b${escaped}\\b`, 'g') : new RegExp(escaped, 'g');
+    protectedText = protectedText.replace(pattern, replaceWithToken);
   }
 
   // 3. Protect URLs
@@ -85,31 +120,45 @@ function protectNonTranslatables(text: string): { protectedText: string; tokens:
 /**
  * Post-processes Dutch translations to match the brand style guide:
  * - Direct tone: "je" / "jouw" instead of formal "u" / "uw"
- * - Domain terms: "founder(s)" instead of "stichter(s)"
+ * - Domain terms: standardized on "founder" / "founders" everywhere (replaces both "stichter" and "oprichter")
  * - Executive phrasing: "uitvoering" instead of "executie"
  * - HR idioms: "senior hire" instead of "oudere huur"
+ * - Meetings: "meeting" / "vergadering" instead of literal "ontmoeting"
  */
 function applyDutchStyleRules(text: string): string {
   let styled = text;
 
-  // Tone of voice: replace formal "u / uw" with informal "je / jouw"
+  // 1. Tone of voice: replace formal "u / uw" with informal "je / jouw"
   styled = styled.replace(/\buw\b/gi, (m) => (m[0] === 'U' ? 'Je' : 'je'));
   styled = styled.replace(/\b([Uu])\b/g, (m) => (m === 'U' ? 'Je' : 'je'));
 
-  // Terminology corrections
+  // 2. Standardize on "founder" / "founders" everywhere (removes "stichter" & "oprichter")
   styled = styled.replace(/\bStichters\b/g, 'Founders');
   styled = styled.replace(/\bstichters\b/g, 'founders');
   styled = styled.replace(/\bStichter\b/g, 'Founder');
   styled = styled.replace(/\bstichter\b/g, 'founder');
 
+  styled = styled.replace(/\bOprichters\b/g, 'Founders');
+  styled = styled.replace(/\boprichters\b/g, 'founders');
+  styled = styled.replace(/\bOprichter\b/g, 'Founder');
+  styled = styled.replace(/\boprichter\b/g, 'founder');
+
+  // 3. Executive operations terminology
   styled = styled.replace(/\bExecutie\b/g, 'Uitvoering');
   styled = styled.replace(/\bexecutie\b/g, 'uitvoering');
+  styled = styled.replace(/\bExecuties\b/g, 'Uitvoeringen');
+  styled = styled.replace(/\bexecuties\b/g, 'uitvoeringen');
 
-  // Fix literal idioms
+  // 4. Fix literal idioms
   styled = styled.replace(/\boudere huren\b/gi, 'senior hires');
+  styled = styled.replace(/\boude huren\b/gi, 'senior hires');
   styled = styled.replace(/\boudere huur\b/gi, 'senior hire');
   styled = styled.replace(/\boude huur\b/gi, 'senior hire');
-  styled = styled.replace(/\bhalf rechts en half fout\b/gi, 'half goed en half fout');
+  styled = styled.replace(/\bhalf rechts en half fout\b/gi, 'half gelijk en half ongelijk');
+  styled = styled.replace(/\bhalf goed en half fout\b/gi, 'half gelijk en half ongelijk');
+
+  // 5. Fix meeting mistranslations
+  styled = styled.replace(/\bDe ontmoeting eindigde\b/gi, 'De meeting eindigde');
 
   return styled;
 }
@@ -357,10 +406,15 @@ export class TranslationService {
       );
     }
 
-    console.log(`[TranslationService] Successfully translated article to Dutch: "${translatedTitle}"`);
+    const finalTitle =
+      fields.slug && CANONICAL_DUTCH_TITLES[fields.slug.toLowerCase()]
+        ? CANONICAL_DUTCH_TITLES[fields.slug.toLowerCase()]
+        : translatedTitle;
+
+    console.log(`[TranslationService] Successfully translated article to Dutch: "${finalTitle}"`);
 
     return {
-      title: translatedTitle,
+      title: finalTitle,
       excerpt: translatedExcerpt,
       content: translatedContent,
       meta_title: translatedMetaTitle,
