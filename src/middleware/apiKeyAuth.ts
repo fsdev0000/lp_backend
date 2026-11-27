@@ -47,7 +47,6 @@ async function attachSignedInUser(req: Request, token: string | undefined, valid
 export async function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
   const authHeader = req.headers.authorization as string | undefined;
-  const queryKey = (req.query.api_key || req.query.apiKey || req.query.token) as string | undefined;
 
   const validKeys = [
     process.env.ADMIN_API_KEY,
@@ -59,12 +58,19 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     .map((k) => k?.trim())
     .filter(Boolean) as string[];
 
-  // 1. Check x-api-key header or query param
-  if (
-    (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) ||
-    (queryKey && validKeys.includes(queryKey.trim()))
-  ) {
+  // 1. Check x-api-key header (disallow in URL query string to prevent leak in server/proxy access logs)
+  if (apiKeyHeader && validKeys.includes(apiKeyHeader.trim())) {
     await attachSignedInUser(req, bearerOf(authHeader), validKeys);
+    if (!req.crmUser) {
+      req.crmUser = {
+        id: 'api-key-admin',
+        email: 'admin@leadersperformance.ae',
+        name: 'API Key Admin',
+        role: 'super_admin',
+        workspaces: ['leaders_performance', 'lionel_eersteling'],
+        roleVersion: 2,
+      };
+    }
     return next();
   }
 
@@ -92,6 +98,16 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       : authHeader.trim();
 
     if (token && validKeys.includes(token)) {
+      if (!req.crmUser) {
+        req.crmUser = {
+          id: 'api-key-admin',
+          email: 'admin@leadersperformance.ae',
+          name: 'API Key Admin',
+          role: 'super_admin',
+          workspaces: ['leaders_performance', 'lionel_eersteling'],
+          roleVersion: 2,
+        };
+      }
       return next();
     }
 

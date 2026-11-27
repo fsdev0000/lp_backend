@@ -4,6 +4,8 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const CONFIG_KEY = 'crm_revoked_users';
 let hasLoadedFromDb = false;
+let lastDbSyncMs = 0;
+const DB_SYNC_INTERVAL_MS = 30_000; // 30-second multi-instance sync interval
 
 export interface CrmSessionPayload {
   id: string;
@@ -37,6 +39,7 @@ async function syncRevocationsFromDb(): Promise<void> {
       }
     }
     hasLoadedFromDb = true;
+    lastDbSyncMs = Date.now();
   } catch {}
 }
 
@@ -73,7 +76,9 @@ export function restoreUserSessions(userId?: string | null, email?: string | nul
 }
 
 export function isUserSessionRevoked(userId?: string | null, email?: string | null): boolean {
-  if (!hasLoadedFromDb && process.env.NODE_ENV !== 'test') {
+  const now = Date.now();
+  if (process.env.NODE_ENV !== 'test' && (!hasLoadedFromDb || now - lastDbSyncMs > DB_SYNC_INTERVAL_MS)) {
+    lastDbSyncMs = now;
     syncRevocationsFromDb().catch(() => {});
   }
   if (userId && revokedUserIds.has(userId.trim())) return true;

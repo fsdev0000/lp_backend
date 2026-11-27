@@ -233,11 +233,13 @@ export class CrmHealthService {
     const ytDays = getDaysRemaining(ytAccount?.tokenExpiresAt);
     const ytStatus: PlatformHealthStatus = {
       label: 'YouTube Data API v3',
-      status: ytAccount ? (ytDays !== null && ytDays < 7 ? 'TOKEN_EXPIRING' : 'CONNECTED') : 'CONNECTED',
+      status: ytAccount ? (ytDays !== null && ytDays < 7 ? 'TOKEN_EXPIRING' : 'CONNECTED') : 'DISCONNECTED',
       tokenExpiresAt: ytAccount?.tokenExpiresAt ? new Date(ytAccount.tokenExpiresAt).toISOString() : null,
       daysUntilExpiry: ytDays,
       autoPublishEnabled: publishingFlags.youtube && !publishingFlags.dryRunGlobal,
-      details: 'YouTube Data API connected with verified OAuth credentials',
+      details: ytAccount
+        ? 'YouTube Data API connected with verified OAuth credentials'
+        : 'YouTube account not connected',
     };
 
     // Platform 2: Instagram
@@ -245,11 +247,13 @@ export class CrmHealthService {
     const igDays = getDaysRemaining(igAccount?.tokenExpiresAt);
     const igStatus: PlatformHealthStatus = {
       label: 'Instagram Graph API Professional',
-      status: igAccount ? (igDays !== null && igDays < 7 ? 'TOKEN_EXPIRING' : 'CONNECTED') : 'CONNECTED',
+      status: igAccount ? (igDays !== null && igDays < 7 ? 'TOKEN_EXPIRING' : 'CONNECTED') : 'DISCONNECTED',
       tokenExpiresAt: igAccount?.tokenExpiresAt ? new Date(igAccount.tokenExpiresAt).toISOString() : null,
       daysUntilExpiry: igDays,
       autoPublishEnabled: publishingFlags.instagram && !publishingFlags.dryRunGlobal,
-      details: 'Meta Graph API active for @lioneleersteling',
+      details: igAccount
+        ? 'Meta Graph API active for @lioneleersteling'
+        : 'Instagram Professional account not connected',
     };
 
     // Platform 3: TikTok

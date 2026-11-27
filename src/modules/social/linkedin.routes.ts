@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { LinkedInController } from './controllers/linkedin.controller';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
+import { requireCrmAuth, requireCrmRoles } from '../../middleware/crmRoleAuth';
 
 const router = Router();
 const controller = new LinkedInController();
@@ -16,11 +17,11 @@ router.get('/status', requireApiKey, controller.getStatus);
 router.get('/page/status', requireApiKey, controller.getStatus);
 router.get('/profile', requireApiKey, controller.getProfile);
 router.get('/page/profile', requireApiKey, controller.getProfile);
-router.post('/disconnect', requireApiKey, controller.disconnect);
-router.post('/page/disconnect', requireApiKey, controller.disconnect);
+router.post('/disconnect', requireApiKey, requireCrmRoles('super_admin', 'admin'), controller.disconnect);
+router.post('/page/disconnect', requireApiKey, requireCrmRoles('super_admin', 'admin'), controller.disconnect);
 
-// Direct Publishing, Posts & Internal DB Synchronization (Protected by auth + kill switch)
-router.post('/share', requireApiKey, controller.publishDirect);
+// Direct Publishing, Posts & Internal DB Synchronization (Protected by manager/super_admin auth + kill switch)
+router.post('/share', requireApiKey, requireCrmRoles('super_admin', 'manager'), controller.publishDirect);
 router.get('/posts', requireApiKey, controller.getPosts);
 router.post('/sync', requireApiKey, controller.syncAll);
 router.get('/ping', requireApiKey, controller.ping);

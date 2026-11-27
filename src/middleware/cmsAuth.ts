@@ -5,6 +5,7 @@ import {
   crmUserFromSessionPayload,
   crmUserFromSupabase,
   isSupabaseUserDeactivated,
+  normalizeWorkspace,
 } from './crmRoleAuth';
 
 export interface CmsAuthResult {
@@ -69,10 +70,12 @@ export async function authenticateCmsAdmin(req: Request): Promise<CmsAuthResult>
     };
   }
 
-  const targetWorkspace =
+  const targetWorkspace = normalizeWorkspace(
     (req.query?.workspace as string) ||
     (req.body?.workspace as string) ||
-    'leaders_performance';
+    (req.headers['x-workspace-id'] as string) ||
+    'leaders_performance'
+  );
 
   // 2. Check signed expiring CRM session token (lp_sess.*)
   if (token.startsWith('lp_sess.')) {

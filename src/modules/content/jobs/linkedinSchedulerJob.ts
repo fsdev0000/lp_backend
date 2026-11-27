@@ -7,13 +7,22 @@ export class LinkedInSchedulerJob {
   private static timer: NodeJS.Timeout | null = null;
   private static isRunning = false;
   private static intervalMs = 60 * 1000; // Check every 60 seconds
-  private static wasPublishingEnabled = false;
+  private static wasPublishingEnabled: boolean | null = null;
   private static publishingEnabledAt: Date | null = null;
 
   public static start(intervalMs = 60 * 1000) {
     if (this.timer) {
       return;
     }
+
+    // Safety guard: prevent local developer backend from auto-publishing to Lionel's live profile
+    if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_LOCAL_SCHEDULER !== 'true') {
+      console.log(
+        '[LinkedInSchedulerJob] Background scheduler disabled in local/development mode to prevent accidental live posting. Set ENABLE_LOCAL_SCHEDULER=true to override.'
+      );
+      return;
+    }
+
     this.intervalMs = intervalMs;
     this.wasPublishingEnabled = false;
     this.publishingEnabledAt = null;
@@ -52,7 +61,8 @@ export class LinkedInSchedulerJob {
     }
 
     // Item 1: Kill switch — while LINKEDIN_PUBLISHING_ENABLED is false, send nothing
-    if (!isLinkedInPublishingEnabled()) {
+    const isPublishing = isLinkedInPublishingEnabled();
+    if (!isPublishing) {
       this.wasPublishingEnabled = false;
       this.publishingEnabledAt = null;
       return;
@@ -62,13 +72,14 @@ export class LinkedInSchedulerJob {
 
     try {
       const now = new Date();
-      const justWentLive = !this.wasPublishingEnabled;
-      if (justWentLive) {
-        this.wasPublishingEnabled = true;
+      // Only "just went live" if transitioning from explicitly false (not server boot)
+      const justWentLive = this.wasPublishingEnabled === false;
+      this.wasPublishingEnabled = true;
+      if (justWentLive || !this.publishingEnabledAt) {
         this.publishingEnabledAt = now;
       }
 
-      // Item 6d: Only query LINKEDIN posts (never mark YouTube/Instagram/TikTok as PUBLISHED)
+      // Query approved SCHEDULED posts that are due (supporting LINKEDIN and TIKTOK)
       const duePosts = await contentPrisma.socialPost.findMany({
         where: {
           platform: 'LINKEDIN',
@@ -80,11 +91,26 @@ export class LinkedInSchedulerJob {
         orderBy: { scheduledFor: 'asc' },
       });
 
-      if (duePosts.length > 0) {
-        console.log(`[LinkedInSchedulerJob] Evaluating ${duePosts.length} due LinkedIn post(s).`);
+      const dueTikTokPosts = await contentPrisma.socialPost
+        .findMany({
+          where: {
+            platform: 'TIKTOK',
+            status: 'SCHEDULED',
+            approvalSignature: { not: null },
+            scheduledFor: { lte: now },
+          },
+          take: 20,
+          orderBy: { scheduledFor: 'asc' },
+        })
+        .catch(() => []);
+
+      const allDuePosts = [...duePosts, ...dueTikTokPosts];
+
+      if (allDuePosts.length > 0) {
+        console.log(`[LinkedInSchedulerJob] Evaluating ${allDuePosts.length} due post(s).`);
       }
 
-      for (const post of duePosts) {
+      for (const post of allDuePosts) {
         const meta =
           post.metadata && typeof post.metadata === 'object' && !Array.isArray(post.metadata)
             ? (post.metadata as Record<string, any>)
@@ -92,10 +118,13 @@ export class LinkedInSchedulerJob {
 
         const scheduledTimeMs = post.scheduledFor ? new Date(post.scheduledFor).getTime() : 0;
         const goLiveMs = this.publishingEnabledAt ? this.publishingEnabledAt.getTime() : now.getTime();
+
+        // Issue 13 fix: Do NOT mark approved posts FAILED on a normal server restart.
+        // A post should only be expired if it was approved while publishing was disabled,
+        // or if publishing just went live and its scheduled time had already passed.
         const isPastDueAtGoLive =
           Boolean(meta.approvedWhilePublishingDisabled) ||
-          (justWentLive && scheduledTimeMs < goLiveMs) ||
-          scheduledTimeMs < goLiveMs;
+          (justWentLive && scheduledTimeMs < goLiveMs);
 
         // Item 4: Do not auto-publish posts whose scheduled time had already passed while publishing was off
         if (isPastDueAtGoLive) {

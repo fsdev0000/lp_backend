@@ -13,8 +13,8 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-// Caption/document file content preview (accessible to reviewer/approver with optional auth)
-crmAutomationRouter.get('/posts/:id/caption-file-content', optionalCrmAuth, crmPostsController.getCaptionFileContent);
+// Caption/document file content preview (accessible strictly to authenticated CRM users)
+crmAutomationRouter.get('/posts/:id/caption-file-content', requireCrmAuth, crmPostsController.getCaptionFileContent);
 
 // Scope CRM session authentication strictly to CRM automation sub-paths so public routes (scan, bookings, terms, Stripe webhooks) are never blocked
 crmAutomationRouter.use(
@@ -170,7 +170,7 @@ crmAutomationRouter.get(
 
 crmAutomationRouter.put(
   ['/settings/publishing-flags', '/crm/settings/publishing-flags'],
-  requireCrmRoles('admin', 'approver'),
+  requireCrmRoles('super_admin'),
   async (req, res) => {
     try {
       const updated = await crmHealthService.updatePublishingFlags(req.body);

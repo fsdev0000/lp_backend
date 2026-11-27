@@ -5,3 +5,7 @@ dist
 .env.*
 .DS_Store
 dev.db
+private
+private/
+*.pem
+*.key

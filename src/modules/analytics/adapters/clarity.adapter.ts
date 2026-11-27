@@ -23,7 +23,8 @@ export class ClarityAdapter implements IClarityAdapter {
   private static quotaTracker: Record<string, { requestsToday: number; resetDate: string }> = {};
   private static lastAnomalyAlert: Record<string, number> = {};
 
-  private readonly cacheTtlMs = 15 * 60 * 1000; // 15-minute in-memory cache to respect API quota
+  // 2.5-hour cache TTL (150 minutes) so 24h stays comfortably within Clarity's ~10 requests/day per project limit
+  private readonly cacheTtlMs = 150 * 60 * 1000;
   private readonly defaultRageClickThreshold: number;
 
   constructor() {
@@ -95,6 +96,21 @@ export class ClarityAdapter implements IClarityAdapter {
     if (!config.token) {
       console.warn(`[ClarityAdapter] No token configured for ${config.key}. Serving empty fallback.`);
       return this.getFallbackNormalizedMetrics(config, cached ? new Date(cached.lastSuccess).toISOString() : null);
+    }
+
+    // Quota guard: Respect Clarity's ~10 requests/day project quota
+    const today = new Date().toISOString().split('T')[0];
+    const tracker = ClarityAdapter.quotaTracker[config.key] || { requestsToday: 0, resetDate: today };
+    if (tracker.resetDate === today && tracker.requestsToday >= 10) {
+      console.warn(`[ClarityAdapter] Daily quota limit of 10 requests reached for ${config.key}. Serving cached/fallback metrics.`);
+      if (cached) {
+        return {
+          ...cached.data,
+          ingestionLatencyMs: 2,
+          isStale: true,
+        };
+      }
+      return this.getFallbackNormalizedMetrics(config, null);
     }
 
     const start = Date.now();

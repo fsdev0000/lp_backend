@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { safeEncryptToken, safeDecryptToken } from '../../automation/crypto/tokenCrypto';
 
 const prisma = new PrismaClient();
 
@@ -148,7 +149,7 @@ export class InstagramAdapter {
       if (res.ok) {
         return (await res.json()) as InstagramAccountProfile;
       }
-    } catch {}
+    } catch { }
 
     // 2. Discover via linked Facebook Pages
     const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name,biography,profile_picture_url,followers_count}&access_token=${token}`;
@@ -225,7 +226,11 @@ export class InstagramAdapter {
           return null;
         }
         if (conn.accessToken) {
-          return conn;
+          return {
+            ...conn,
+            accessToken: safeDecryptToken(conn.accessToken) || conn.accessToken,
+            refreshToken: safeDecryptToken(conn.refreshToken) || conn.refreshToken,
+          };
         }
       }
     } catch (e: any) {
@@ -306,12 +311,15 @@ export class InstagramAdapter {
       }
     }
 
+    const encAccessToken = safeEncryptToken(data.accessToken) || data.accessToken;
+    const encRefreshToken = data.refreshToken ? (safeEncryptToken(data.refreshToken) || data.refreshToken) : null;
+
     const payload = {
       platform: 'INSTAGRAM',
       accountName: data.accountName,
       accountUrn: `instagram:${data.accountId}`,
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken || null,
+      accessToken: encAccessToken,
+      refreshToken: encRefreshToken,
       tokenExpiresAt: expiresAt,
       scopes: scopes || ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights'],
       status: 'HEALTHY',

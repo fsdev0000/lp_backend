@@ -509,6 +509,7 @@ export class Ga4Adapter implements IGa4Adapter {
     }
 
     const mapByDate = new Map<string, { visitors: number; pageviews: number; leads: number }>();
+    let ga4ReportFailed = false;
 
     try {
       // Item 3.1: Strict production hostname filter (exact match, excluding staging)
@@ -541,6 +542,7 @@ export class Ga4Adapter implements IGa4Adapter {
         mapByDate.set(formattedDate, { visitors, pageviews, leads: 0 });
       });
     } catch (error: any) {
+      ga4ReportFailed = true;
       await LiveErrorBoundary.logUpstreamError('GA4', 'runReport', error);
     }
 
@@ -583,6 +585,11 @@ export class Ga4Adapter implements IGa4Adapter {
       // Item 2.12: No zeros before the site's GA4 tracking started (LP 25 Sep 2026, LE 11 Nov 2026).
       const EARLIEST_TRACKING_DATE = isLeDomain(target.domain) ? '2026-11-11' : '2026-09-25';
       const effectiveStart = resolvedStart < EARLIEST_TRACKING_DATE ? EARLIEST_TRACKING_DATE : resolvedStart;
+
+      // If upstream GA4 report failed, do not generate fake 0s across the entire window
+      if (ga4ReportFailed && mapByDate.size === 0) {
+        return [];
+      }
 
       const start = new Date(effectiveStart + 'T00:00:00Z');
       const end = new Date(resolvedEnd + 'T00:00:00Z');
@@ -888,8 +895,8 @@ export class Ga4Adapter implements IGa4Adapter {
     return Array.from(campaignMap.values())
       .map((c) => {
         const leads = Math.max(c.ga4Leads, c.dbEmails.size);
-        // Visits come strictly from GA4 sessions (or verified inquiries when GA4 has attribution delay)
-        const clicks = Math.max(c.clicks, leads);
+        // Visits come strictly from GA4 sessions (do not artificially inflate to match inquiries)
+        const clicks = c.clicks;
         const convRate = clicks > 0 ? `${((leads / clicks) * 100).toFixed(1)}%` : '0.0%';
         return {
           campaign: c.campaign,

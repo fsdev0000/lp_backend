@@ -256,8 +256,22 @@ app.get('/ping', pingHandler);
 
 import { crmHealthService } from './modules/automation/monitoring/crmHealth.service';
 
-const crmHealthHandler = async (_req: express.Request, res: express.Response) => {
+const crmHealthHandler = async (req: express.Request, res: express.Response) => {
   try {
+    const authHeader = req.headers.authorization || '';
+    const apiKey = (req.headers['x-api-key'] as string) || '';
+    const isAuthed = Boolean(authHeader || apiKey);
+
+    // Finding 17: Public probe returns minimal status; hide internal platform diagnostics, token expiry, and flags
+    if (!isAuthed) {
+      res.status(200).json({
+        status: 'OK',
+        uptimeSeconds: Math.round(process.uptime()),
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
     const report = await crmHealthService.getHealthStatus();
     const code = report.status === 'UNHEALTHY' ? 503 : 200;
     res.status(code).json(report);

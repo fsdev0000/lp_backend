@@ -344,31 +344,20 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  const apiKeyHeader = (req.headers['x-api-key'] ||
-    req.headers['x-api-token'] ||
-    req.query.api_key ||
-    req.query.apiKey) as string | undefined;
+  const apiKeyHeader = (req.headers['x-api-key'] || req.headers['x-api-token']) as string | undefined;
   const authHeader = String(req.headers.authorization || '').trim();
-  const rawQueryToken = (req.query.token || req.query.auth_token || req.query.bearer) as
-    | string
-    | undefined;
   const bearerToken = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length).trim()
-    : authHeader || (rawQueryToken ? String(rawQueryToken).trim() : '');
+    : authHeader;
 
-  const validKeys = [
-    process.env.ADMIN_API_KEY,
-    process.env.CRM_API_KEY,
-    process.env.ARTICLES_API_KEY,
-    process.env.NEWSLETTER_SEND_API_KEY,
-    process.env.NEWSLETTER_API_KEY,
-  ]
+  // Master keys that are permitted full CRM Super Admin access
+  const crmAdminKeys = [process.env.ADMIN_API_KEY, process.env.CRM_API_KEY]
     .map((k) => k?.trim())
     .filter(Boolean) as string[];
 
   const candidateKey = apiKeyHeader?.trim() || bearerToken;
 
-  if (bearerToken && !validKeys.includes(bearerToken)) {
+  if (bearerToken && !crmAdminKeys.includes(bearerToken)) {
     // 1. Internal signed CRM session token (lp_sess.*)
     if (bearerToken.startsWith('lp_sess.')) {
       const verified = verifyCrmSessionToken(bearerToken);
@@ -413,7 +402,7 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
     }
   }
 
-  if (candidateKey && validKeys.includes(candidateKey)) {
+  if (candidateKey && crmAdminKeys.includes(candidateKey)) {
     req.crmUser = {
       id: 'api-key-admin',
       email: process.env.CRM_ADMIN_EMAIL || 'admin@leadersperformance.ae',
@@ -474,15 +463,25 @@ export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  const rawTarget =
+  const rawDomain = (req.query.domain as string) || (req.body && req.body.domain);
+  let normalizedWorkspace = normalizeWorkspace(
     (req.query.workspace as string) ||
     (req.query.website as string) ||
-    (req.query.domain as string) ||
+    rawDomain ||
     (req.headers['x-workspace-id'] as string) ||
-    (req.body && (req.body.workspace || req.body.website || req.body.domain)) ||
-    'leaders_performance';
+    (req.body && (req.body.workspace || req.body.website)) ||
+    'leaders_performance'
+  );
 
-  const normalizedWorkspace = normalizeWorkspace(rawTarget);
+  // Issue 9: Strict domain-to-workspace mapping so URL params cannot bypass brand isolation
+  if (rawDomain) {
+    const domainNorm = rawDomain.toLowerCase().trim();
+    if (domainNorm.includes('lioneleersteling') || domainNorm === 'le' || domainNorm.includes('personal')) {
+      normalizedWorkspace = 'lionel_eersteling';
+    } else if (domainNorm.includes('leadersperformance') || domainNorm === 'lp') {
+      normalizedWorkspace = 'leaders_performance';
+    }
+  }
 
   // super_admin and admin always have access to both workspaces
   if (req.crmUser.role === 'super_admin' || req.crmUser.role === 'admin') {

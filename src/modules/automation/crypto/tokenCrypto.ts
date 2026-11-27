@@ -57,3 +57,32 @@ export function decryptToken(encryptedPayload: string, rawKey?: string): string 
   return decrypted.toString('utf8');
 }
 
+/**
+ * Encrypts a token if not already encrypted. Returns original if encryption fails or is unconfigured.
+ */
+export function safeEncryptToken(token: string | null | undefined, rawKey?: string): string | null | undefined {
+  if (!token || typeof token !== 'string') return token;
+  if (process.env.NODE_ENV === 'test' && !rawKey) return token;
+  if (token.startsWith('v1:')) return token; // Already encrypted
+  try {
+    return encryptToken(token, rawKey);
+  } catch (err: any) {
+    console.warn('[tokenCrypto] safeEncryptToken fallback:', err?.message);
+    return token;
+  }
+}
+
+/**
+ * Decrypts an encrypted token (v1:...) or returns plaintext for backward compatibility.
+ */
+export function safeDecryptToken(token: string | null | undefined, rawKey?: string): string | null | undefined {
+  if (!token || typeof token !== 'string') return token;
+  if (!token.startsWith('v1:')) return token; // Plaintext token
+  try {
+    return decryptToken(token, rawKey);
+  } catch (err: any) {
+    console.warn('[tokenCrypto] safeDecryptToken failed:', err?.message);
+    return token;
+  }
+}
+

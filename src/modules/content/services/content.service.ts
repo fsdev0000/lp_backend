@@ -292,8 +292,20 @@ export class ContentService {
   /**
    * Deletes a post from CRM
    */
-  public async deletePost(id: string, ipAddress?: string, actor?: string): Promise<{ success: boolean }> {
+  public async deletePost(id: string, ipAddress?: string, actor?: string, userRole?: string): Promise<{ success: boolean }> {
     const post = await this.getPostById(id);
+
+    // Issue 5: Protect published and scheduled posts from unauthorized deletion
+    if (post.status === 'PUBLISHED') {
+      throw createHttpError('Cannot delete an already published post.', 400);
+    }
+
+    if (post.status === 'SCHEDULED' || post.status === 'APPROVED') {
+      if (userRole && userRole !== 'super_admin' && userRole !== 'manager' && userRole !== 'admin') {
+        throw createHttpError('Only managers or administrators can delete scheduled or approved posts.', 403);
+      }
+    }
+
     await contentPrisma.socialPost.delete({ where: { id } });
 
     await this.logAudit({
@@ -522,6 +534,10 @@ export class ContentService {
       throw createHttpError('Post has already been published.', 400);
     }
 
+    if (post.status === 'PUBLISHING') {
+      throw createHttpError('Post is currently being published by another process. Please wait.', 409);
+    }
+
     // Item 6b: Never self-sign when a post has no approval
     if (
       !post.approvalSignature ||
@@ -534,51 +550,81 @@ export class ContentService {
       );
     }
 
-    let dispatch: { postUrn?: string | null; postUrl?: string | null } = {};
-
-    if (post.platform === 'LINKEDIN') {
-      if (!isLinkedInPublishingEnabled()) {
-        throw createHttpError(
-          'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
-          403
-        );
-      }
-      dispatch = await this.dispatchToLinkedIn(post);
-    } else if (post.platform === 'TIKTOK') {
-      if (!isTikTokPublishingEnabled()) {
-        throw createHttpError(
-          'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
-          403
-        );
-      }
-      dispatch = await this.dispatchToTikTok(post);
-    } else {
-      throw createHttpError(
-        `Live publishing is not supported for platform "${post.platform}". Only approved LINKEDIN and TIKTOK posts can be published via this endpoint.`,
-        400
-      );
-    }
-
-    const updated = await contentPrisma.socialPost.update({
-      where: { id },
+    // Issue 8 fix: Atomic lock to prevent race condition / double posting
+    const lockResult = await contentPrisma.socialPost.updateMany({
+      where: {
+        id,
+        status: { in: ['SCHEDULED', 'APPROVED'] },
+      },
       data: {
-        status: 'PUBLISHED',
-        publishedAt: new Date(),
-        platformPostId: dispatch.postUrn,
-        platformPostUrl: dispatch.postUrl,
+        status: 'PUBLISHING',
       },
     });
 
-    await this.logAudit({
-      actor: actor || post.approvedBy || 'System Publisher',
-      action: `${post.platform}_BROADCAST_DISPATCHED`,
-      entity: `ContentPost #${post.id}`,
-      details: `Live post broadcast to ${post.platform} feed. URN: ${dispatch.postUrn || 'none'}`,
-      ipAddress,
-      metadata: { postUrl: dispatch.postUrl },
-    });
+    if (lockResult.count === 0) {
+      throw createHttpError(
+        'Concurrent publishing detected. Post is already being published or status was updated.',
+        409
+      );
+    }
 
-    return updated;
+    let dispatch: { postUrn?: string | null; postUrl?: string | null } = {};
+
+    try {
+      if (post.platform === 'LINKEDIN') {
+        if (!isLinkedInPublishingEnabled()) {
+          throw createHttpError(
+            'LinkedIn publishing is currently disabled (LINKEDIN_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
+            403
+          );
+        }
+        dispatch = await this.dispatchToLinkedIn(post);
+      } else if (post.platform === 'TIKTOK') {
+        if (!isTikTokPublishingEnabled()) {
+          throw createHttpError(
+            'TikTok publishing is currently disabled (TIKTOK_PUBLISHING_ENABLED=false). No posts may be sent until the owner enables publishing.',
+            403
+          );
+        }
+        dispatch = await this.dispatchToTikTok(post);
+      } else {
+        throw createHttpError(
+          `Live publishing is not supported for platform "${post.platform}". Only approved LINKEDIN and TIKTOK posts can be published via this endpoint.`,
+          400
+        );
+      }
+
+      const updated = await contentPrisma.socialPost.update({
+        where: { id },
+        data: {
+          status: 'PUBLISHED',
+          publishedAt: new Date(),
+          platformPostId: dispatch.postUrn,
+          platformPostUrl: dispatch.postUrl,
+        },
+      });
+
+      await this.logAudit({
+        actor: actor || post.approvedBy || 'System Publisher',
+        action: `${post.platform}_BROADCAST_DISPATCHED`,
+        entity: `ContentPost #${post.id}`,
+        details: `Live post broadcast to ${post.platform} feed. URN: ${dispatch.postUrn || 'none'}`,
+        ipAddress,
+        metadata: { postUrl: dispatch.postUrl },
+      });
+
+      return updated;
+    } catch (dispatchErr: any) {
+      // Revert lock on failure so post can be retried or inspected
+      await contentPrisma.socialPost.update({
+        where: { id },
+        data: {
+          status: 'SCHEDULED',
+          rejectionReason: `Dispatch failed: ${dispatchErr?.message || 'Upstream error'}`,
+        },
+      }).catch(() => {});
+      throw dispatchErr;
+    }
   }
 
   /**
@@ -606,10 +652,22 @@ export class ContentService {
       );
     }
 
-    const videoUrl = post.mediaUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    // Issue 7 fix: Do NOT substitute Google's sample video; require valid video mediaUrl
+    if (!post.mediaUrl || !post.mediaUrl.trim()) {
+      throw createHttpError(
+        'TikTok publishing requires a valid video mediaUrl. Sample video fallback is forbidden.',
+        400
+      );
+    }
+
+    const videoUrl = post.mediaUrl.trim();
     const isDirect = (post.metadata as any)?.mode === 'DIRECT';
+    
+    // Issue 7 fix: Use complete text (body/title) as caption instead of only title
+    const caption = (post.body ? `${post.title ? post.title + '\n\n' : ''}${post.body}` : post.title || 'New Video').trim();
+
     const result = await this.tiktok.publishVideo(conn.accessToken, {
-      title: post.title || post.body || 'New Video',
+      title: caption,
       videoUrl,
       mode: isDirect ? 'DIRECT' : 'DRAFT',
     });

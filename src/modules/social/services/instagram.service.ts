@@ -46,9 +46,9 @@ export class InstagramService {
       throw new Error('Missing authorization code from Meta redirect');
     }
 
-    // 1. Verify CSRF state token if provided
-    if (state && !this.validateState(state)) {
-      console.warn('[InstagramService] OAuth state validation warning: proceeding with redirect exchange');
+    // 1. Verify CSRF state token (strictly required to prevent CSRF / connection takeover)
+    if (!state || !this.validateState(state)) {
+      throw new Error('Invalid or expired OAuth state parameter for Instagram');
     }
 
     // 2. Exchange code for access token

@@ -289,7 +289,8 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           for (const item of elements) {
             const stats = item.totalShareStatistics;
             if (stats) {
-              const imp = stats.uniqueImpressionsCount || stats.impressionCount || 0;
+              // Prioritize LinkedIn total impressionCount; fallback to uniqueImpressionsCount only if missing
+              const imp = stats.impressionCount ?? stats.uniqueImpressionsCount ?? 0;
               const clk = stats.clickCount || 0;
               const likes = stats.likeCount || 0;
               const comments = stats.commentCount || 0;

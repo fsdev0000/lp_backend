@@ -175,21 +175,7 @@ export class LinkedInService {
     }
 
     if (!stateEntry) {
-      if (state === 'lp_member_auth') {
-        stateEntry = {
-          target: 'member',
-          scopes: getLinkedInMemberScopes(),
-          createdAt: Date.now(),
-        };
-      } else if (state === 'lp_page_auth') {
-        stateEntry = {
-          target: 'page',
-          scopes: LINKEDIN_PAGE_SCOPES,
-          createdAt: Date.now(),
-        };
-      } else {
-        throw createHttpError('Invalid or expired OAuth state parameter', 400);
-      }
+      throw createHttpError('Invalid or expired OAuth state parameter', 400);
     } else if (state) {
       LinkedInService.pendingStates.delete(state);
       socialPrisma.systemConfig

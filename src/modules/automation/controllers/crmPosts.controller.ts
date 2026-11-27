@@ -3,6 +3,7 @@ import { crmPostsService } from '../review/crmPosts.service';
 import { publisherService } from '../publisher/publisher.service';
 import { InvalidTransitionError } from '../state/transition';
 import { FatalError } from '../publisher/adapters/base.adapter';
+import { normalizeWorkspace } from '../../../middleware/crmRoleAuth';
 
 function handleControllerError(res: Response, err: any, fallbackMessage: string): void {
   if (err?.statusCode === 403) {
@@ -40,7 +41,28 @@ function handleControllerError(res: Response, err: any, fallbackMessage: string)
 export class CrmPostsController {
   public listPosts = async (req: Request, res: Response): Promise<void> => {
     try {
-      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
+      const user = req.crmUser;
+      let workspace = req.query.workspace ? String(req.query.workspace) : undefined;
+
+      // Issue 9: Brand isolation enforcement for calendar posts
+      if (user && user.role !== 'super_admin' && user.role !== 'admin') {
+        const allowed = user.workspaces || [];
+        if (workspace) {
+          const norm = normalizeWorkspace(workspace);
+          if (!allowed.includes(norm)) {
+            res.status(403).json({
+              success: false,
+              code: 'FORBIDDEN_WORKSPACE',
+              error: `Access denied to workspace "${norm}".`,
+            });
+            return;
+          }
+          workspace = norm;
+        } else if (allowed.length === 1) {
+          workspace = allowed[0];
+        }
+      }
+
       const result = await crmPostsService.listPosts({
         workspace,
         status: req.query.status ? String(req.query.status) : undefined,

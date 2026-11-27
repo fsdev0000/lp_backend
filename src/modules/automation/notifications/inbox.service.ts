@@ -2,6 +2,7 @@ import { automationPrisma } from '../state/transition';
 import { getRecipientLists, NotificationService } from './notification.service';
 import { SseStreamManager } from '../../analytics/realtime/sseStreamManager';
 import { AuthenticatedCrmUser } from '../../../middleware/crmRoleAuth';
+import { crmUsersService } from '../../users/services/crmUsers.service';
 
 export type InboxCategory = 'LEAD' | 'APPROVAL' | 'SYSTEM';
 export type InboxRole = 'Approver' | 'Marketing' | 'Advisor';
@@ -47,7 +48,7 @@ export class InboxService {
    * Resolves list of recipient identifier strings (emails / user IDs)
    * based on the event's target roles and any explicit named recipients.
    */
-  public resolveRecipients(input: NotifyEventInput): string[] {
+  public async resolveRecipients(input: NotifyEventInput): Promise<string[]> {
     const set = new Set<string>();
 
     if (input.recipients && input.recipients.length > 0) {
@@ -57,14 +58,45 @@ export class InboxService {
     }
 
     if (input.roles && input.roles.length > 0) {
-      const lists = getRecipientLists();
+      // 1. Dynamic recipients from Users & Roles in Supabase Auth
+      try {
+        const users = await crmUsersService.listUsers();
+        for (const u of users) {
+          if (u.status !== 'active') continue;
 
+          // Brand/workspace isolation
+          if (input.workspace && u.role !== 'super_admin') {
+            const hasWs =
+              !u.workspaces ||
+              u.workspaces.includes('all') ||
+              u.workspaces.includes(input.workspace);
+            if (!hasWs) continue;
+          }
+
+          for (const role of input.roles) {
+            if (role === 'Approver' && ['super_admin', 'admin', 'approver', 'manager'].includes(u.role)) {
+              set.add(u.email.toLowerCase());
+            } else if (
+              role === 'Marketing' &&
+              ['editor', 'marketing', 'staff', 'manager', 'admin', 'super_admin'].includes(u.role)
+            ) {
+              set.add(u.email.toLowerCase());
+            } else if (role === 'Advisor' && ['advisor', 'admin', 'super_admin'].includes(u.role)) {
+              set.add(u.email.toLowerCase());
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[InboxService] Failed to load dynamic CRM users for notifications:', err?.message);
+      }
+
+      // 2. Fixed list fallback
+      const lists = getRecipientLists();
       for (const role of input.roles) {
         if (role === 'Approver') {
           for (const email of lists.approver) set.add(email.toLowerCase());
           for (const email of lists.admin) set.add(email.toLowerCase());
-          // Staging developer login receives a standalone copy as an Approver
-          set.add('developer');
+          if (process.env.NODE_ENV !== 'production') set.add('developer');
         } else if (role === 'Marketing') {
           for (const email of lists.editors) set.add(email.toLowerCase());
         } else if (role === 'Advisor') {
@@ -90,7 +122,7 @@ export class InboxService {
     recipients: string[];
     emailQueued: boolean;
   }> {
-    const recipients = this.resolveRecipients(input);
+    const recipients = await this.resolveRecipients(input);
     let createdCount = 0;
 
     for (const recipient of recipients) {
@@ -192,6 +224,19 @@ export class InboxService {
 
     if (options.category && ['LEAD', 'APPROVAL', 'SYSTEM'].includes(options.category.toUpperCase())) {
       where.category = options.category.toUpperCase();
+    }
+
+    // Brand / workspace isolation: Managers and staff only see notifications belonging to their workspaces
+    if (
+      user.role !== 'super_admin' &&
+      Array.isArray(user.workspaces) &&
+      user.workspaces.length > 0 &&
+      !user.workspaces.includes('all')
+    ) {
+      where.OR = [
+        { workspace: null },
+        { workspace: { in: user.workspaces } },
+      ];
     }
 
     const items = await automationPrisma.crmInboxNotification.findMany({

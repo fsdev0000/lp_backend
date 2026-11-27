@@ -6,6 +6,12 @@ export class SseStreamManager {
   private lastActiveVisitorCountByDomain: Map<string, number> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
+  // Rate limiting & connection controls (Finding 14)
+  private totalActiveConnections = 0;
+  private connectionsByIp: Map<string, number> = new Map();
+  private static readonly MAX_GLOBAL_SSE = 100;
+  private static readonly MAX_PER_IP_SSE = 5;
+
   private constructor() {
     this.startHeartbeat();
   }
@@ -29,6 +35,22 @@ export class SseStreamManager {
   }
 
   public registerClient(req: Request, res: Response): void {
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown-ip';
+    const currentIpConnections = this.connectionsByIp.get(clientIp) || 0;
+
+    if (this.totalActiveConnections >= SseStreamManager.MAX_GLOBAL_SSE) {
+      res.status(429).json({ error: 'Global SSE connection limit reached. Try again later.' });
+      return;
+    }
+
+    if (currentIpConnections >= SseStreamManager.MAX_PER_IP_SSE) {
+      res.status(429).json({ error: 'Too many SSE connections from this IP.' });
+      return;
+    }
+
+    this.totalActiveConnections += 1;
+    this.connectionsByIp.set(clientIp, currentIpConnections + 1);
+
     const rawDomain = (req.query.domain as string) || 'leadersperformance.ae';
     const canonicalDomain = this.normalizeDomain(rawDomain);
 
@@ -44,9 +66,10 @@ export class SseStreamManager {
     const domainClients = this.clientsByDomain.get(canonicalDomain)!;
     domainClients.add(res);
 
-    const lastCount = this.lastActiveVisitorCountByDomain.get(canonicalDomain) ?? 0;
+    const hasInitialCount = this.lastActiveVisitorCountByDomain.has(canonicalDomain);
+    const lastCount = hasInitialCount ? this.lastActiveVisitorCountByDomain.get(canonicalDomain) : null;
 
-    // Send initial connection acknowledgment and domain-specific active visitor state
+    // Send initial connection acknowledgment and domain-specific active visitor state (null if not yet fetched)
     res.write(`:connected\n\n`);
     res.write(
       `event: initial_state\ndata: ${JSON.stringify({
@@ -58,6 +81,14 @@ export class SseStreamManager {
     );
 
     req.on('close', () => {
+      this.totalActiveConnections = Math.max(0, this.totalActiveConnections - 1);
+      const remainingForIp = (this.connectionsByIp.get(clientIp) || 1) - 1;
+      if (remainingForIp <= 0) {
+        this.connectionsByIp.delete(clientIp);
+      } else {
+        this.connectionsByIp.set(clientIp, remainingForIp);
+      }
+
       const set = this.clientsByDomain.get(canonicalDomain);
       if (set) {
         set.delete(res);

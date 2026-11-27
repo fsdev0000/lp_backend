@@ -222,45 +222,51 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
         nextUrl = json.paging?.next || null;
       }
 
-      // Item 6.3: Fetch per-post reach via /{media-id}/insights?metric=reach
-      const posts: InstagramPostDetailRow[] = await Promise.all(
-        allRawPosts.map(async (m: any) => {
-          let mediaReach: number | null = null;
-          try {
-            const insRes = await fetch(
-              `https://graph.facebook.com/v21.0/${m.id}/insights?metric=reach&access_token=${token}`
-            );
-            if (insRes.ok) {
-              const insJson = (await insRes.json()) as any;
-              const val = insJson?.data?.[0]?.values?.[0]?.value;
-              if (typeof val === 'number') {
-                mediaReach = val;
+      // Item 6.3: Fetch per-post reach via /{media-id}/insights in controlled batches of 5 to avoid Meta rate limits
+      const posts: InstagramPostDetailRow[] = [];
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < allRawPosts.length; i += BATCH_SIZE) {
+        const batch = allRawPosts.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (m: any) => {
+            let mediaReach: number | null = null;
+            try {
+              const insRes = await fetch(
+                `https://graph.facebook.com/v21.0/${m.id}/insights?metric=reach&access_token=${token}`
+              );
+              if (insRes.ok) {
+                const insJson = (await insRes.json()) as any;
+                const val = insJson?.data?.[0]?.values?.[0]?.value;
+                if (typeof val === 'number') {
+                  mediaReach = val;
+                }
               }
+            } catch {
+              // Insights permission not available
             }
-          } catch {
-            // Insights permission not available
-          }
 
-          return {
-            id: m.id,
-            caption: m.caption || null,
-            mediaType: m.media_type || 'IMAGE',
-            mediaUrl: m.media_url || null,
-            thumbnailUrl: m.thumbnail_url || m.media_url || null,
-            permalink: m.permalink || `https://www.instagram.com/p/${m.id}/`,
-            // Item 6.7: Missing timestamps return null, never substitute current time
-            publishedAt: m.timestamp || null,
-            likes: typeof m.like_count === 'number' ? m.like_count : null,
-            comments: typeof m.comments_count === 'number' ? m.comments_count : null,
-            reach: mediaReach,
-            impressions: null,
-            saved: null,
-            shares: null,
-            engagementRate: null,
-            engagementRateFormatted: null,
-          };
-        })
-      );
+            return {
+              id: m.id,
+              caption: m.caption || null,
+              mediaType: m.media_type || 'IMAGE',
+              mediaUrl: m.media_url || null,
+              thumbnailUrl: m.thumbnail_url || m.media_url || null,
+              permalink: m.permalink || `https://www.instagram.com/p/${m.id}/`,
+              // Item 6.7: Missing timestamps return null, never substitute current time
+              publishedAt: m.timestamp || null,
+              likes: typeof m.like_count === 'number' ? m.like_count : null,
+              comments: typeof m.comments_count === 'number' ? m.comments_count : null,
+              reach: mediaReach,
+              impressions: null,
+              saved: null,
+              shares: null,
+              engagementRate: null,
+              engagementRateFormatted: null,
+            };
+          })
+        );
+        posts.push(...batchResults);
+      }
 
       // Sort newest first
       posts.sort((a, b) => {
@@ -269,15 +275,16 @@ export class InstagramAnalyticsAdapter implements IInstagramAnalyticsAdapter {
         return timeB - timeA;
       });
 
-      InstagramAnalyticsAdapter.postsCache = {
-        data: posts,
-        cachedAt: now,
-      };
+      if (posts.length > 0) {
+        InstagramAnalyticsAdapter.postsCache = {
+          data: posts,
+          cachedAt: now,
+        };
+        // Persist snapshots in background
+        this.persistMediaSnapshots(posts).catch(() => {});
+      }
 
-      // Persist snapshots in background
-      this.persistMediaSnapshots(posts).catch(() => {});
-
-      return posts;
+      return posts.length > 0 ? posts : (InstagramAnalyticsAdapter.postsCache?.data || []);
     } catch (err: any) {
       console.warn('[InstagramAnalyticsAdapter] Failed to fetch media:', err?.message);
       return InstagramAnalyticsAdapter.postsCache?.data || [];

@@ -4,7 +4,7 @@ import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
 import { isTikTokPublishingEnabled } from '../../social/adapters/tiktok.adapter';
-import { checkCanApprovePostWorkspace } from '../../../middleware/crmRoleAuth';
+import { checkCanApprovePostWorkspace, normalizeWorkspace } from '../../../middleware/crmRoleAuth';
 
 /** Who made the request, for the activity log: the signed-in CRM user, or the API key when nobody is signed in. */
 function actorOf(req: Request): string {
@@ -125,15 +125,20 @@ export class ContentController {
 
   public createPost = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval, workspace } = req.body;
+      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval, workspace, brand } = req.body;
       if (!title || !title.trim()) {
         res.status(400).json({ success: false, error: 'Post title is required' });
         return;
       }
 
+      // Issue 6 fix: ensure workspace is normalized from brand or workspace
+      const targetWorkspace = normalizeWorkspace(
+        workspace || brand || (req.headers['x-workspace-id'] as string) || (req.query.workspace as string)
+      );
+
       const post = await this.service.createPost(
         {
-          workspace: workspace || (req.query.workspace as string) || 'leaders_performance',
+          workspace: targetWorkspace,
           title: title.trim(),
           hook,
           body,
@@ -174,7 +179,8 @@ export class ContentController {
   public deletePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const result = await this.service.deletePost(id, req.ip, actorOf(req));
+      const user = (req as any).crmUser || (req as any).user;
+      const result = await this.service.deletePost(id, req.ip, actorOf(req), user?.role);
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[ContentController] deletePost error:', error);
