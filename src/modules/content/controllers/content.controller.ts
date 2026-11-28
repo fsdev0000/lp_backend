@@ -4,12 +4,64 @@ import { ContentService } from '../services/content.service';
 import { uploadContentMedia } from '../../../services/supabaseStorageService';
 import { isLinkedInPublishingEnabled } from '../../social/config/linkedin.config';
 import { isTikTokPublishingEnabled } from '../../social/adapters/tiktok.adapter';
-import { checkCanApprovePostWorkspace } from '../../../middleware/crmRoleAuth';
+import { checkCanApprovePostWorkspace, normalizeWorkspace } from '../../../middleware/crmRoleAuth';
+import { workspaceForPlatform } from '../../automation/workspace';
 
 /** Who made the request, for the activity log: the signed-in CRM user, or the API key when nobody is signed in. */
 function actorOf(req: Request): string {
   const user = (req as any).crmUser || (req as any).user;
   return user?.name || user?.email || 'API key';
+}
+
+/**
+ * Resolves workspace query filtering based on user permissions:
+ * - super_admin and admin: can query any workspace, or all workspaces if omitted.
+ * - other roles (manager, user): 403 if ?workspace= is a brand they don't have;
+ *   when no workspace is sent, defaults strictly to their allowed brands.
+ */
+function resolveContentWorkspaceFilter(
+  req: Request
+): { allowed: boolean; workspace?: string | string[]; statusCode?: number; code?: string; error?: string } {
+  const user = (req as any).crmUser || (req as any).user;
+  const rawWorkspace =
+    (req.query.workspace as string) ||
+    (req.query.brand as string) ||
+    (req.headers['x-workspace-id'] as string);
+
+  // Super Admin & Admin have universal access across all workspaces
+  if (!user || user.role === 'super_admin' || user.role === 'admin') {
+    return {
+      allowed: true,
+      workspace: rawWorkspace ? normalizeWorkspace(rawWorkspace) : undefined,
+    };
+  }
+
+  // Non-super_admin / non-admin (e.g. manager, user)
+  const userWorkspaces = Array.isArray(user.workspaces)
+    ? user.workspaces.map((w: string) => normalizeWorkspace(w))
+    : [];
+
+  if (rawWorkspace) {
+    const target = normalizeWorkspace(rawWorkspace);
+    if (!userWorkspaces.includes(target)) {
+      return {
+        allowed: false,
+        statusCode: 403,
+        code: 'FORBIDDEN_WORKSPACE',
+        error: `Access denied to workspace "${target}".`,
+      };
+    }
+    return {
+      allowed: true,
+      workspace: target,
+    };
+  }
+
+  // When no workspace is sent, return only the user's brands
+  return {
+    allowed: true,
+    workspace: userWorkspaces.length === 1 ? userWorkspaces[0] : userWorkspaces,
+  };
 }
 
 export class ContentController {
@@ -96,9 +148,19 @@ export class ContentController {
 
   public listPosts = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { platform, status, search, page, limit, workspace } = req.query;
+      const wsCheck = resolveContentWorkspaceFilter(req);
+      if (!wsCheck.allowed) {
+        res.status(wsCheck.statusCode || 403).json({
+          success: false,
+          code: wsCheck.code || 'FORBIDDEN_WORKSPACE',
+          error: wsCheck.error || 'Access denied to workspace.',
+        });
+        return;
+      }
+
+      const { platform, status, search, page, limit } = req.query;
       const data = await this.service.listPosts({
-        workspace: workspace ? String(workspace) : undefined,
+        workspace: wsCheck.workspace,
         platform: platform as string,
         status: status as string,
         search: search as string,
@@ -116,6 +178,21 @@ export class ContentController {
     try {
       const id = String(req.params.id);
       const post = await this.service.getPostById(id);
+      const user = (req as any).crmUser || (req as any).user;
+      if (user && user.role !== 'super_admin' && user.role !== 'admin') {
+        const allowed = Array.isArray(user.workspaces)
+          ? user.workspaces.map((w: string) => normalizeWorkspace(w))
+          : [];
+        const postWs = normalizeWorkspace(post.workspace);
+        if (!allowed.includes(postWs)) {
+          res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_WORKSPACE',
+            error: `Access denied to workspace "${postWs}".`,
+          });
+          return;
+        }
+      }
       res.status(200).json({ success: true, data: post });
     } catch (error: any) {
       console.error('[ContentController] getPost error:', error);
@@ -125,15 +202,36 @@ export class ContentController {
 
   public createPost = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval, workspace } = req.body;
+      const { title, hook, body, platform, scheduledFor, mediaUrl, mediaType, tags, author, requireApproval, workspace, brand } = req.body;
       if (!title || !title.trim()) {
         res.status(400).json({ success: false, error: 'Post title is required' });
         return;
       }
 
+      // Issue 6 fix: ensure workspace is normalized from brand, workspace, query or platform default
+      const explicitWorkspace = workspace || brand || (req.headers['x-workspace-id'] as string) || (req.query.workspace as string);
+      const targetWorkspace = explicitWorkspace
+        ? normalizeWorkspace(explicitWorkspace)
+        : workspaceForPlatform(platform);
+
+      const user = (req as any).crmUser || (req as any).user;
+      if (user && user.role !== 'super_admin' && user.role !== 'admin') {
+        const allowed = Array.isArray(user.workspaces)
+          ? user.workspaces.map((w: string) => normalizeWorkspace(w))
+          : [];
+        if (!allowed.includes(targetWorkspace)) {
+          res.status(403).json({
+            success: false,
+            code: 'FORBIDDEN_WORKSPACE',
+            error: `Access denied to workspace "${targetWorkspace}".`,
+          });
+          return;
+        }
+      }
+
       const post = await this.service.createPost(
         {
-          workspace: workspace || (req.query.workspace as string) || 'leaders_performance',
+          workspace: targetWorkspace,
           title: title.trim(),
           hook,
           body,
@@ -296,8 +394,17 @@ export class ContentController {
 
   public getApprovalDesk = async (req: Request, res: Response): Promise<void> => {
     try {
-      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
-      const posts = await this.service.getApprovalDeskPosts(workspace);
+      const wsCheck = resolveContentWorkspaceFilter(req);
+      if (!wsCheck.allowed) {
+        res.status(wsCheck.statusCode || 403).json({
+          success: false,
+          code: wsCheck.code || 'FORBIDDEN_WORKSPACE',
+          error: wsCheck.error || 'Access denied to workspace.',
+        });
+        return;
+      }
+
+      const posts = await this.service.getApprovalDeskPosts(wsCheck.workspace);
       res.status(200).json({ success: true, data: posts, count: posts.length });
     } catch (error: any) {
       console.error('[ContentController] getApprovalDesk error:', error);
@@ -307,8 +414,17 @@ export class ContentController {
 
   public getApprovalStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const workspace = req.query.workspace ? String(req.query.workspace) : undefined;
-      const stats = await this.service.getApprovalStats(workspace);
+      const wsCheck = resolveContentWorkspaceFilter(req);
+      if (!wsCheck.allowed) {
+        res.status(wsCheck.statusCode || 403).json({
+          success: false,
+          code: wsCheck.code || 'FORBIDDEN_WORKSPACE',
+          error: wsCheck.error || 'Access denied to workspace.',
+        });
+        return;
+      }
+
+      const stats = await this.service.getApprovalStats(wsCheck.workspace);
       res.status(200).json({ success: true, data: stats });
     } catch (error: any) {
       console.error('[ContentController] getApprovalStats error:', error);
