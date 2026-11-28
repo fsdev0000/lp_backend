@@ -58,15 +58,38 @@ export function decryptToken(encryptedPayload: string, rawKey?: string): string 
 }
 
 /**
- * Encrypts a token if not already encrypted. Returns original if encryption fails or is unconfigured.
+ * Validates that TOKEN_ENCRYPTION_KEY is configured in production.
+ */
+export function assertTokenEncryptionKeyConfigured(): void {
+  const key = (process.env.TOKEN_ENCRYPTION_KEY || '').trim();
+  if (!key && process.env.NODE_ENV === 'production') {
+    throw new Error('[tokenCrypto] FATAL: TOKEN_ENCRYPTION_KEY environment variable is required in production');
+  }
+}
+
+/**
+ * Encrypts a token if not already encrypted.
+ * In production, TOKEN_ENCRYPTION_KEY is strictly required and failure throws rather than storing plaintext.
  */
 export function safeEncryptToken(token: string | null | undefined, rawKey?: string): string | null | undefined {
   if (!token || typeof token !== 'string') return token;
-  if (process.env.NODE_ENV === 'test' && !rawKey) return token;
   if (token.startsWith('v1:')) return token; // Already encrypted
+  const key = (rawKey ?? process.env.TOKEN_ENCRYPTION_KEY ?? '').trim();
+  if (process.env.NODE_ENV === 'production') {
+    if (!key) {
+      throw new Error('TOKEN_ENCRYPTION_KEY environment variable is required in production');
+    }
+    return encryptToken(token, rawKey);
+  }
+  if (!key && process.env.NODE_ENV === 'test') {
+    return token;
+  }
   try {
     return encryptToken(token, rawKey);
   } catch (err: any) {
+    if (process.env.NODE_ENV === 'production') {
+      throw err;
+    }
     console.warn('[tokenCrypto] safeEncryptToken fallback:', err?.message);
     return token;
   }

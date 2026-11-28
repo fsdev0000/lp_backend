@@ -10,6 +10,7 @@ import {
   HttpFetchFn,
   buildFullPostCaption,
 } from './base.adapter';
+import { safeDecryptToken } from '../../crypto/tokenCrypto';
 
 export const TIKTOK_DEFAULT_CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -83,6 +84,7 @@ export class TikTokPublishAdapter implements IPublishAdapter {
   }
 
   public async publish(post: PublishablePostContext): Promise<PublishAdapterResult> {
+    post.account.accessToken = safeDecryptToken(post.account.accessToken) || post.account.accessToken;
     // Edge Case #25: TikTok app not yet audited -> refuse public posting and mark FAILED "TikTok audit pending"
     if (!this.isAudited()) {
       throw new FatalError(
@@ -310,6 +312,7 @@ export class TikTokPublishAdapter implements IPublishAdapter {
     const clientKey = (process.env.TIKTOK_CLIENT_KEY || '').trim();
     const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || '').trim();
 
+    const refreshPlain = safeDecryptToken(account.refreshToken) || account.refreshToken;
     const res = await this.fetchWithTimeout('https://open.tiktokapis.com/v2/oauth/token/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -317,7 +320,7 @@ export class TikTokPublishAdapter implements IPublishAdapter {
         client_key: clientKey,
         client_secret: clientSecret,
         grant_type: 'refresh_token',
-        refresh_token: account.refreshToken,
+        refresh_token: refreshPlain,
       }).toString(),
     });
 

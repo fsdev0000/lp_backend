@@ -10,6 +10,7 @@ import {
   HttpFetchFn,
   buildFullPostCaption,
 } from './base.adapter';
+import { safeDecryptToken } from '../../crypto/tokenCrypto';
 
 export const IG_GRAPH_VERSION = 'v21.0';
 export const IG_DAILY_CAP_DEFAULT = 50;
@@ -237,6 +238,7 @@ export class InstagramPublishAdapter implements IPublishAdapter {
   }
 
   public async publish(post: PublishablePostContext): Promise<PublishAdapterResult> {
+    post.account.accessToken = safeDecryptToken(post.account.accessToken) || post.account.accessToken;
     if (post.processingRef) {
       return this.poll(post);
     }
@@ -399,6 +401,7 @@ export class InstagramPublishAdapter implements IPublishAdapter {
     externalId: string;
     refreshToken: string;
   }): Promise<RefreshTokenResult> {
+    const refreshPlain = safeDecryptToken(account.refreshToken) || account.refreshToken;
     const res = await this.fetchWithTimeout(
       `https://graph.facebook.com/${IG_GRAPH_VERSION}/oauth/access_token?` +
         new URLSearchParams({
@@ -409,7 +412,7 @@ export class InstagramPublishAdapter implements IPublishAdapter {
             process.env.META_APP_SECRET ||
             ''
           ).trim(),
-          fb_exchange_token: account.refreshToken,
+          fb_exchange_token: refreshPlain,
         }).toString(),
       { method: 'GET' }
     );

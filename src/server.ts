@@ -386,12 +386,14 @@ import { ensureAudiobookFromSupabase } from './services/audiobookService';
 import { initAppointmentReminderWorker } from './services/reminderService';
 
 import { validateAnalyticsCredentials } from './modules/analytics/adapters/credentialValidator';
+import { assertTokenEncryptionKeyConfigured } from './modules/automation/crypto/tokenCrypto';
 import { GscIngestionJob } from './modules/analytics/jobs/gscIngestionJob';
 import { LinkedInAnalyticsSyncJob } from './modules/analytics/jobs/linkedinAnalyticsSyncJob';
 import { InstagramAnalyticsSyncJob } from './modules/analytics/jobs/instagramAnalyticsSyncJob';
 
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  assertTokenEncryptionKeyConfigured();
   const creds = validateAnalyticsCredentials();
   console.log(`[Startup] Analytics credentials validated on boot: GA4 (${creds.ga4.isConfigured ? 'OK' : 'MISSING'}), GSC (${creds.gsc.isConfigured ? 'OK' : 'MISSING'}), Clarity (${creds.clarity.isConfigured ? 'OK' : 'DECOUPLED'}), GHL (${creds.ghl.isConfigured ? 'OK' : 'WEBHOOK_ONLY'})`);
   RealtimePollingJob.start();

@@ -12,6 +12,7 @@ import {
   getLinkedInVanityName,
   LINKEDIN_PAGE_PLATFORM,
 } from '../../social/config/linkedin.config';
+import { safeDecryptToken } from '../../automation/crypto/tokenCrypto';
 
 export const analyticsPrisma = new PrismaClient();
 
@@ -113,8 +114,9 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
    */
   private async getActiveConnection(accountType: 'BUSINESS' | 'PERSONAL' = 'BUSINESS') {
     try {
+      let conn: any = null;
       if (accountType === 'PERSONAL') {
-        return await (analyticsPrisma as any).socialAccountConnection.findFirst({
+        conn = await (analyticsPrisma as any).socialAccountConnection.findFirst({
           where: {
             OR: [
               { accountUrn: { startsWith: 'urn:li:person:' } },
@@ -125,7 +127,7 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           orderBy: { updatedAt: 'desc' },
         });
       } else {
-        return await (analyticsPrisma as any).socialAccountConnection.findFirst({
+        conn = await (analyticsPrisma as any).socialAccountConnection.findFirst({
           where: {
             OR: [
               { platform: 'LINKEDIN_PAGE' },
@@ -136,6 +138,14 @@ export class LinkedInAnalyticsAdapter implements ILinkedInAnalyticsAdapter {
           orderBy: { updatedAt: 'desc' },
         });
       }
+      if (conn) {
+        return {
+          ...conn,
+          accessToken: safeDecryptToken(conn.accessToken) || conn.accessToken,
+          refreshToken: conn.refreshToken ? (safeDecryptToken(conn.refreshToken) || conn.refreshToken) : conn.refreshToken,
+        };
+      }
+      return null;
     } catch (e: any) {
       console.warn('[LinkedInAnalyticsAdapter] Database connection notice:', e?.message);
       return null;

@@ -1015,7 +1015,7 @@ export class LinkedInAdapter {
     const encAccessToken = safeEncryptToken(data.accessToken) || data.accessToken;
     const encRefreshToken = data.refreshToken ? (safeEncryptToken(data.refreshToken) || data.refreshToken) : null;
 
-    return socialPrisma.socialAccountConnection.upsert({
+    const saved = await socialPrisma.socialAccountConnection.upsert({
       where: { platform },
       create: {
         platform,
@@ -1049,6 +1049,12 @@ export class LinkedInAdapter {
         ...(data.metadata !== undefined ? { metadata: data.metadata as any } : {}),
       },
     });
+
+    return {
+      ...saved,
+      accessToken: safeDecryptToken(saved.accessToken) || data.accessToken,
+      refreshToken: saved.refreshToken ? (safeDecryptToken(saved.refreshToken) || data.refreshToken) : null,
+    };
   }
 
   /**

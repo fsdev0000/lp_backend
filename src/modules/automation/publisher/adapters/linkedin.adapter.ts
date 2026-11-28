@@ -10,6 +10,7 @@ import {
   HttpFetchFn,
   buildFullPostCaption,
 } from './base.adapter';
+import { safeDecryptToken } from '../../crypto/tokenCrypto';
 
 export const DEFAULT_LINKEDIN_VERSION = '202504';
 
@@ -19,9 +20,10 @@ export class LinkedInPublishAdapter implements IPublishAdapter {
   constructor(private readonly httpFetch: HttpFetchFn = fetch) {}
 
   private getLinkedInHeaders(accessToken: string, extra: Record<string, string> = {}) {
+    const cleanToken = safeDecryptToken(accessToken) || accessToken;
     const version = (process.env.LINKEDIN_API_VERSION || DEFAULT_LINKEDIN_VERSION).trim();
     return {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${cleanToken}`,
       'Linkedin-Version': version,
       'X-Restli-Protocol-Version': '2.0.0',
       ...extra,
@@ -346,6 +348,7 @@ export class LinkedInPublishAdapter implements IPublishAdapter {
   }
 
   public async publish(post: PublishablePostContext): Promise<PublishAdapterResult> {
+    post.account.accessToken = safeDecryptToken(post.account.accessToken) || post.account.accessToken;
     if (post.processingRef) {
       return this.poll(post);
     }
@@ -451,12 +454,13 @@ export class LinkedInPublishAdapter implements IPublishAdapter {
       ''
     ).trim();
 
+    const refreshPlain = safeDecryptToken(account.refreshToken) || account.refreshToken;
     const res = await this.fetchWithTimeout('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: account.refreshToken,
+        refresh_token: refreshPlain,
         client_id: clientId,
         client_secret: clientSecret,
       }).toString(),
