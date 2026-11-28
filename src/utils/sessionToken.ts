@@ -4,6 +4,8 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const CONFIG_KEY = 'crm_revoked_users';
 let hasLoadedFromDb = false;
+let lastDbSyncMs = 0;
+const DB_SYNC_INTERVAL_MS = 30_000; // 30-second multi-instance sync interval
 
 export interface CrmSessionPayload {
   id: string;
@@ -37,7 +39,8 @@ async function syncRevocationsFromDb(): Promise<void> {
       }
     }
     hasLoadedFromDb = true;
-  } catch {}
+    lastDbSyncMs = Date.now();
+  } catch { }
 }
 
 async function persistRevocationsToDb(): Promise<void> {
@@ -58,23 +61,25 @@ async function persistRevocationsToDb(): Promise<void> {
 }
 
 // Initial hydration from DB on load
-syncRevocationsFromDb().catch(() => {});
+syncRevocationsFromDb().catch(() => { });
 
 export function revokeUserSessions(userId?: string | null, email?: string | null): void {
   if (userId) revokedUserIds.add(userId.trim());
   if (email) revokedUserEmails.add(email.trim().toLowerCase());
-  persistRevocationsToDb().catch(() => {});
+  persistRevocationsToDb().catch(() => { });
 }
 
 export function restoreUserSessions(userId?: string | null, email?: string | null): void {
   if (userId) revokedUserIds.delete(userId.trim());
   if (email) revokedUserEmails.delete(email.trim().toLowerCase());
-  persistRevocationsToDb().catch(() => {});
+  persistRevocationsToDb().catch(() => { });
 }
 
 export function isUserSessionRevoked(userId?: string | null, email?: string | null): boolean {
-  if (!hasLoadedFromDb && process.env.NODE_ENV !== 'test') {
-    syncRevocationsFromDb().catch(() => {});
+  const now = Date.now();
+  if (process.env.NODE_ENV !== 'test' && (!hasLoadedFromDb || now - lastDbSyncMs > DB_SYNC_INTERVAL_MS)) {
+    lastDbSyncMs = now;
+    syncRevocationsFromDb().catch(() => { });
   }
   if (userId && revokedUserIds.has(userId.trim())) return true;
   if (email && revokedUserEmails.has(email.trim().toLowerCase())) return true;
