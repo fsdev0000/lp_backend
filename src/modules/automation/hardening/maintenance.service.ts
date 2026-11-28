@@ -25,7 +25,7 @@ export class MaintenanceService {
   constructor(
     private readonly storage: IStorageService = defaultStorageService,
     private readonly publisher: PublisherService = publisherService
-  ) {}
+  ) { }
 
   private resolveToken(encrypted?: string | null): string {
     if (!encrypted) return '';

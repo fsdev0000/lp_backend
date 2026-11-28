@@ -15,7 +15,7 @@ import { safeDecryptToken } from '../../crypto/tokenCrypto';
 export class YouTubePublishAdapter implements IPublishAdapter {
   public readonly platform = 'YOUTUBE';
 
-  constructor(private readonly httpFetch: HttpFetchFn = fetch) {}
+  constructor(private readonly httpFetch: HttpFetchFn = fetch) { }
 
   private async fetchWithTimeout(
     url: string,
@@ -126,14 +126,14 @@ export class YouTubePublishAdapter implements IPublishAdapter {
       },
       status: isFutureSlot
         ? {
-            privacyStatus: 'private',
-            publishAt: post.scheduledAt.toISOString(),
-            selfDeclaredMadeForKids: false,
-          }
+          privacyStatus: 'private',
+          publishAt: post.scheduledAt.toISOString(),
+          selfDeclaredMadeForKids: false,
+        }
         : {
-            privacyStatus: String(post.options?.privacyStatus || 'public'),
-            selfDeclaredMadeForKids: false,
-          },
+          privacyStatus: String(post.options?.privacyStatus || 'public'),
+          selfDeclaredMadeForKids: false,
+        },
     };
 
     const initUrl =
@@ -304,8 +304,7 @@ export class YouTubePublishAdapter implements IPublishAdapter {
 
     if (procStatus === 'failed' || uploadStatus === 'Failed' || uploadStatus === 'rejected') {
       throw new FatalError(
-        `YouTube processing failed for video ${videoId}: ${
-          item?.processingDetails?.processingFailureReason || uploadStatus
+        `YouTube processing failed for video ${videoId}: ${item?.processingDetails?.processingFailureReason || uploadStatus
         }`,
         {
           httpStatus: 400,
