@@ -329,6 +329,7 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
     url.includes('/notifications') ||
     url.includes('/ai-referrals') ||
     url.includes('/crm/users') ||
+    url.includes('/realtime/stream') ||
     url.includes('/auth/me');
   if (
     process.env.NODE_ENV === 'test' &&
@@ -458,6 +459,23 @@ export async function optionalCrmAuth(req: Request, res: Response, next: NextFun
     }
   }
   next();
+}
+
+/**
+ * Stream-level authentication middleware for SSE / realtime endpoints.
+ * Accepts CRM session token via standard Authorization header OR query parameter (?token= or ?accessToken=)
+ * to support EventSource clients and direct fetch streams alike, then validates workspace authorization.
+ */
+export async function requireStreamAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!req.headers.authorization) {
+    const queryToken = (req.query.token as string) || (req.query.accessToken as string);
+    if (typeof queryToken === 'string' && queryToken.trim().length > 0) {
+      req.headers.authorization = `Bearer ${queryToken.trim()}`;
+    }
+  }
+  await requireCrmAuth(req, res, () => {
+    requireWorkspaceAuth(req, res, next);
+  });
 }
 
 /**

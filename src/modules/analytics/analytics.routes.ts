@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AnalyticsController } from './controllers/analytics.controller';
-import { requireCrmAuth, requireWorkspaceAuth } from '../../middleware/crmRoleAuth';
+import { requireCrmAuth, requireWorkspaceAuth, requireStreamAuth } from '../../middleware/crmRoleAuth';
 
 export const analyticsRoutes = Router();
 const controller = new AnalyticsController();
@@ -15,9 +15,9 @@ analyticsRoutes.post('/clarity/webhook', controller.ingestClarityWebhook);
 /**
  * @route GET /api/v1/analytics/realtime/stream
  * @desc Persistent Server-Sent Events (SSE) stream for live active visitor ticker
- * @access Public SSE stream (browser EventSource does not support custom Authorization headers)
+ * @access Protected SSE stream (requires valid CRM session via Authorization header or ?token=)
  */
-analyticsRoutes.get('/realtime/stream', controller.streamRealtime);
+analyticsRoutes.get('/realtime/stream', requireStreamAuth, controller.streamRealtime);
 
 /**
  * Issue 4.1: Apply CRM authentication and workspace authorization across all protected analytics routes
