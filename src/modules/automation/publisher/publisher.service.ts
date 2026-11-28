@@ -7,7 +7,7 @@ import {
   storageService as defaultStorageService,
 } from '../storage/storage.service';
 import { notificationService } from '../notifications/notification.service';
-import { decryptToken, encryptToken } from '../crypto/tokenCrypto';
+import { decryptToken, encryptToken, safeDecryptToken } from '../crypto/tokenCrypto';
 import {
   IPublishAdapter,
   PublishablePostContext,
@@ -63,10 +63,7 @@ export class PublisherService {
 
   private resolveAccessToken(encrypted?: string | null): string {
     if (!encrypted) return '';
-    if (encrypted.startsWith('v1:')) {
-      return decryptToken(encrypted);
-    }
-    return encrypted;
+    return safeDecryptToken(encrypted) || encrypted;
   }
 
   private async buildPostContext(post: any): Promise<PublishablePostContext> {

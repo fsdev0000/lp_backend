@@ -9,7 +9,7 @@ import {
   storageService as defaultStorageService,
 } from '../storage/storage.service';
 import { publisherService, PublisherService } from '../publisher/publisher.service';
-import { decryptToken, encryptToken } from '../crypto/tokenCrypto';
+import { decryptToken, encryptToken, safeDecryptToken } from '../crypto/tokenCrypto';
 import { notificationService } from '../notifications/notification.service';
 
 export interface MaintenanceRunSummary {
@@ -29,10 +29,7 @@ export class MaintenanceService {
 
   private resolveToken(encrypted?: string | null): string {
     if (!encrypted) return '';
-    if (encrypted.startsWith('v1:')) {
-      return decryptToken(encrypted);
-    }
-    return encrypted;
+    return safeDecryptToken(encrypted) || encrypted;
   }
 
   /**

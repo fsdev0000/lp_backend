@@ -10,6 +10,7 @@ import {
   HttpFetchFn,
   buildFullPostCaption,
 } from './base.adapter';
+import { safeDecryptToken } from '../../crypto/tokenCrypto';
 
 export class YouTubePublishAdapter implements IPublishAdapter {
   public readonly platform = 'YOUTUBE';
@@ -93,6 +94,7 @@ export class YouTubePublishAdapter implements IPublishAdapter {
   }
 
   public async publish(post: PublishablePostContext): Promise<PublishAdapterResult> {
+    post.account.accessToken = safeDecryptToken(post.account.accessToken) || post.account.accessToken;
     // Idempotency: if processingRef already exists from an interrupted run, poll instead of re-uploading
     if (post.processingRef) {
       return this.poll(post);
@@ -352,13 +354,14 @@ export class YouTubePublishAdapter implements IPublishAdapter {
       ''
     ).trim();
 
+    const refreshPlain = safeDecryptToken(account.refreshToken) || account.refreshToken;
     const res = await this.fetchWithTimeout('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        refresh_token: account.refreshToken,
+        refresh_token: refreshPlain,
         grant_type: 'refresh_token',
       }).toString(),
     });

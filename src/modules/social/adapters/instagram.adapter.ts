@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { safeEncryptToken, safeDecryptToken } from '../../automation/crypto/tokenCrypto';
 
 const prisma = new PrismaClient();
 
@@ -148,7 +149,7 @@ export class InstagramAdapter {
       if (res.ok) {
         return (await res.json()) as InstagramAccountProfile;
       }
-    } catch {}
+    } catch { }
 
     // 2. Discover via linked Facebook Pages
     const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name,biography,profile_picture_url,followers_count}&access_token=${token}`;
@@ -225,7 +226,11 @@ export class InstagramAdapter {
           return null;
         }
         if (conn.accessToken) {
-          return conn;
+          return {
+            ...conn,
+            accessToken: safeDecryptToken(conn.accessToken) || conn.accessToken,
+            refreshToken: safeDecryptToken(conn.refreshToken) || conn.refreshToken,
+          };
         }
       }
     } catch (e: any) {
@@ -237,7 +242,13 @@ export class InstagramAdapter {
       if (InstagramAdapter.memoryConnection.status === 'DISCONNECTED') {
         return null;
       }
-      return InstagramAdapter.memoryConnection;
+      return {
+        ...InstagramAdapter.memoryConnection,
+        accessToken: safeDecryptToken(InstagramAdapter.memoryConnection.accessToken) || InstagramAdapter.memoryConnection.accessToken,
+        refreshToken: InstagramAdapter.memoryConnection.refreshToken
+          ? (safeDecryptToken(InstagramAdapter.memoryConnection.refreshToken) || InstagramAdapter.memoryConnection.refreshToken)
+          : null,
+      };
     }
 
     // Fall back to preconfigured Environment System User token ONLY if not explicitly disconnected
@@ -306,12 +317,15 @@ export class InstagramAdapter {
       }
     }
 
+    const encAccessToken = safeEncryptToken(data.accessToken) || data.accessToken;
+    const encRefreshToken = data.refreshToken ? (safeEncryptToken(data.refreshToken) || data.refreshToken) : null;
+
     const payload = {
       platform: 'INSTAGRAM',
       accountName: data.accountName,
       accountUrn: `instagram:${data.accountId}`,
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken || null,
+      accessToken: encAccessToken,
+      refreshToken: encRefreshToken,
       tokenExpiresAt: expiresAt,
       scopes: scopes || ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights'],
       status: 'HEALTHY',
@@ -330,12 +344,22 @@ export class InstagramAdapter {
         create: payload,
         update: payload,
       });
-      InstagramAdapter.memoryConnection = saved;
-      return saved;
+      const decrypted = {
+        ...saved,
+        accessToken: safeDecryptToken(saved.accessToken) || data.accessToken,
+        refreshToken: saved.refreshToken ? (safeDecryptToken(saved.refreshToken) || data.refreshToken) : null,
+      };
+      InstagramAdapter.memoryConnection = decrypted;
+      return decrypted;
     } catch (e: any) {
       console.warn('[InstagramAdapter] DB saveConnection notice:', e?.message);
-      InstagramAdapter.memoryConnection = payload;
-      return payload;
+      const fallback = {
+        ...payload,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken || null,
+      };
+      InstagramAdapter.memoryConnection = fallback;
+      return fallback;
     }
   }
 

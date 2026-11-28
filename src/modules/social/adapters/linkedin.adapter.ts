@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
+import { safeEncryptToken, safeDecryptToken } from '../../automation/crypto/tokenCrypto';
 import {
   DEFAULT_LINKEDIN_ORGANIZATION_ID,
   getLinkedInApiVersion,
@@ -877,7 +878,13 @@ export class LinkedInAdapter {
       const conn = await socialPrisma.socialAccountConnection.findUnique({
         where: { platform: LINKEDIN_MEMBER_PLATFORM },
       });
-      if (conn) return conn;
+      if (conn) {
+        return {
+          ...conn,
+          accessToken: safeDecryptToken(conn.accessToken) || conn.accessToken,
+          refreshToken: safeDecryptToken(conn.refreshToken) || conn.refreshToken,
+        };
+      }
     } catch {
       // Ignore DB offline error
     }
@@ -892,7 +899,13 @@ export class LinkedInAdapter {
       const conn = await socialPrisma.socialAccountConnection.findUnique({
         where: { platform: LINKEDIN_PAGE_PLATFORM },
       });
-      if (conn) return conn;
+      if (conn) {
+        return {
+          ...conn,
+          accessToken: safeDecryptToken(conn.accessToken) || conn.accessToken,
+          refreshToken: safeDecryptToken(conn.refreshToken) || conn.refreshToken,
+        };
+      }
     } catch {
       // Ignore DB offline error
     }
@@ -999,7 +1012,10 @@ export class LinkedInAdapter {
       ? new Date(Date.now() + data.refreshTokenExpiresIn * 1000)
       : undefined;
 
-    return socialPrisma.socialAccountConnection.upsert({
+    const encAccessToken = safeEncryptToken(data.accessToken) || data.accessToken;
+    const encRefreshToken = data.refreshToken ? (safeEncryptToken(data.refreshToken) || data.refreshToken) : null;
+
+    const saved = await socialPrisma.socialAccountConnection.upsert({
       where: { platform },
       create: {
         platform,
@@ -1007,8 +1023,8 @@ export class LinkedInAdapter {
         accountUrn: data.accountUrn,
         accountEmail: data.accountEmail || null,
         profilePictureUrl: data.profilePictureUrl || null,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || null,
+        accessToken: encAccessToken,
+        refreshToken: encRefreshToken,
         tokenExpiresAt: expiresAt,
         ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
         scopes: data.scopes || defaultScopes,
@@ -1022,8 +1038,8 @@ export class LinkedInAdapter {
         accountUrn: data.accountUrn,
         accountEmail: data.accountEmail || null,
         profilePictureUrl: data.profilePictureUrl || null,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || undefined,
+        accessToken: encAccessToken,
+        refreshToken: encRefreshToken || undefined,
         tokenExpiresAt: expiresAt,
         ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
         scopes: data.scopes || defaultScopes,
@@ -1033,6 +1049,12 @@ export class LinkedInAdapter {
         ...(data.metadata !== undefined ? { metadata: data.metadata as any } : {}),
       },
     });
+
+    return {
+      ...saved,
+      accessToken: safeDecryptToken(saved.accessToken) || data.accessToken,
+      refreshToken: saved.refreshToken ? (safeDecryptToken(saved.refreshToken) || data.refreshToken) : null,
+    };
   }
 
   /**
