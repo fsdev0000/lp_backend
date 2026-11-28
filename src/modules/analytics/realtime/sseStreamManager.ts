@@ -35,7 +35,7 @@ export class SseStreamManager {
   }
 
   public registerClient(req: Request, res: Response): void {
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown-ip';
+    const clientIp = req.ip || 'unknown-ip';
     const currentIpConnections = this.connectionsByIp.get(clientIp) || 0;
 
     if (this.totalActiveConnections >= SseStreamManager.MAX_GLOBAL_SSE) {
@@ -51,7 +51,7 @@ export class SseStreamManager {
     this.totalActiveConnections += 1;
     this.connectionsByIp.set(clientIp, currentIpConnections + 1);
 
-    const rawDomain = (req.query.domain as string) || 'leadersperformance.ae';
+    const rawDomain = (req as any).crmDomain || (req.query.domain as string) || 'leadersperformance.ae';
     const canonicalDomain = this.normalizeDomain(rawDomain);
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -175,6 +175,11 @@ export class SseStreamManager {
     }
   }
 
+  public resetLimitsForTests(): void {
+    this.totalActiveConnections = 0;
+    this.connectionsByIp.clear();
+  }
+
   public getActiveClientCount(targetDomain?: string): number {
     if (targetDomain) {
       const canonical = this.normalizeDomain(targetDomain);
@@ -193,6 +198,13 @@ export class SseStreamManager {
     );
   }
 
+  public stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
   private startHeartbeat(): void {
     if (this.heartbeatInterval) return;
     // 15s standard SSE heartbeat comment
@@ -207,5 +219,6 @@ export class SseStreamManager {
         }
       }
     }, 15000);
+    this.heartbeatInterval.unref?.();
   }
 }
