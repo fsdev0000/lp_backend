@@ -9,11 +9,16 @@ import { crmPostsController } from '../modules/automation/controllers/crmPosts.c
 import { automationPrisma } from '../modules/automation/state/transition';
 import { ContentController } from '../modules/content/controllers/content.controller';
 
-process.env.CRM_SESSION_SECRET = 'test-crm-session-secret-hardening-12345';
+const TEST_SECRET = 'test-crm-session-secret-xyz12345';
+process.env.CRM_SESSION_SECRET = TEST_SECRET;
 process.env.ADMIN_API_KEY = 'test-admin-secret-key';
 process.env.CRM_API_KEY = 'test-crm-secret-key';
 
 describe('Hardening Brand Resolution, CMS Lockdown, and Calendar Workspace Suite', () => {
+  beforeEach(() => {
+    process.env.CRM_SESSION_SECRET = TEST_SECRET;
+  });
+
   // Tokens
   const lionelOnlyManagerToken = generateCrmSessionToken({
     id: 'usr-lionel-mgr',

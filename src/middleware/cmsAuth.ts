@@ -5,6 +5,7 @@ import {
   crmUserFromSessionPayload,
   crmUserFromSupabase,
   isSupabaseUserDeactivated,
+  normalizeWorkspace,
 } from './crmRoleAuth';
 
 export interface CmsAuthResult {
