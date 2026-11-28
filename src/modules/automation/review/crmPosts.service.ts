@@ -25,6 +25,7 @@ import { PLATFORM_LIMITS } from './geminiDraft.service';
 import {
   AuthenticatedCrmUser,
   checkCanApprovePostWorkspace,
+  checkCanAccessPostWorkspace,
 } from '../../../middleware/crmRoleAuth';
 import { resolvePostWorkspace } from '../workspace';
 
@@ -274,7 +275,7 @@ export class CrmPostsService {
   /**
    * GET /posts/:id — Full post detail with revision history + diff, comment thread, dual timezones, and signed media URLs.
    */
-  public async getPostDetail(postId: string) {
+  public async getPostDetail(postId: string, actor?: AuthenticatedCrmUser) {
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
       include: {
@@ -305,7 +306,14 @@ export class CrmPostsService {
     });
 
     if (!post) {
-      throw new Error(`Post ${postId} not found`);
+      const err = new Error(`Post ${postId} not found`) as Error & { statusCode: number; code: string };
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (actor) {
+      await this.assertCanAccessPostWorkspace(post, actor);
     }
 
     const tz = formatDualTimezone(post.scheduledAt);
@@ -371,6 +379,7 @@ export class CrmPostsService {
     const existing = await automationPrisma.post.findUnique({
       where: { id: postId },
       include: {
+        contentItem: true,
         media: { include: { asset: true } },
       },
     });
@@ -378,6 +387,8 @@ export class CrmPostsService {
     if (!existing) {
       throw new Error(`Post ${postId} not found`);
     }
+
+    await this.assertCanAccessPostWorkspace(existing, actor);
 
     const nextTitle = updates.title !== undefined ? updates.title : existing.title;
     const nextCaption = updates.caption !== undefined ? updates.caption : existing.caption;
@@ -507,10 +518,13 @@ export class CrmPostsService {
   ) {
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
+      include: { contentItem: true },
     });
     if (!post) {
       throw new Error(`Post ${postId} not found`);
     }
+
+    await this.assertCanAccessPostWorkspace(post, actor);
 
     const buffer = Buffer.from(input.base64Data || '', 'base64');
     const normalizedName = normalizeFileNameNfc(input.fileName || 'upload.bin');
@@ -612,6 +626,7 @@ export class CrmPostsService {
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
       include: {
+        contentItem: true,
         media: { include: { asset: true } },
         revisions: { orderBy: { revision: 'desc' }, take: 1 },
       },
@@ -620,6 +635,8 @@ export class CrmPostsService {
     if (!post) {
       throw new Error(`Post ${postId} not found`);
     }
+
+    await this.assertCanAccessPostWorkspace(post, actor);
 
     const prevRevisionRow = post.revisions[0] || null;
     const prevRevisionNumber = post.revision;
@@ -706,6 +723,47 @@ export class CrmPostsService {
     await logCalendarActivity(actor, 'CALENDAR_SUBMITTED', updatedPost, comment ? `Sent for review. Note: ${comment}` : 'Sent for review.');
 
     return this.getPostDetail(postId);
+  }
+
+  /**
+   * Verifies that `actor` is allowed to view or modify `postId` based on workspace assignment.
+   * (Super Admin & Admin anywhere; Manager & User only in their assigned workspaces).
+   */
+  public async assertCanAccessPostWorkspace(
+    postIdOrPost: string | any,
+    actor?: AuthenticatedCrmUser
+  ): Promise<any> {
+    if (!actor) {
+      const err = new Error('Authentication required.') as Error & { statusCode: number; code: string };
+      err.statusCode = 401;
+      err.code = 'UNAUTHORIZED';
+      throw err;
+    }
+
+    let post = postIdOrPost;
+    if (typeof postIdOrPost === 'string' || !postIdOrPost.platform) {
+      const id = typeof postIdOrPost === 'string' ? postIdOrPost : postIdOrPost.id;
+      post = await automationPrisma.post.findUnique({
+        where: { id },
+        include: { contentItem: true },
+      });
+      if (!post) {
+        const err = new Error(`Post ${id} not found`) as Error & { statusCode: number; code: string };
+        err.statusCode = 404;
+        err.code = 'NOT_FOUND';
+        throw err;
+      }
+    }
+
+    const postWorkspace = resolvePostWorkspace(post);
+    const check = checkCanAccessPostWorkspace(actor, postWorkspace);
+    if (!check.allowed) {
+      const err = new Error(check.error) as Error & { statusCode: number; code: string };
+      err.statusCode = check.statusCode;
+      err.code = check.code;
+      throw err;
+    }
+    return post;
   }
 
   /**
@@ -841,10 +899,7 @@ export class CrmPostsService {
       throw new InvalidTransitionError('Comment text cannot be empty');
     }
 
-    const post = await automationPrisma.post.findUnique({ where: { id: postId } });
-    if (!post) {
-      throw new Error(`Post ${postId} not found`);
-    }
+    const post = await this.assertCanAccessPostWorkspace(postId, actor);
 
     const event = await automationPrisma.reviewEvent.create({
       data: {
@@ -868,13 +923,14 @@ export class CrmPostsService {
     actor: AuthenticatedCrmUser,
     comment?: string
   ) {
+    await this.assertCanAccessPostWorkspace(postId, actor);
     const retried = await transition(postId, 'ADMIN_RETRY', {
       actorId: actor.email,
       comment,
     });
     await logCalendarActivity(actor, 'CALENDAR_RETRY', retried, 'Failed post set to approved again for another publish attempt.');
 
-    return this.getPostDetail(postId);
+    return this.getPostDetail(postId, actor);
   }
 
   /**
@@ -886,6 +942,7 @@ export class CrmPostsService {
     url: string,
     comment?: string
   ) {
+    await this.assertCanAccessPostWorkspace(postId, actor);
     const done = await transition(postId, 'MARK_MANUAL_DONE', {
       actorId: actor.email,
       platformUrl: url,
@@ -893,17 +950,18 @@ export class CrmPostsService {
     });
     await logCalendarActivity(actor, 'CALENDAR_POSTED_BY_HAND', done, `Marked as posted by hand: ${url}`);
 
-    return this.getPostDetail(postId);
+    return this.getPostDetail(postId, actor);
   }
 
   /**
    * GET /posts/:id/caption-file-content
    * Loads and extracts text content from the post's caption or attached document file.
    */
-  public async getCaptionFileContent(postId: string, assetId?: string) {
+  public async getCaptionFileContent(postId: string, assetId?: string, actor?: AuthenticatedCrmUser) {
     const post = await automationPrisma.post.findUnique({
       where: { id: postId },
       include: {
+        contentItem: true,
         media: {
           include: { asset: true },
           orderBy: { position: 'asc' },
@@ -913,6 +971,10 @@ export class CrmPostsService {
 
     if (!post) {
       throw new Error(`Post ${postId} not found`);
+    }
+
+    if (actor) {
+      await this.assertCanAccessPostWorkspace(post, actor);
     }
 
     // 1. If post already has non-empty caption text and no specific alternative asset requested

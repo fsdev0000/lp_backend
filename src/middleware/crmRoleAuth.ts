@@ -23,6 +23,9 @@ declare global {
   namespace Express {
     interface Request {
       crmUser?: AuthenticatedCrmUser;
+      crmWorkspace?: string;
+      crmDomain?: string;
+      crmWebsite?: string;
     }
   }
 }
@@ -450,6 +453,10 @@ export async function optionalCrmAuth(req: Request, res: Response, next: NextFun
 
 /**
  * Workspace-level authorization guard.
+ * Resolves the target brand once from workspace, domain, or website,
+ * verifies the user has access to it, and stores resolvedWorkspace,
+ * resolvedDomain, and resolvedWebsite on the request for downstream controllers.
+ *
  * super_admin and admin have universal access to all workspaces.
  * manager and user may only access workspaces assigned in req.crmUser.workspaces.
  */
@@ -463,30 +470,91 @@ export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  const rawTarget =
+  const user = req.crmUser;
+  const isSuperOrAdmin = user.role === 'super_admin' || user.role === 'admin';
+  const allowed = (user.workspaces || []).map((w: string) => normalizeWorkspace(w));
+
+  const rawWorkspace =
     (req.query.workspace as string) ||
-    (req.query.website as string) ||
-    (req.query.domain as string) ||
     (req.headers['x-workspace-id'] as string) ||
-    (req.body && (req.body.workspace || req.body.website || req.body.domain)) ||
-    'leaders_performance';
+    (req.body && req.body.workspace);
 
-  const normalizedWorkspace = normalizeWorkspace(rawTarget);
+  const rawDomain =
+    (req.query.domain as string) ||
+    (req.body && req.body.domain);
 
-  // super_admin and admin always have access to both workspaces
-  if (req.crmUser.role === 'super_admin' || req.crmUser.role === 'admin') {
-    next();
-    return;
+  const rawWebsite =
+    (req.query.website as string) ||
+    (req.body && req.body.website);
+
+  const targets: { type: string; raw: string; normalized: string }[] = [];
+  if (rawWorkspace) targets.push({ type: 'workspace', raw: rawWorkspace, normalized: normalizeWorkspace(rawWorkspace) });
+  if (rawDomain) targets.push({ type: 'domain', raw: rawDomain, normalized: normalizeWorkspace(rawDomain) });
+  if (rawWebsite) targets.push({ type: 'website', raw: rawWebsite, normalized: normalizeWorkspace(rawWebsite) });
+
+  // For non-super/admin: verify every provided parameter is in user's allowed workspaces
+  if (!isSuperOrAdmin) {
+    for (const t of targets) {
+      if (!allowed.includes(t.normalized)) {
+        res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_WORKSPACE',
+          error: `Access denied to workspace "${t.normalized}".`,
+        });
+        return;
+      }
+    }
   }
 
-  const allowed = req.crmUser.workspaces || [];
-  if (!allowed.includes(normalizedWorkspace)) {
-    res.status(403).json({
-      success: false,
-      code: 'FORBIDDEN_WORKSPACE',
-      error: `Access denied to workspace "${normalizedWorkspace}".`,
+  // Check for conflicting targets (e.g. ?workspace=lionel_eersteling&domain=leadersperformance.ae)
+  if (targets.length > 1) {
+    const first = targets[0].normalized;
+    const conflicting = targets.find((t) => t.normalized !== first);
+    if (conflicting) {
+      res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN_WORKSPACE',
+        error: `Conflicting brand parameters: ${targets[0].type} "${targets[0].raw}" conflicts with ${conflicting.type} "${conflicting.raw}".`,
+      });
+      return;
+    }
+  }
+
+  // Resolve canonical workspace
+  let resolvedWorkspace: string;
+  if (targets.length > 0) {
+    resolvedWorkspace = targets[0].normalized;
+  } else if (!isSuperOrAdmin && allowed.length === 1) {
+    resolvedWorkspace = allowed[0];
+  } else if (!isSuperOrAdmin && allowed.length > 0) {
+    resolvedWorkspace = allowed.includes('leaders_performance') ? 'leaders_performance' : allowed[0];
+  } else {
+    resolvedWorkspace = 'leaders_performance';
+  }
+
+  const resolvedDomain = resolvedWorkspace === 'lionel_eersteling' ? 'lioneleersteling.com' : 'leadersperformance.ae';
+  const resolvedWebsite = resolvedWorkspace;
+
+  req.crmWorkspace = resolvedWorkspace;
+  req.crmDomain = resolvedDomain;
+  req.crmWebsite = resolvedWebsite;
+
+  // Sync req.query so any helper reading query receives the resolved value
+  try {
+    const updatedQuery = {
+      ...(req.query || {}),
+      domain: resolvedDomain,
+      workspace: resolvedWorkspace,
+      website: resolvedWebsite,
+    };
+    Object.defineProperty(req, 'query', {
+      value: updatedQuery,
+      writable: true,
+      configurable: true,
+      enumerable: true,
     });
-    return;
+  } catch (_e) {
+    // fallback
   }
 
   next();
@@ -581,6 +649,42 @@ export function checkCanApprovePostWorkspace(
       statusCode: 403,
       code: 'FORBIDDEN_WORKSPACE',
       error: `You can only approve or publish posts in your assigned workspaces (${assigned.join(', ') || 'none'}).`,
+    };
+  }
+
+  return { allowed: true, statusCode: 200, code: 'OK', error: '' };
+}
+
+/**
+ * Verifies that `crmUser` is allowed to access/view/edit `postWorkspace`
+ * - super_admin / admin: allowed anywhere
+ * - manager / user: allowed only in assigned workspaces
+ */
+export function checkCanAccessPostWorkspace(
+  crmUser: AuthenticatedCrmUser | undefined | null,
+  postWorkspace?: string | null
+): { allowed: boolean; statusCode: number; code: string; error: string } {
+  if (!crmUser) {
+    return {
+      allowed: false,
+      statusCode: 401,
+      code: 'UNAUTHORIZED',
+      error: 'Authentication required.',
+    };
+  }
+
+  if (crmUser.role === 'super_admin' || crmUser.role === 'admin') {
+    return { allowed: true, statusCode: 200, code: 'OK', error: '' };
+  }
+
+  const targetWs = normalizeWorkspace(postWorkspace);
+  const assigned = Array.isArray(crmUser.workspaces) ? crmUser.workspaces : [];
+  if (!assigned.includes(targetWs)) {
+    return {
+      allowed: false,
+      statusCode: 403,
+      code: 'FORBIDDEN_WORKSPACE',
+      error: `You do not have access to posts in workspace '${targetWs}' (assigned: ${assigned.join(', ') || 'none'}).`,
     };
   }
 

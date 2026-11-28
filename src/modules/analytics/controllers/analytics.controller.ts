@@ -3,13 +3,21 @@ import { AnalyticsService } from '../services/analytics.service';
 import { SseStreamManager } from '../realtime/sseStreamManager';
 import { analyticsReportGeneratorService } from '../services/analyticsReportGenerator.service';
 
+function getTargetDomain(req: Request): string {
+  return (req as any).crmDomain || (req.query.domain as string) || 'leadersperformance.ae';
+}
+
+function getTargetWebsite(req: Request): string {
+  return (req as any).crmWebsite || (req.query.website as string) || (req.query.domain as string) || 'leaders_performance';
+}
+
 export class AnalyticsController {
   private service = new AnalyticsService();
 
   public getOverview = async (req: Request, res: Response): Promise<void> => {
     try {
       const range = (req.query.range as string) || '30d';
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const data = await this.service.getOverview(range, domain);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
@@ -24,7 +32,7 @@ export class AnalyticsController {
   public getChannels = async (req: Request, res: Response): Promise<void> => {
     try {
       const range = (req.query.range as string) || '30d';
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const data = await this.service.getChannels(range, domain);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
@@ -40,7 +48,7 @@ export class AnalyticsController {
     try {
       const limit = parseInt(req.query.limit as string, 10) || 100;
       const range = (req.query.range as string) || '30d';
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
 
@@ -69,7 +77,7 @@ export class AnalyticsController {
 
   public getTelemetry = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = ((req.query.domain as string) || (req.query.website as string) || 'leaders_performance') as string;
+      const website = getTargetWebsite(req);
       const data = await this.service.getTelemetry(website);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
@@ -114,7 +122,7 @@ export class AnalyticsController {
 
   public getReportsSnapshot = async (req: Request, res: Response): Promise<void> => {
     try {
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const range = req.query.range as string | undefined;
       const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
       const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
@@ -133,7 +141,7 @@ export class AnalyticsController {
 
   public getAiReferrals = async (req: Request, res: Response): Promise<void> => {
     try {
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const range = (req.query.range as string) || '30d';
       const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
       const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
@@ -174,7 +182,7 @@ export class AnalyticsController {
 
   public getClaritySessions = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = ((req.query.domain as string) || (req.query.website as string) || 'leaders_performance') as string;
+      const website = getTargetWebsite(req);
       const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
       const data = await this.service.getClaritySessions(limit, website);
       res.status(200).json({ success: true, data });
@@ -189,7 +197,7 @@ export class AnalyticsController {
 
   public getClarityAnalytics = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = ((req.query.domain as string) || (req.query.website as string) || 'leaders_performance') as string;
+      const website = getTargetWebsite(req);
       const days = typeof req.query.days === 'string' ? parseInt(req.query.days, 10) : 1;
       const data = await this.service.getClarityAnalytics(website, false, days);
       res.status(200).json({ success: true, data });
@@ -204,7 +212,7 @@ export class AnalyticsController {
 
   public refreshClarityAnalytics = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = (req.body?.domain || req.body?.website || req.query.domain || req.query.website || 'leaders_performance') as string;
+      const website = getTargetWebsite(req);
       const data = await this.service.refreshClarityAnalytics(website);
       res.status(200).json({ success: true, message: 'Clarity cache refreshed', data });
     } catch (error: any) {
@@ -218,7 +226,7 @@ export class AnalyticsController {
 
   public getClarityRecordings = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = ((req.query.domain as string) || (req.query.website as string) || 'leaders_performance') as string;
+      const website = getTargetWebsite(req);
       const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
       const data = await this.service.getClarityRecordings(website, limit);
       res.status(200).json({ success: true, data });
@@ -233,7 +241,7 @@ export class AnalyticsController {
 
   public getClarityStatus = async (req: Request, res: Response): Promise<void> => {
     try {
-      const website = ((req.query.domain as string) || (req.query.website as string) || undefined) as string | undefined;
+      const website = getTargetWebsite(req);
       const data = await this.service.getClarityStatus(website);
       res.status(200).json({ success: true, data });
     } catch (error: any) {
@@ -376,7 +384,7 @@ export class AnalyticsController {
   public exportReport = async (req: Request, res: Response): Promise<void> => {
     try {
       const format = ((req.query.format as string) || 'pdf').toLowerCase();
-      const domain = (req.query.domain as string) || 'leadersperformance.ae';
+      const domain = getTargetDomain(req);
       const range = (req.query.range as string) || '30d';
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
@@ -431,7 +439,7 @@ export class AnalyticsController {
   public dispatchReport = async (req: Request, res: Response): Promise<void> => {
     try {
       const frequency = ((req.body?.frequency || req.query.frequency || 'WEEKLY') as string).toUpperCase() as any;
-      const domain = (req.body?.domain || req.query.domain || 'leadersperformance.ae') as string;
+      const domain = getTargetDomain(req);
 
       const result = await analyticsReportGeneratorService.dispatchExecutiveAnalyticsReport({
         frequency,
