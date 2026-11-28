@@ -463,25 +463,15 @@ export function requireWorkspaceAuth(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  const rawDomain = (req.query.domain as string) || (req.body && req.body.domain);
-  let normalizedWorkspace = normalizeWorkspace(
+  const rawTarget =
     (req.query.workspace as string) ||
     (req.query.website as string) ||
-    rawDomain ||
+    (req.query.domain as string) ||
     (req.headers['x-workspace-id'] as string) ||
-    (req.body && (req.body.workspace || req.body.website)) ||
-    'leaders_performance'
-  );
+    (req.body && (req.body.workspace || req.body.website || req.body.domain)) ||
+    'leaders_performance';
 
-  // Issue 9: Strict domain-to-workspace mapping so URL params cannot bypass brand isolation
-  if (rawDomain) {
-    const domainNorm = rawDomain.toLowerCase().trim();
-    if (domainNorm.includes('lioneleersteling') || domainNorm === 'le' || domainNorm.includes('personal')) {
-      normalizedWorkspace = 'lionel_eersteling';
-    } else if (domainNorm.includes('leadersperformance') || domainNorm === 'lp') {
-      normalizedWorkspace = 'leaders_performance';
-    }
-  }
+  const normalizedWorkspace = normalizeWorkspace(rawTarget);
 
   // super_admin and admin always have access to both workspaces
   if (req.crmUser.role === 'super_admin' || req.crmUser.role === 'admin') {
