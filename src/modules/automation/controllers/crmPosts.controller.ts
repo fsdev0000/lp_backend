@@ -5,6 +5,14 @@ import { InvalidTransitionError } from '../state/transition';
 import { FatalError } from '../publisher/adapters/base.adapter';
 
 function handleControllerError(res: Response, err: any, fallbackMessage: string): void {
+  if (err?.statusCode === 401) {
+    res.status(401).json({
+      success: false,
+      code: err?.code || 'UNAUTHORIZED',
+      error: err.message,
+    });
+    return;
+  }
   if (err?.statusCode === 403) {
     res.status(403).json({
       success: false,
@@ -64,7 +72,7 @@ export class CrmPostsController {
   public getPostDetail = async (req: Request, res: Response): Promise<void> => {
     try {
       const postId = String(req.params.id || '').trim();
-      const post = await crmPostsService.getPostDetail(postId);
+      const post = await crmPostsService.getPostDetail(postId, req.crmUser);
       res.status(200).json({
         success: true,
         data: post,
@@ -78,7 +86,7 @@ export class CrmPostsController {
     try {
       const postId = String(req.params.id || '').trim();
       const assetId = req.query.assetId ? String(req.query.assetId) : undefined;
-      const content = await crmPostsService.getCaptionFileContent(postId, assetId);
+      const content = await crmPostsService.getCaptionFileContent(postId, assetId, req.crmUser);
       res.status(200).json({
         success: true,
         data: content,
@@ -280,15 +288,21 @@ export class CrmPostsController {
   public publishNow = async (req: Request, res: Response): Promise<void> => {
     try {
       const postId = String(req.params.id || '').trim();
-      if (req.crmUser) {
-        await crmPostsService.assertCanApprovePost(postId, req.crmUser);
+      if (!req.crmUser) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Authentication required.',
+        });
+        return;
       }
+      await crmPostsService.assertCanApprovePost(postId, req.crmUser);
       const outcome = await publisherService.publishSinglePost(postId, {
         now: new Date(),
         forceImmediate: true,
-        actorId: req.crmUser?.email || 'crm-publish-now',
+        actorId: req.crmUser.email || 'crm-publish-now',
       });
-      const detail = await crmPostsService.getPostDetail(postId);
+      const detail = await crmPostsService.getPostDetail(postId, req.crmUser);
       res.status(200).json({
         success: true,
         data: detail,

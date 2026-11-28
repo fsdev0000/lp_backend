@@ -90,11 +90,14 @@ export async function authenticateCmsAdmin(req: Request): Promise<CmsAuthResult>
         return { success: true, user: crmUser };
       }
       if (crmUser.role === 'manager') {
-        if (!crmUser.workspaces.includes(targetWorkspace)) {
+        const allowed = Array.isArray(crmUser.workspaces)
+          ? crmUser.workspaces.map((w: string) => normalizeWorkspace(w))
+          : [];
+        if (!allowed.includes('leaders_performance')) {
           return {
             success: false,
             status: 403,
-            error: `Forbidden: Manager does not have access to workspace "${targetWorkspace}".`,
+            error: 'Forbidden: CMS texts belong to leadersperformance.ae. Manager does not have access to workspace "leaders_performance".',
           };
         }
         return { success: true, user: crmUser };
@@ -126,11 +129,14 @@ export async function authenticateCmsAdmin(req: Request): Promise<CmsAuthResult>
           return { success: true, user: crmUser };
         }
         if (crmUser.role === 'manager') {
-          if (!crmUser.workspaces.includes(targetWorkspace)) {
+          const allowed = Array.isArray(crmUser.workspaces)
+            ? crmUser.workspaces.map((w: string) => normalizeWorkspace(w))
+            : [];
+          if (!allowed.includes('leaders_performance')) {
             return {
               success: false,
               status: 403,
-              error: `Forbidden: Manager does not have access to workspace "${targetWorkspace}".`,
+              error: 'Forbidden: CMS texts belong to leadersperformance.ae. Manager does not have access to workspace "leaders_performance".',
             };
           }
           return { success: true, user: crmUser };

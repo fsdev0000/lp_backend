@@ -193,4 +193,58 @@ describe('requireApiKey Service Key Scoping & Boundary Enforcement', () => {
       expect(res.body.success).toBe(false);
     });
   });
+
+  describe('Condition 4: Service keys cannot bypass route scoping via query string tricks', () => {
+    it('blocks ARTICLES_API_KEY on /api/v1/content/posts?x=/articles/ with 403 Forbidden', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts?x=/articles/')
+        .set('x-api-key', ARTICLES_KEY);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks ARTICLES_API_KEY on /api/v1/social/linkedin/share?r=/articles with 403 Forbidden', async () => {
+      const res = await request(app)
+        .post('/api/v1/social/linkedin/share?r=/articles')
+        .set('x-api-key', ARTICLES_KEY)
+        .send({ text: 'Bypass attempt' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks NEWSLETTER_API_KEY on /api/v1/content/posts/123?n=/newsletter with 403 Forbidden', async () => {
+      const res = await request(app)
+        .get('/api/v1/content/posts/123?n=/newsletter')
+        .set('x-api-key', NEWSLETTER_KEY);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks ARTICLES_API_KEY on /api/v1/social/instagram/disconnect?foo=/articles/ with 403 Forbidden', async () => {
+      const res = await request(app)
+        .post('/api/v1/social/instagram/disconnect?foo=/articles/')
+        .set('x-api-key', ARTICLES_KEY);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+
+    it('blocks NEWSLETTER_API_KEY on /api/v1/social/tiktok/publish?param=/newsletter/ with 403 Forbidden', async () => {
+      const res = await request(app)
+        .post('/api/v1/social/tiktok/publish?param=/newsletter/')
+        .set('x-api-key', NEWSLETTER_KEY)
+        .send({ text: 'Bypass attempt' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Forbidden: Service API key is not authorized');
+    });
+  });
 });

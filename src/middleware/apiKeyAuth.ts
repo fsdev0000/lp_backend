@@ -40,12 +40,17 @@ async function attachSignedInUser(req: Request, token: string | undefined, valid
   }
 }
 
-function isArticlesRoute(url: string): boolean {
-  return /(?:^|\/)(?:api\/)?(?:v1\/)?articles(?:\/|$)/i.test(url);
+function getCleanPath(req: Request): string {
+  const raw = req.baseUrl ? `${req.baseUrl}${req.path}` : (req.path || req.originalUrl || '');
+  return raw.split('?')[0].trim();
 }
 
-function isNewsletterRoute(url: string): boolean {
-  return /(?:^|\/)(?:api\/)?(?:v1\/)?newsletter(?:\/|$)/i.test(url);
+function isArticlesRoute(path: string): boolean {
+  return /^\/(?:api\/)?(?:v1\/)?articles(?:\/|$)/i.test(path);
+}
+
+function isNewsletterRoute(path: string): boolean {
+  return /^\/(?:api\/)?(?:v1\/)?newsletter(?:\/|$)/i.test(path);
 }
 
 /**
@@ -82,7 +87,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
   const serviceKeys = [...articlesKeys, ...newsletterKeys];
   const allValidKeys = [...crmAdminKeys, ...serviceKeys];
 
-  const fullUrl = req.originalUrl || (req.baseUrl ? `${req.baseUrl}${req.path}` : req.path) || '';
+  const cleanPath = getCleanPath(req);
 
   // Extract raw candidate key from x-api-key, Bearer, or Basic
   let candidateKey: string | undefined;
@@ -144,12 +149,12 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     const isNewsletterKey = newsletterKeys.includes(candidateKey);
 
     // ARTICLES_API_KEY only works on articles routes
-    if (isArticlesKey && isArticlesRoute(fullUrl)) {
+    if (isArticlesKey && isArticlesRoute(cleanPath)) {
       return next();
     }
 
     // NEWSLETTER keys only work on newsletter routes
-    if (isNewsletterKey && isNewsletterRoute(fullUrl)) {
+    if (isNewsletterKey && isNewsletterRoute(cleanPath)) {
       return next();
     }
 
