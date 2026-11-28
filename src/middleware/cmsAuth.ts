@@ -70,12 +70,10 @@ export async function authenticateCmsAdmin(req: Request): Promise<CmsAuthResult>
     };
   }
 
-  const targetWorkspace = normalizeWorkspace(
+  const targetWorkspace =
     (req.query?.workspace as string) ||
     (req.body?.workspace as string) ||
-    (req.headers['x-workspace-id'] as string) ||
-    'leaders_performance'
-  );
+    'leaders_performance';
 
   // 2. Check signed expiring CRM session token (lp_sess.*)
   if (token.startsWith('lp_sess.')) {
