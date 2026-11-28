@@ -174,7 +174,8 @@ export class ContentController {
   public deletePost = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);
-      const result = await this.service.deletePost(id, req.ip, actorOf(req));
+      const user = (req as any).crmUser || (req as any).user;
+      const result = await this.service.deletePost(id, req.ip, actorOf(req), user?.role, user);
       res.status(200).json(result);
     } catch (error: any) {
       console.error('[ContentController] deletePost error:', error);
