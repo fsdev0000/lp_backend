@@ -1,6 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
-import { getSupabaseUrl, getSupabaseServiceKey } from '../../services/supabaseStorageService';
+import {
+  getSupabaseUrl,
+  getSupabaseServiceKey,
+  createIsolatedAuthClient,
+} from '../../services/supabaseStorageService';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
 import {
   ALL_WORKSPACES,
@@ -12,7 +15,7 @@ import {
 import {
   generateCrmSessionToken,
   isUserSessionRevoked,
-  revokeUserSessions,
+  revokeSessionToken,
   verifyCrmSessionToken,
 } from '../../utils/sessionToken';
 import { crmUsersService, resolveCrmOrigin } from '../../modules/users/services/crmUsers.service';
@@ -58,7 +61,7 @@ export function resetAuthRateLimitsForTests(): void {
  */
 authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
   try {
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown-ip';
+    const clientIp = req.ip || 'unknown-ip';
     if (!checkRateLimit(ipRateBuckets, `login-ip:${clientIp}`, 10, 60 * 1000)) {
       res.status(429).json({ success: false, error: 'Too many login attempts. Please try again in a minute.' });
       return;
@@ -89,47 +92,10 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 
     // 1. Try Supabase Auth signInWithPassword using an ISOLATED, non-cached client
     try {
-      if (
-        process.env.NODE_ENV === 'test' &&
-        process.env.CRM_ADMIN_EMAIL &&
-        cleanEmail === process.env.CRM_ADMIN_EMAIL.toLowerCase() &&
-        process.env.CRM_ADMIN_PASSWORD &&
-        cleanPassword === process.env.CRM_ADMIN_PASSWORD
-      ) {
-        const sessionToken = generateCrmSessionToken({
-          id: 'test-admin-id',
-          email: cleanEmail,
-          name: 'Test Administrator',
-          role: 'admin',
-          workspaces: ['leaders_performance', 'lionel_eersteling'],
-          roleVersion: 2,
-        });
-
-        res.status(200).json({
-          success: true,
-          user: {
-            id: 'test-admin-id',
-            email: cleanEmail,
-            name: 'Test Administrator',
-            role: 'admin',
-            workspaces: ['leaders_performance', 'lionel_eersteling'],
-            roleVersion: 2,
-          },
-          token: sessionToken,
-          sessionToken,
-        });
-        return;
-      }
       const supabaseUrl = getSupabaseUrl();
       const serviceKey = await getSupabaseServiceKey();
       if (supabaseUrl && serviceKey) {
-        const isolatedAuthClient = createClient(supabaseUrl, serviceKey, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
-        });
+        const isolatedAuthClient = createIsolatedAuthClient(supabaseUrl, serviceKey);
 
         const { data, error } = await isolatedAuthClient.auth.signInWithPassword({
           email: cleanEmail,
@@ -233,20 +199,10 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 authRouter.post('/logout', async (req: Request, res: Response): Promise<void> => {
   try {
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const crmUser = (req as any).crmUser;
-
-    if (crmUser?.id || crmUser?.email) {
-      revokeUserSessions(crmUser.id, crmUser.email);
-    } else if (token) {
-      try {
-        const payload = verifyCrmSessionToken(token);
-        if (payload?.id || payload?.email) {
-          revokeUserSessions(payload.id, payload.email);
-        }
-      } catch {}
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim() || (req.body?.token as string);
+    if (token) {
+      revokeSessionToken(token);
     }
-
     res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error?.message || 'Logout failed' });

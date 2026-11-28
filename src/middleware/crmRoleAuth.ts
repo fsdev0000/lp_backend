@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import {
   verifyCrmSessionToken,
   isUserSessionRevoked,
+  isTokenRevoked,
   revokeUserSessions,
   restoreUserSessions,
 } from '../utils/sessionToken';
@@ -361,6 +362,14 @@ export async function requireCrmAuth(req: Request, res: Response, next: NextFunc
   const candidateKey = apiKeyHeader?.trim() || bearerToken;
 
   if (bearerToken && !crmAdminKeys.includes(bearerToken)) {
+    if (isTokenRevoked(bearerToken)) {
+      res.status(401).json({
+        success: false,
+        code: 'UNAUTHORIZED',
+        error: 'Session has been invalidated. Please log in again.',
+      });
+      return;
+    }
     // 1. Internal signed CRM session token (lp_sess.*)
     if (bearerToken.startsWith('lp_sess.')) {
       const verified = verifyCrmSessionToken(bearerToken);

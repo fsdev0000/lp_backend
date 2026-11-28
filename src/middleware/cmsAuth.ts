@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { getSupabaseClient } from '../services/supabaseStorageService';
-import { verifyCrmSessionToken } from '../utils/sessionToken';
+import { verifyCrmSessionToken, isTokenRevoked } from '../utils/sessionToken';
 import {
   crmUserFromSessionPayload,
   crmUserFromSupabase,
@@ -60,6 +60,14 @@ export async function authenticateCmsAdmin(req: Request): Promise<CmsAuthResult>
   }
 
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+
+  if (isTokenRevoked(token)) {
+    return {
+      success: false,
+      status: 401,
+      error: 'Unauthorized: Session has been invalidated. Please log in again.',
+    };
+  }
 
   if (envKeys.includes(token)) {
     return {
