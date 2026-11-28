@@ -23,7 +23,7 @@ export interface CreatePostDto {
 }
 
 export interface PostFilterDto {
-  workspace?: string;
+  workspace?: string | string[];
   platform?: string;
   status?: string;
   search?: string;
@@ -45,6 +45,10 @@ export class ContentService {
   private tiktok = new TikTokAdapter();
   private instagramPublishing = new InstagramPublishingService();
   private static legacyPurged = false;
+
+  public static resetLegacyPurgeState(): void {
+    ContentService.legacyPurged = false;
+  }
 
   constructor() {
     this.purgeLegacySeedData().catch(() => {
@@ -88,6 +92,17 @@ export class ContentService {
           }
         }
       }
+
+      // Migrate existing TikTok posts previously saved under leaders_performance to lionel_eersteling
+      await contentPrisma.socialPost.updateMany({
+        where: {
+          platform: 'TIKTOK',
+          workspace: 'leaders_performance',
+        },
+        data: {
+          workspace: 'lionel_eersteling',
+        },
+      });
     } catch {
       // Ignore if DB is unreachable
     }
@@ -101,7 +116,11 @@ export class ContentService {
 
     const where: any = {};
     if (filter.workspace) {
-      where.workspace = filter.workspace;
+      if (Array.isArray(filter.workspace)) {
+        where.workspace = { in: filter.workspace };
+      } else {
+        where.workspace = filter.workspace;
+      }
     }
     if (filter.platform && filter.platform !== 'ALL') {
       where.platform = filter.platform.toUpperCase();
@@ -740,10 +759,12 @@ export class ContentService {
   /**
    * Retrieves pending posts for the Approval Desk
    */
-  public async getApprovalDeskPosts(workspace?: string) {
+  public async getApprovalDeskPosts(workspace?: string | string[]) {
     await this.purgeLegacySeedData();
     const where: any = { status: 'PENDING_REVIEW' };
-    if (workspace) {
+    if (Array.isArray(workspace)) {
+      where.workspace = { in: workspace };
+    } else if (workspace) {
       where.workspace = workspace;
     }
     return contentPrisma.socialPost.findMany({
@@ -755,9 +776,14 @@ export class ContentService {
   /**
    * Returns approval queue analytics
    */
-  public async getApprovalStats(workspace?: string) {
+  public async getApprovalStats(workspace?: string | string[]) {
     await this.purgeLegacySeedData();
-    const baseWhere: any = workspace ? { workspace } : {};
+    const baseWhere: any = {};
+    if (Array.isArray(workspace)) {
+      baseWhere.workspace = { in: workspace };
+    } else if (workspace) {
+      baseWhere.workspace = workspace;
+    }
     const [pending, scheduled, published, rejected, total] = await Promise.all([
       contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'PENDING_REVIEW' } }),
       contentPrisma.socialPost.count({ where: { ...baseWhere, status: 'SCHEDULED' } }),
