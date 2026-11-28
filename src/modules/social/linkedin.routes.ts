@@ -20,8 +20,8 @@ router.get('/page/profile', requireApiKey, controller.getProfile);
 router.post('/disconnect', requireApiKey, requireCrmRoles('super_admin', 'admin'), controller.disconnect);
 router.post('/page/disconnect', requireApiKey, requireCrmRoles('super_admin', 'admin'), controller.disconnect);
 
-// Direct Publishing, Posts & Internal DB Synchronization (Protected by manager/super_admin auth + kill switch)
-router.post('/share', requireApiKey, requireCrmRoles('super_admin', 'manager'), controller.publishDirect);
+// Direct Publishing, Posts & Internal DB Synchronization (Protected by super_admin auth + kill switch)
+router.post('/share', requireApiKey, requireCrmRoles('super_admin'), controller.publishDirect);
 router.get('/posts', requireApiKey, controller.getPosts);
 router.post('/sync', requireApiKey, controller.syncAll);
 router.get('/ping', requireApiKey, controller.ping);

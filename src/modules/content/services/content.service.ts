@@ -292,18 +292,50 @@ export class ContentService {
   /**
    * Deletes a post from CRM
    */
-  public async deletePost(id: string, ipAddress?: string, actor?: string, userRole?: string): Promise<{ success: boolean }> {
+  public async deletePost(
+    id: string,
+    ipAddress?: string,
+    actor?: string,
+    userRole?: string,
+    user?: any
+  ): Promise<{ success: boolean }> {
     const post = await this.getPostById(id);
 
-    // Issue 5: Protect published and scheduled posts from unauthorized deletion
-    if (post.status === 'PUBLISHED') {
-      throw createHttpError('Cannot delete an already published post.', 400);
+    // 1. Role is mandatory; deny when role is missing or invalid
+    if (!userRole) {
+      throw createHttpError('Forbidden: User role is required to delete posts.', 403);
     }
 
-    if (post.status === 'SCHEDULED' || post.status === 'APPROVED') {
-      if (userRole && userRole !== 'super_admin' && userRole !== 'manager' && userRole !== 'admin') {
-        throw createHttpError('Only managers or administrators can delete scheduled or approved posts.', 403);
+    // 2. User role: may only delete their own drafts
+    if (userRole === 'user') {
+      if (post.status !== 'DRAFT') {
+        throw createHttpError('Forbidden: Users may only delete draft posts.', 403);
       }
+
+      const postAuthor = (post.author || '').trim().toLowerCase();
+      const userEmail = (user?.email || '').trim().toLowerCase();
+      const userName = (user?.name || '').trim().toLowerCase();
+      const userId = (user?.id || '').trim().toLowerCase();
+      const actorName = (actor || '').trim().toLowerCase();
+
+      const isAuthor = Boolean(
+        postAuthor &&
+          ((userEmail && postAuthor === userEmail) ||
+            (userName && postAuthor === userName) ||
+            (userId && postAuthor === userId) ||
+            (actorName && postAuthor === actorName && actorName !== 'unknown user' && actorName !== 'api key'))
+      );
+
+      if (!isAuthor) {
+        throw createHttpError('Forbidden: Users may only delete their own drafts.', 403);
+      }
+    } else if (['super_admin', 'admin', 'manager'].includes(userRole)) {
+      // 3. Managers and above may delete any post, except published posts
+      if (post.status === 'PUBLISHED') {
+        throw createHttpError('Cannot delete an already published post.', 400);
+      }
+    } else {
+      throw createHttpError('Forbidden: Insufficient permissions to delete posts.', 403);
     }
 
     await contentPrisma.socialPost.delete({ where: { id } });
