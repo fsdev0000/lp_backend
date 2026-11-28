@@ -7,6 +7,7 @@ import { analyticsRoutes } from '../modules/analytics/analytics.routes';
 import { LinkedInAdapter, socialPrisma } from '../modules/social/adapters/linkedin.adapter';
 import { ContentService, contentPrisma } from '../modules/content/services/content.service';
 import { LinkedInSchedulerJob } from '../modules/content/jobs/linkedinSchedulerJob';
+import { safeDecryptToken } from '../modules/automation/crypto/tokenCrypto';
 import {
   LinkedInAnalyticsAdapter,
   analyticsPrisma,
@@ -698,10 +699,10 @@ describe('Social CRM & Content Studio API Suite (Checklist Items 1–15)', () =>
       expect(shareRes.body.data.post.status).toBe('PUBLISHED');
       expect(shareRes.body.data.post.platformPostId).toBe('urn:li:share:999888777');
 
-      // 2. Verify token was refreshed and persisted in DB
+      // 2. Verify token was refreshed and persisted in DB (encrypted at rest)
       const updatedConn = mockConnections.get('LINKEDIN');
-      expect(updatedConn.accessToken).toBe('refreshed-internal-access-token');
-      expect(updatedConn.refreshToken).toBe('new-refresh-token');
+      expect(safeDecryptToken(updatedConn.accessToken)).toBe('refreshed-internal-access-token');
+      expect(safeDecryptToken(updatedConn.refreshToken)).toBe('new-refresh-token');
 
       // 3. Frontend calls GET /api/v1/social/linkedin/posts to retrieve DB posts with live synced metrics
       const postsRes = await request(app)
