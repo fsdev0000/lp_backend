@@ -237,7 +237,13 @@ export class InstagramAdapter {
       if (InstagramAdapter.memoryConnection.status === 'DISCONNECTED') {
         return null;
       }
-      return InstagramAdapter.memoryConnection;
+      return {
+        ...InstagramAdapter.memoryConnection,
+        accessToken: safeDecryptToken(InstagramAdapter.memoryConnection.accessToken) || InstagramAdapter.memoryConnection.accessToken,
+        refreshToken: InstagramAdapter.memoryConnection.refreshToken
+          ? (safeDecryptToken(InstagramAdapter.memoryConnection.refreshToken) || InstagramAdapter.memoryConnection.refreshToken)
+          : null,
+      };
     }
 
     // Fall back to preconfigured Environment System User token ONLY if not explicitly disconnected
@@ -330,12 +336,22 @@ export class InstagramAdapter {
         create: payload,
         update: payload,
       });
-      InstagramAdapter.memoryConnection = saved;
-      return saved;
+      const decrypted = {
+        ...saved,
+        accessToken: safeDecryptToken(saved.accessToken) || data.accessToken,
+        refreshToken: saved.refreshToken ? (safeDecryptToken(saved.refreshToken) || data.refreshToken) : null,
+      };
+      InstagramAdapter.memoryConnection = decrypted;
+      return decrypted;
     } catch (e: any) {
       console.warn('[InstagramAdapter] DB saveConnection notice:', e?.message);
-      InstagramAdapter.memoryConnection = payload;
-      return payload;
+      const fallback = {
+        ...payload,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken || null,
+      };
+      InstagramAdapter.memoryConnection = fallback;
+      return fallback;
     }
   }
 

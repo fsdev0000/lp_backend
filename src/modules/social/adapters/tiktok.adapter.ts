@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'crypto';
 import { socialPrisma } from './linkedin.adapter';
+import { safeEncryptToken, safeDecryptToken } from '../../automation/crypto/tokenCrypto';
 
 export const TIKTOK_PLATFORM = 'TIKTOK';
 export const TIKTOK_DEFAULT_SCOPES = [
@@ -368,10 +369,16 @@ export class TikTokAdapter {
 
   public async getActiveConnection(autoRefresh = true) {
     try {
-      const conn = await socialPrisma.socialAccountConnection.findUnique({
+      const rawConn = await socialPrisma.socialAccountConnection.findUnique({
         where: { platform: TIKTOK_PLATFORM },
       });
-      if (!conn) return null;
+      if (!rawConn) return null;
+
+      const conn = {
+        ...rawConn,
+        accessToken: safeDecryptToken(rawConn.accessToken) || rawConn.accessToken,
+        refreshToken: rawConn.refreshToken ? (safeDecryptToken(rawConn.refreshToken) || rawConn.refreshToken) : rawConn.refreshToken,
+      };
 
       // Item 7: Proactive Token Refresh before expiry
       if (autoRefresh && conn.refreshToken && conn.tokenExpiresAt) {
@@ -382,16 +389,26 @@ export class TikTokAdapter {
             console.log('[TikTokAdapter] Proactively refreshing expiring TikTok access token...');
             const refreshed = await this.refreshAccessToken(conn.refreshToken);
             const expiresAt = new Date(Date.now() + (refreshed.expires_in || 86400) * 1000);
-            return await socialPrisma.socialAccountConnection.update({
+            const encAccess = safeEncryptToken(refreshed.access_token) || refreshed.access_token;
+            const encRefresh = (refreshed.refresh_token || conn.refreshToken)
+              ? (safeEncryptToken(refreshed.refresh_token || conn.refreshToken) || (refreshed.refresh_token || conn.refreshToken))
+              : null;
+
+            const updated = await socialPrisma.socialAccountConnection.update({
               where: { platform: TIKTOK_PLATFORM },
               data: {
-                accessToken: refreshed.access_token,
-                refreshToken: refreshed.refresh_token || conn.refreshToken,
+                accessToken: encAccess,
+                refreshToken: encRefresh,
                 tokenExpiresAt: expiresAt,
                 status: 'HEALTHY',
                 lastSyncAt: new Date(),
               },
             });
+            return {
+              ...updated,
+              accessToken: refreshed.access_token,
+              refreshToken: refreshed.refresh_token || conn.refreshToken,
+            };
           } catch (refErr: any) {
             console.warn('[TikTokAdapter] Proactive token refresh failed:', refErr?.message);
           }
@@ -416,15 +433,18 @@ export class TikTokAdapter {
     metadata?: any;
   }) {
     const expiresAt = new Date(Date.now() + (data.expiresInSeconds || 86400) * 1000);
-    return socialPrisma.socialAccountConnection.upsert({
+    const encAccessToken = safeEncryptToken(data.accessToken) || data.accessToken;
+    const encRefreshToken = data.refreshToken ? (safeEncryptToken(data.refreshToken) || data.refreshToken) : null;
+
+    const saved = await socialPrisma.socialAccountConnection.upsert({
       where: { platform: TIKTOK_PLATFORM },
       create: {
         platform: TIKTOK_PLATFORM,
         accountName: data.accountName,
         accountUrn: data.accountUrn,
         profilePictureUrl: data.profilePictureUrl || null,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || null,
+        accessToken: encAccessToken,
+        refreshToken: encRefreshToken,
         tokenExpiresAt: expiresAt,
         scopes: data.scopes || TIKTOK_DEFAULT_SCOPES,
         status: 'HEALTHY',
@@ -436,8 +456,8 @@ export class TikTokAdapter {
         accountName: data.accountName,
         accountUrn: data.accountUrn,
         profilePictureUrl: data.profilePictureUrl || null,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || undefined,
+        accessToken: encAccessToken,
+        refreshToken: encRefreshToken || undefined,
         tokenExpiresAt: expiresAt,
         scopes: data.scopes || TIKTOK_DEFAULT_SCOPES,
         status: 'HEALTHY',
@@ -446,6 +466,12 @@ export class TikTokAdapter {
         metadata: data.metadata || undefined,
       },
     });
+
+    return {
+      ...saved,
+      accessToken: safeDecryptToken(saved.accessToken) || data.accessToken,
+      refreshToken: saved.refreshToken ? (safeDecryptToken(saved.refreshToken) || data.refreshToken) : null,
+    };
   }
 
   public async disconnect(): Promise<void> {
