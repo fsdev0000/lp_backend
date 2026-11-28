@@ -25,6 +25,21 @@ export function resetSupabaseStorageClient() {
   cachedClient = null;
 }
 
+export function createIsolatedAuthClient(url?: string, key?: string): SupabaseClient {
+  if (mockClient) {
+    return mockClient as SupabaseClient;
+  }
+  const supabaseUrl = url || getSupabaseUrl();
+  const serviceKey = key || process.env.SUPABASE_SERVICE_ROLE_KEY || 'mock-service-key';
+  return createClient(supabaseUrl, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
 export function getSupabaseUrl(): string {
   if (process.env.SUPABASE_URL) return process.env.SUPABASE_URL;
   if (process.env.VITE_SUPABASE_URL) return process.env.VITE_SUPABASE_URL;

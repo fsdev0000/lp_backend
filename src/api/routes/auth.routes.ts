@@ -1,6 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
-import { getSupabaseUrl, getSupabaseServiceKey } from '../../services/supabaseStorageService';
+import {
+  getSupabaseUrl,
+  getSupabaseServiceKey,
+  createIsolatedAuthClient,
+} from '../../services/supabaseStorageService';
 import { requireApiKey } from '../../middleware/apiKeyAuth';
 import {
   ALL_WORKSPACES,
@@ -9,7 +12,12 @@ import {
   requireCrmAuth,
   VerifiedSupabaseUser,
 } from '../../middleware/crmRoleAuth';
-import { generateCrmSessionToken, isUserSessionRevoked } from '../../utils/sessionToken';
+import {
+  generateCrmSessionToken,
+  isUserSessionRevoked,
+  revokeSessionToken,
+  verifyCrmSessionToken,
+} from '../../utils/sessionToken';
 import { crmUsersService, resolveCrmOrigin } from '../../modules/users/services/crmUsers.service';
 
 export const authRouter = Router();
@@ -53,6 +61,12 @@ export function resetAuthRateLimitsForTests(): void {
  */
 authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
   try {
+    const clientIp = req.ip || 'unknown-ip';
+    if (!checkRateLimit(ipRateBuckets, `login-ip:${clientIp}`, 10, 60 * 1000)) {
+      res.status(429).json({ success: false, error: 'Too many login attempts. Please try again in a minute.' });
+      return;
+    }
+
     const { email, password } = req.body || {};
     if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
       res.status(400).json({ success: false, error: 'Email and password are required.' });
@@ -60,7 +74,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    if (!checkRateLimit(emailRateBuckets, `login-email:${cleanEmail}`, 5, 60 * 1000)) {
+      res.status(429).json({ success: false, error: 'Too many login attempts for this account. Please try again in a minute.' });
+      return;
+    }
+
+    const cleanPassword = password; // Do not trim password: preserve exact leading/trailing spaces
 
     const liveOverride = getLiveUserOverride(undefined, cleanEmail);
     if (liveOverride?.status === 'deactivated' || isUserSessionRevoked(undefined, cleanEmail)) {
@@ -76,13 +95,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       const supabaseUrl = getSupabaseUrl();
       const serviceKey = await getSupabaseServiceKey();
       if (supabaseUrl && serviceKey) {
-        const isolatedAuthClient = createClient(supabaseUrl, serviceKey, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
-        });
+        const isolatedAuthClient = createIsolatedAuthClient(supabaseUrl, serviceKey);
 
         const { data, error } = await isolatedAuthClient.auth.signInWithPassword({
           email: cleanEmail,
@@ -176,6 +189,23 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
   } catch (error: any) {
     console.error('[AuthRouter] Login error:', error);
     res.status(500).json({ success: false, error: error?.message || 'Authentication failed' });
+  }
+});
+
+/**
+ * POST /api/v1/auth/logout
+ * Server-side session invalidation: immediately revokes the session on this and other instances
+ */
+authRouter.post('/logout', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim() || (req.body?.token as string);
+    if (token) {
+      revokeSessionToken(token);
+    }
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || 'Logout failed' });
   }
 });
 

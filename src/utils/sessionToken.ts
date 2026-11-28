@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, createHash, timingSafeEqual, randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -14,6 +14,7 @@ export interface CrmSessionPayload {
   role: string;
   workspaces?: string[];
   roleVersion?: number;
+  jti?: string;
   iat: number;
   exp: number;
 }
@@ -25,17 +26,35 @@ export interface CrmSessionPayload {
 const revokedUserIds = new Set<string>();
 const revokedUserEmails = new Set<string>();
 
+/**
+ * Registry of individually logged-out session tokens (tokenHash -> expiryTimestampMs).
+ * Keeps track of revoked sessions without putting the user on the deactivation list.
+ */
+const revokedSessionTokens = new Map<string, number>();
+
 async function syncRevocationsFromDb(): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
   try {
     const row = await prisma.systemConfig.findUnique({ where: { key: CONFIG_KEY } });
     if (row?.value) {
-      const data = JSON.parse(row.value) as { userIds?: string[]; emails?: string[] };
+      const data = JSON.parse(row.value) as {
+        userIds?: string[];
+        emails?: string[];
+        revokedTokens?: Record<string, number>;
+      };
       if (Array.isArray(data.userIds)) {
         for (const id of data.userIds) revokedUserIds.add(id);
       }
       if (Array.isArray(data.emails)) {
         for (const e of data.emails) revokedUserEmails.add(e.toLowerCase());
+      }
+      if (data.revokedTokens && typeof data.revokedTokens === 'object') {
+        const now = Date.now();
+        for (const [hash, expMs] of Object.entries(data.revokedTokens)) {
+          if (expMs > now) {
+            revokedSessionTokens.set(hash, expMs);
+          }
+        }
       }
     }
     hasLoadedFromDb = true;
@@ -46,9 +65,17 @@ async function syncRevocationsFromDb(): Promise<void> {
 async function persistRevocationsToDb(): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
   try {
+    const now = Date.now();
+    const tokenObj: Record<string, number> = {};
+    for (const [hash, exp] of revokedSessionTokens.entries()) {
+      if (exp > now) {
+        tokenObj[hash] = exp;
+      }
+    }
     const data = {
       userIds: Array.from(revokedUserIds),
       emails: Array.from(revokedUserEmails),
+      revokedTokens: tokenObj,
     };
     await prisma.systemConfig.upsert({
       where: { key: CONFIG_KEY },
@@ -62,6 +89,56 @@ async function persistRevocationsToDb(): Promise<void> {
 
 // Initial hydration from DB on load
 syncRevocationsFromDb().catch(() => { });
+
+export function revokeSessionToken(token?: string | null): void {
+  if (!token) return;
+  const clean = token.replace(/^Bearer\s+/i, '').trim();
+  if (!clean) return;
+
+  const hash = createHash('sha256').update(clean).digest('hex');
+  let expMs = Date.now() + 24 * 60 * 60 * 1000;
+
+  if (clean.startsWith('lp_sess.')) {
+    const parts = clean.split('.');
+    if (parts.length === 3) {
+      try {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        if (payload?.exp && typeof payload.exp === 'number') {
+          expMs = payload.exp * 1000;
+        }
+      } catch {}
+    }
+  } else if (clean.split('.').length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(clean.split('.')[1], 'base64url').toString('utf8'));
+      if (payload?.exp && typeof payload.exp === 'number') {
+        expMs = payload.exp * 1000;
+      }
+    } catch {}
+  }
+
+  revokedSessionTokens.set(hash, expMs);
+  persistRevocationsToDb().catch(() => {});
+}
+
+export function isTokenRevoked(token?: string | null): boolean {
+  if (!token) return false;
+  const clean = token.replace(/^Bearer\s+/i, '').trim();
+  if (!clean) return false;
+
+  const hash = createHash('sha256').update(clean).digest('hex');
+  const exp = revokedSessionTokens.get(hash);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    revokedSessionTokens.delete(hash);
+    return false;
+  }
+  return true;
+}
+
+export function clearRevokedTokens(): void {
+  revokedSessionTokens.clear();
+}
 
 export function revokeUserSessions(userId?: string | null, email?: string | null): void {
   if (userId) revokedUserIds.add(userId.trim());
@@ -89,6 +166,7 @@ export function isUserSessionRevoked(userId?: string | null, email?: string | nu
 export function clearRevokedUserSessions(): void {
   revokedUserIds.clear();
   revokedUserEmails.clear();
+  revokedSessionTokens.clear();
 }
 
 function getSessionSecret(): string {
@@ -121,6 +199,7 @@ export function generateCrmSessionToken(
     role: user.role.toLowerCase(),
     ...(Array.isArray(user.workspaces) ? { workspaces: user.workspaces } : {}),
     ...(typeof user.roleVersion === 'number' ? { roleVersion: user.roleVersion } : {}),
+    jti: randomUUID(),
     iat: now,
     exp: now + expiresInSeconds,
   };
@@ -138,6 +217,10 @@ export function generateCrmSessionToken(
  */
 export function verifyCrmSessionToken(token: string): CrmSessionPayload | null {
   if (!token || !token.startsWith('lp_sess.')) {
+    return null;
+  }
+
+  if (isTokenRevoked(token)) {
     return null;
   }
 

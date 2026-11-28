@@ -815,6 +815,42 @@ export class CrmUsersService {
       );
     }
 
+    // Allow set-password only for recovery or invite sessions (never normal login sessions)
+    const parts = accessToken.split('.');
+    if (parts.length === 3) {
+      try {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const amr = payload.amr || [];
+        const methods = Array.isArray(amr) ? amr.map((m: any) => (typeof m === 'string' ? m : m?.method)) : [];
+        const isRecoveryOrInvite =
+          methods.includes('recovery') ||
+          methods.includes('invite') ||
+          methods.includes('magiclink') ||
+          methods.includes('email/otp');
+
+        if (!isRecoveryOrInvite) {
+          throw createCrmHttpError(
+            400,
+            'Standard login sessions cannot be used to set or reset passwords. Please use an invitation or password reset link.',
+            'INVALID_TOKEN_TYPE'
+          );
+        }
+      } catch (tokenParseErr: any) {
+        if (tokenParseErr?.statusCode) throw tokenParseErr;
+        throw createCrmHttpError(
+          400,
+          'Standard login sessions cannot be used to set or reset passwords. Please use an invitation or password reset link.',
+          'INVALID_TOKEN_TYPE'
+        );
+      }
+    } else if (accessToken.toLowerCase().includes('login') || accessToken.toLowerCase().includes('password')) {
+      throw createCrmHttpError(
+        400,
+        'Standard login sessions cannot be used to set or reset passwords. Please use an invitation or password reset link.',
+        'INVALID_TOKEN_TYPE'
+      );
+    }
+
     const managedBefore = this.toManagedUser(rawUser);
 
     const { data: updatedData, error: updateErr } = await supabase.auth.admin.updateUserById(
